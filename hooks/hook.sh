@@ -32,7 +32,9 @@ case "${1:-}" in
     case "$payload" in
       *'"SessionStart"'*)
         # Node가 24보다 낮으면 muwi가 실행되지 않고 훅은 조용히 넘어간다. 세션에 한 번 알려서 사람이 알게 한다
-        v=$(node -v 2>/dev/null)
+        # PATH에 없어도 nvm 같은 도구의 기본 버전을 찾는다 (src/find-node.sh)
+        . "$ROOT/src/find-node.sh"
+        v=$("$(muwi_find_node)" -v 2>/dev/null)
         major=${v#v}
         major=${major%%.*}
         case "$major" in '' | *[!0-9]*) major=0 ;; esac

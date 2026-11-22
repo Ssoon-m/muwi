@@ -176,9 +176,13 @@ export const readInstall = (dir: string) => readJson<Install>(installFile(dir));
 
 const WRAPPER_MARK = '# muwi setup이 만든 파일';
 
-/** 터미널과 Herdr 앱에서 쓸 muwi 명령. 설치된 위치와 node를 절대 경로로 적어 둔다 */
+/**
+ * 터미널과 Herdr 앱에서 쓸 muwi 명령. 설치된 위치의 bin/muwi를 부른다.
+ * Node는 실행할 때마다 bin/muwi가 찾는다 (nvm 기본 버전을 바꾸면 따라간다).
+ * setup을 실행한 Node는 다른 곳에서 못 찾을 때만 쓴다.
+ */
 function wrapper(root: string): string {
-  return `#!/bin/sh\n${WRAPPER_MARK}. 고치지 말고 muwi setup을 다시 실행해요.\nexec "${process.execPath}" "${path.join(root, 'src', 'cli.ts')}" "$@"\n`;
+  return `#!/bin/sh\n${WRAPPER_MARK}. 고치지 말고 muwi setup을 다시 실행해요.\nMUWI_SETUP_NODE="${process.execPath}" exec "${path.join(root, 'bin', 'muwi')}" "$@"\n`;
 }
 
 function isOurWrapper(file: string): boolean {

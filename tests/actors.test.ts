@@ -425,7 +425,8 @@ test('Node가 낮으면 무엇이 필요한지 알린다 (조용히 실패하지
   const old = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-oldnode-'));
   // 22.14인 척하는 node: TypeScript 파일을 실행하지 못한다
   fs.writeFileSync(path.join(old, 'node'), '#!/bin/sh\nif [ "$1" = "-v" ]; then echo v22.14.0; exit 0; fi\necho "ERR_UNKNOWN_FILE_EXTENSION" >&2\nexit 1\n', { mode: 0o755 });
-  const env = (p: string) => ({ PATH: p, HOME: dir, MUWI_DIR: dir });
+  // MUWI_NODE_DIRS를 비워서 이 기계의 Homebrew·시스템 Node를 보지 않게 한다
+  const env = (p: string) => ({ PATH: p, HOME: dir, MUWI_DIR: dir, MUWI_NODE_DIRS: '' });
   const bin = path.resolve(import.meta.dirname, '../bin/muwi');
   const stale = spawnSync('/bin/sh', [bin, '--version'], { encoding: 'utf8', env: env(`${old}:/usr/bin:/bin`) });
   assert.equal(stale.status, 1);
@@ -447,6 +448,47 @@ test('Node가 낮으면 무엇이 필요한지 알린다 (조용히 실패하지
   assert.match(note.additionalContext, /Node가 v22\.14\.0라서 muwi가 동작하지 않는다\. Node 24 이상이 필요하다/);
   const fine = spawnSync('sh', [sh], { input: start, encoding: 'utf8', env: env(`${path.dirname(process.execPath)}:/usr/bin:/bin`) });
   assert.match(JSON.parse(fine.stdout).hookSpecificOutput.additionalContext, /작업 진행 방식 \(muwi\)/);
+});
+
+test('셸 설정 없이 실행돼도 nvm의 기본 버전을 찾아 쓴다 (Herdr가 띄운 세션, 그래프 칸)', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-nvm-'));
+  const old = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-oldnode-'));
+  fs.writeFileSync(path.join(old, 'node'), '#!/bin/sh\nif [ "$1" = "-v" ]; then echo v22.14.0; exit 0; fi\nexit 1\n', { mode: 0o755 });
+  // nvm에 버전 셋: default 별칭은 "24"를 가리킨다. 24 중 가장 높은 것을 고른다
+  const nvm = path.join(home, '.nvm');
+  for (const v of ['v22.14.0', 'v24.1.0', 'v24.10.0']) {
+    fs.mkdirSync(path.join(nvm, 'versions', 'node', v, 'bin'), { recursive: true });
+    // 22는 버전만 알려 주는 가짜, 24는 이 테스트를 돌리는 Node
+    if (v === 'v22.14.0') fs.copyFileSync(path.join(old, 'node'), path.join(nvm, 'versions', 'node', v, 'bin', 'node'));
+    else fs.symlinkSync(process.execPath, path.join(nvm, 'versions', 'node', v, 'bin', 'node'));
+  }
+  fs.mkdirSync(path.join(nvm, 'alias'));
+  fs.writeFileSync(path.join(nvm, 'alias', 'default'), '24\n');
+  const env = (p: string, more: object = {}) => ({ PATH: p, HOME: home, MUWI_DIR: home, MUWI_NODE_DIRS: '', ...more });
+  const find = (p: string, more: object = {}) =>
+    spawnSync('sh', ['-c', `. "${path.resolve(import.meta.dirname, '../src/find-node.sh')}"; muwi_find_node`], { encoding: 'utf8', env: env(p, more) }).stdout.trim();
+  // PATH에 node가 없거나 낮아도 nvm 기본 버전을 쓴다
+  assert.equal(find('/usr/bin:/bin'), path.join(nvm, 'versions', 'node', 'v24.10.0', 'bin', 'node'));
+  assert.equal(find(`${old}:/usr/bin:/bin`), path.join(nvm, 'versions', 'node', 'v24.10.0', 'bin', 'node'));
+  // 별칭이 다른 별칭을 가리켜도 따라간다
+  fs.writeFileSync(path.join(nvm, 'alias', 'default'), 'mine\n');
+  fs.writeFileSync(path.join(nvm, 'alias', 'mine'), 'v24.1.0\n');
+  assert.equal(find('/usr/bin:/bin'), path.join(nvm, 'versions', 'node', 'v24.1.0', 'bin', 'node'));
+  // PATH의 node가 24 이상이면 그대로 쓴다
+  assert.equal(find(`${path.dirname(process.execPath)}:/usr/bin:/bin`), 'node');
+  // nvm 기본 버전이 24보다 낮고 다른 곳에도 없으면, setup을 실행한 Node를 쓴다
+  fs.writeFileSync(path.join(nvm, 'alias', 'default'), '22\n');
+  assert.equal(find('/usr/bin:/bin', { MUWI_SETUP_NODE: process.execPath }), process.execPath);
+  assert.equal(find('/usr/bin:/bin'), 'node');
+
+  // 명령과 훅이 그 Node로 동작한다
+  fs.writeFileSync(path.join(nvm, 'alias', 'default'), '24\n');
+  const ran = spawnSync('/bin/sh', [path.resolve(import.meta.dirname, '../bin/muwi'), '--version'], { encoding: 'utf8', env: env(`${old}:/usr/bin:/bin`) });
+  assert.equal(ran.status, 0, ran.stderr);
+  assert.match(ran.stdout, /^\d+\.\d+\.\d+/);
+  const start = JSON.stringify({ hook_event_name: 'SessionStart', session_id: 's1' });
+  const hook = spawnSync('sh', [path.resolve(import.meta.dirname, '../hooks/hook.sh')], { input: start, encoding: 'utf8', env: env('/usr/bin:/bin') });
+  assert.match(JSON.parse(hook.stdout).hookSpecificOutput.additionalContext, /작업 진행 방식 \(muwi\)/);
 });
 
 test('적는 명령은 작업을 짐작하지 않는다. 같은 폴더에 남의 끝나지 않은 작업이 있어도 거기에 적지 않는다', () => {
