@@ -1,5 +1,6 @@
 {
   "name": "muwi",
+  "description": "muwi: AI가 스스로 짠 작업 플로우를 기록하고 그래프로 보여 주는 Claude Code 플러그인",
   "owner": {
     "name": "SoonMin"
   },
