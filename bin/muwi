@@ -1,6 +1,16 @@
 #!/bin/sh
-# muwi 명령. TypeScript를 빌드 없이 Node로 바로 실행한다 (Node 22.18 이상).
-# Claude Code 플러그인으로 받으면 이 폴더가 Bash 도구의 PATH에 들어간다.
-# 터미널에서도 쓰려면 muwi setup을 한 번 실행한다.
+# muwi 명령. src/cli.ts를 Node로 바로 실행한다 (Node 22.18 이상).
+# PATH의 node가 낮을 수 있다. 예를 들어 Herdr가 띄운 세션은 셸 설정을 읽지 않아서 nvm으로 고른 node가 안 보인다.
+# 그래서 전에 muwi를 실행했던 node를 기록 폴더에 적어 두고(.node) 그것을 먼저 쓴다.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-exec node --disable-warning=ExperimentalWarning "$ROOT/src/cli.ts" "$@"
+NODE=node
+saved="${MUWI_DIR:-$HOME/.muwi}/.node"
+cand=
+if [ -r "$saved" ]; then read -r cand < "$saved"; fi
+if [ -n "$cand" ] && [ -x "$cand" ]; then
+  NODE=$cand
+elif ! node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit(a > 22 || (a === 22 && b >= 18) ? 0 : 1)' 2>/dev/null; then
+  echo "muwi: Node 22.18 이상이 필요해요 (지금: $(node -v 2>/dev/null || echo 없음)). 새 Node가 잡히는 터미널에서 muwi를 한 번 실행하면 그 Node를 기억해요." >&2
+  exit 1
+fi
+exec "$NODE" --disable-warning=ExperimentalWarning "$ROOT/src/cli.ts" "$@"
