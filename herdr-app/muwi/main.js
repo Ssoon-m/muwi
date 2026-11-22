@@ -6,13 +6,14 @@
 // 끌어서 옮기고, cmd/ctrl+스크롤로 확대한다. 지금 일어나는 곳(작업 중, 나를 기다림)이 보이게 따라간다.
 import { View, div, svg, PathBuilder } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { exec, home, theme, watchFolder, checking, shared, setShared, agents, run, props as blockProps } from "herdr";
+import { exec, home, theme, watchFolder, checking, shared, setShared, agents, panes, run, props as blockProps } from "herdr";
 
 const SELECTED = "muwi.selected";
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const STATE_NAME = { waiting: "나를 기다림", blocked: "막힘", doing: "작업 중", done: "끝", idle: "노드 사이" };
 const STATUS_NAME = { todo: "아직", doing: "작업 중", waiting: "나를 기다림", blocked: "막힘", done: "끝" };
 const AGENT_NAME = { working: "세션 작업 중", blocked: "세션이 입력을 기다림", done: "세션이 멈춤", idle: "세션이 멈춤" };
+const RUN_NAME = { me: "직접", subagent: "서브에이전트", session: "새 세션" };
 
 function ago(iso, now) {
   if (!iso) return "";
@@ -277,7 +278,9 @@ export default class Muwi extends View {
           .child(div().min_w(0).truncate().text_size(13).font_semibold().child(view ? (view.title ?? view.work) : "작업 그래프"))
           .when(Boolean(view), (el) => el.child(this.pill(t, STATE_NAME[view.state] ?? view.state, c[view.state] ?? t.muted))))
         .child(div().truncate().text_size(10.5).text_color(t.dim).child(
-          view ? `${view.work} · ${view.counts.done}/${view.counts.total} 끝 · ${ago(view.updatedAt, now)}` : `${works.length}개 작업`)))
+          view ? [`${view.work} · ${view.counts.done}/${view.counts.total} 끝 · ${ago(view.updatedAt, now)}`,
+            view.helpers?.sessions ? `새 세션 ${view.helpers.sessions}` : null,
+            view.helpers?.subagents ? `서브에이전트 ${view.helpers.subagents}` : null].filter(Boolean).join(" · ") : `${works.length}개 작업`)))
       .when(this.size.width >= 860, (el) => el.child(h_flex().flex_none().gap(12)
         .child(legend("작업 중", c.doing)).child(legend("나를 기다림", c.waiting)).child(legend("막힘", c.blocked)).child(legend("끝", c.done))));
   }
@@ -351,8 +354,29 @@ export default class Muwi extends View {
   }
 
   /** 노드를 맡은 세션의 지금 상태 (Herdr가 아는 것). 터미널을 모르면 null */
+  /** 이 노드를 하는 세션의 Herdr 터미널 주소. 맡긴 세션이 아직 뜨는 중이면 띄운 터미널 */
+  terminalOf(view, n) {
+    return (n.session ? view.sessions?.[n.session]?.terminal : null) ?? (n.status === "todo" ? n.spawn?.terminal : null) ?? null;
+  }
+
+  /**
+   * 카드 오른쪽 위의 표시: 누가 하는가. 계획을 낸 세션이 직접 하면 비워 둔다.
+   * planned: 아직 시작 전이고 계획에 그렇게 적혀 있다 (흐리게 그린다)
+   */
+  tagOf(n) {
+    if (n.who) {
+      if (n.who.kind === "session") return { text: "세션", planned: false };
+      if (n.who.kind === "subagent") return { text: n.who.agents.length > 1 ? `서브 ×${n.who.agents.length}` : "서브", planned: false };
+      return null;
+    }
+    if (n.status !== "todo") return null;
+    if (n.spawn || n.run === "session") return { text: "세션", planned: true };
+    if (n.run === "subagent") return { text: "서브", planned: true };
+    return null;
+  }
+
   agentOf(view, n) {
-    const terminal = n.session ? view.sessions?.[n.session]?.terminal : null;
+    const terminal = this.terminalOf(view, n);
     if (!terminal) return null;
     return agents().find((a) => a.address === terminal) ?? null;
   }
@@ -372,15 +396,15 @@ export default class Muwi extends View {
 
   /** 카드 둘째 줄: 상태에 따라 가장 궁금한 것 하나 */
   metaOf(view, n) {
-    const who = n.session ? view.sessions?.[n.session]?.label : null;
     const times = [n.spentMs > 0 ? dur(n.spentMs) : null, n.attempts > 1 ? `${n.attempts}회차` : null].filter(Boolean).join(" · ");
     if (n.status === "waiting" || n.status === "blocked") return n.note ?? STATUS_NAME[n.status];
     if (n.status === "doing") {
       const agent = this.agentOf(view, n);
       const quiet = agent && agent.status !== "working" ? AGENT_NAME[agent.status] : null;
-      return [who, times, quiet].filter(Boolean).join(" · ") || "작업 중";
+      return [n.who?.kind === "subagent" ? "서브에이전트" : null, times, quiet].filter(Boolean).join(" · ") || "작업 중";
     }
     if (n.status === "done") return [times, n.note].filter(Boolean).join(" · ");
+    if (n.spawn) return "새 세션이 뜨는 중";
     return "";
   }
 
@@ -470,6 +494,9 @@ export default class Muwi extends View {
       }
       const read = n.skills.filter((s) => s.state === "read").length;
       const meta = this.metaOf(view, n);
+      const tag = this.tagOf(n);
+      const chip = (text, tone, faint) => div().flex_none().px(4.5 * z).rounded(4 * z).border(1).border_color(tint(tone, faint ? 0.3 : 0.6))
+        .text_size(9.5 * z).text_color(faint ? tint(tone, 0.7) : tone).child(text);
       cards.push(h_flex().id(`node-${n.id}`).absolute().left(x).top(y).w(w).h(h).px(11 * z).gap(9 * z).items_center().rounded(8 * z)
         .bg(active ? tint(color, 0.12) : t.raised)
         .border(active || picked ? 1.5 : 1)
@@ -479,8 +506,11 @@ export default class Muwi extends View {
         .on_click((_e, cx) => { this.node = this.node === n.id ? null : n.id; cx.notify(); })
         .child(this.statusIcon(t, n, color, 17 * z))
         .child(v_flex().flex_1().min_w(0).gap(2 * z)
-          .child(div().truncate().text_size(12.5 * z).text_color(n.status === "todo" ? t.muted : t.foreground)
-            .when(active, (el) => el.font_semibold()).child(n.title))
+          .child(h_flex().gap(5 * z).items_center()
+            .child(div().flex_1().min_w(0).truncate().text_size(12.5 * z).text_color(n.status === "todo" ? t.muted : t.foreground)
+              .when(active, (el) => el.font_semibold()).child(n.title))
+            .when(Boolean(tag), (el) => el.child(chip(tag.text, t.muted, tag.planned)))
+            .when(Boolean(n.offPlan), (el) => el.child(chip("≠계획", t.blocked, false))))
           .child(h_flex().gap(6 * z).items_center().text_size(10.5 * z)
             .child(div().flex_1().min_w(0).truncate().text_color(active ? color : t.dim).child(meta || " "))
             .when(n.flags.length > 0, (el) => el.child(div().flex_none().text_color(t.blocked).child("⚑")))
@@ -564,6 +594,18 @@ export default class Muwi extends View {
     const color = c[n.status];
     const info = n.session ? view.sessions?.[n.session] : null;
     const agent = this.agentOf(view, n);
+    const terminal = this.terminalOf(view, n);
+    const subKinds = [...new Set((n.who?.agents ?? []).map((a) => a.kind).filter(Boolean))].join(", ");
+    const subs = n.who?.agents?.length ? `서브에이전트 ${n.who.agents.length}개${subKinds ? ` (${subKinds})` : ""}` : null;
+    const session = `${info?.label ?? ""}${info?.tool && info.tool !== "unknown" ? ` (${info.tool})` : ""}`;
+    // 실제로 한 쪽. 시작 전이면 계획에 적은 것이나 뜨는 중인 세션
+    const whoText = n.who
+      ? (n.who.kind === "session" ? [`새 세션 ${session}`, subs].filter(Boolean).join(" + ")
+        : n.who.kind === "subagent" ? `${subs} · 띄운 세션 ${info?.label ?? ""}`
+        : `계획을 낸 세션 ${session}`)
+      : n.spawn ? `새 세션 ${n.spawn.terminal} · 뜨는 중`
+      : null;
+    const plannedText = n.run ? `계획: ${RUN_NAME[n.run] ?? n.run}${n.show ? `, ${n.show}` : ""}` : null;
     const read = n.skills.filter((s) => s.state === "read");
     const loaded = n.skills.filter((s) => s.state === "loaded");
     const times = [
@@ -581,20 +623,22 @@ export default class Muwi extends View {
         .child(label({ waiting: "기다리는 것", blocked: "막힌 이유", done: "결과" }[n.status] ?? "메모"))
         .child(line(n.note, n.status === "done" ? t.foreground : color))))
       .when(Boolean(times), (el) => el.child(v_flex().gap(3).child(label("시간")).child(line(times))))
-      .when(Boolean(n.session), (el) => el.child(v_flex().gap(4).child(label("맡은 세션"))
-        .child(h_flex().gap(8).items_center()
-          .child(line(`${info?.label ?? ""}${info?.tool && info.tool !== "unknown" ? ` (${info.tool})` : ""}${agent ? ` · ${AGENT_NAME[agent.status] ?? agent.status}` : ""}`))
-          .when(Boolean(info?.terminal), (el) => el.child(
-            h_flex().id(`go-${n.id}`).h(20).px(7).items_center().rounded(5).bg(t.raised).border_1().border_color(t.border)
+      .when(Boolean(whoText || plannedText), (el) => el.child(v_flex().gap(4).child(label("누가"))
+        .when(Boolean(whoText), (el) => el.child(h_flex().gap(8).items_center()
+          .child(line(`${whoText}${agent ? ` · ${AGENT_NAME[agent.status] ?? agent.status}` : ""}`, t.foreground))
+          .when(Boolean(terminal), (el) => el.child(
+            h_flex().id(`go-${n.id}`).h(20).px(7).flex_none().items_center().rounded(5).bg(t.raised).border_1().border_color(t.border)
               .text_size(10.5).text_color(t.muted).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground))
-              .on_click(() => run("pane.focus", { terminal: info.terminal }))
-              .child("터미널로 가기"))))))
+              // pane이 있으면 그 pane으로 가고, pane 없이 떠 있는 세션이면 그 자리에서 들여다본다
+              .on_click(() => run(panes().some((p) => p.terminal === terminal) ? "pane.focus" : "terminal.peek", { terminal }))
+              .child("터미널로 가기")))))
+        .when(Boolean(plannedText), (el) => el.child(line(n.offPlan ? `${plannedText} · 계획과 다르게 했어요` : plannedText, n.offPlan ? t.blocked : t.dim)))))
       .child(v_flex().gap(4).child(label("읽은 skill"))
         .when(read.length === 0 && n.attempts > 0, (el) => el.child(line("이 노드를 하는 동안 읽은 skill이 없어요", t.dim)))
         .when(n.attempts === 0, (el) => el.child(line("아직 시작하지 않았어요", t.dim)))
         .children(read.map((s) => h_flex().gap(6).items_center()
           .child(div().size(6).rounded_full().bg(t.done))
-          .child(line(`${s.skill}${s.count > 1 ? ` ×${s.count}` : ""}${s.via === "file" ? " (파일을 직접 읽음)" : ""}`, t.foreground))))
+          .child(line(`${s.skill}${s.count > 1 ? ` ×${s.count}` : ""}${s.via === "file" ? " (파일을 직접 읽음)" : ""}${s.agent ? " · 서브에이전트가 읽음" : ""}`, t.foreground))))
         .when(loaded.length > 0, (el) => el
           .child(div().pt(2).text_size(10).text_color(t.dim).child("이미 읽은 상태 (같은 세션이 앞에서 읽음)"))
           .children(loaded.map((s) => h_flex().gap(6).items_center()
