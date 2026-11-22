@@ -11,10 +11,10 @@ import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, typ
 import { attach, markSettled, readSession, sessionKey, sessionLabel, touchSession } from './session.ts';
 import { checkMod, refreshSetup, removeSetup, runSetup } from './setup.ts';
 import {
-  SHOW_IN, appendEvent, checkWorkName, listWorks, nowIso, readConfig, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
+  SCHEMA, SHOW_IN, appendEvent, checkWorkName, listWorks, nowIso, readConfig, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
   type Config, type NodeStatus, type Plan, type RunBy, type ShowIn,
 } from './store.ts';
-import { loadBoard, loadView, type NodeView, type WorkView } from './view.ts';
+import { loadBoard, loadView, type Actor, type NodeView, type Try, type WorkView } from './view.ts';
 
 const HELP = `사용법: muwi <명령>
 
@@ -111,8 +111,22 @@ function isDone(plan: Plan) {
   return plan.nodes.length > 0 && plan.nodes.every(n => n.status === 'done');
 }
 
-/** 이 명령이 다룰 작업: --work → 이 세션이 붙어 있는 작업 → $MUWI_WORK → 이 폴더에서 시작한 끝나지 않은 작업 */
-function resolveWork(a: Args, dir: string, o: { allowDone?: boolean; sessionOnly?: boolean } = {}): string {
+/** 이 폴더에서 시작한 작업들 (최근 것부터) */
+function worksHere(dir: string): Plan[] {
+  const here = process.cwd();
+  return listWorks(dir)
+    .map(w => readPlan(dir, w))
+    .filter((p): p is Plan => Boolean(p) && p!.cwd === here)
+    .sort((x, y) => (x.updatedAt < y.updatedAt ? 1 : -1));
+}
+
+/**
+ * 이 명령이 다룰 작업: --work나 $MUWI_WORK → 이 세션이 붙어 있는 작업.
+ * 적는 명령은 여기까지만 본다. 폴더를 보고 짐작하면 다른 대화가 남겨 둔 작업에 적어 버릴 수 있다.
+ *   guess: 보기만 하는 명령은 그것도 없으면 이 폴더에서 시작한 작업을 쓴다
+ *   open: 끝나지 않은 작업만 (이름 없이 계획을 낼 때 끝난 작업을 덮어쓰지 않게)
+ */
+function resolveWork(a: Args, dir: string, o: { guess?: boolean; open?: boolean; sessionOnly?: boolean } = {}): string {
   const named = str(a, 'work') ?? process.env.MUWI_WORK;
   if (named) {
     const bad = checkWorkName(named);
@@ -123,18 +137,19 @@ function resolveWork(a: Args, dir: string, o: { allowDone?: boolean; sessionOnly
   const attached = key ? readSession(dir, key)?.work : undefined;
   if (attached) {
     const plan = readPlan(dir, attached);
-    if (plan && (o.allowDone || !isDone(plan))) return attached;
+    if (plan && (!o.open || !isDone(plan))) return attached;
   }
   if (o.sessionOnly) throw new Fail('이 세션이 하던 작업이 없어요');
-  const here = process.cwd();
-  const mine = listWorks(dir)
-    .map(w => readPlan(dir, w))
-    .filter((p): p is Plan => Boolean(p) && p!.cwd === here && (o.allowDone || !isDone(p!)))
-    .sort((x, y) => (x.updatedAt < y.updatedAt ? 1 : -1));
-  if (mine.length === 1) return mine[0].work;
-  const works = listWorks(dir);
+  const here = worksHere(dir);
+  if (o.guess) {
+    const open = here.filter(p => !isDone(p));
+    if (open.length === 1) return open[0].work;
+    if (!open.length && here.length === 1) return here[0].work;
+  }
+  // 이름이 길게 쏟아지지 않게 몇 개만 보여 준다
+  const list = (here.length ? here.map(p => `${p.work}(${isDone(p) ? '끝' : '진행 중'})`) : listWorks(dir)).slice(0, 6);
   throw new Fail(
-    `어느 작업인지 알 수 없어요. --work <이름>을 붙여요.${works.length ? ` 지금 있는 작업: ${works.join(', ')}` : ' (아직 기록된 작업이 없어요)'}`,
+    `어느 작업인지 알 수 없어요. --work <이름>을 붙여요.${list.length ? ` ${here.length ? '이 폴더의 작업' : '있는 작업'}: ${list.join(', ')}` : ' (아직 기록된 작업이 없어요)'} 전체 목록은 muwi status`,
   );
 }
 
@@ -175,17 +190,23 @@ function printPlan(plan: Plan) {
   }
 }
 
-/** 계획을 적는다. 처음이면 새 작업을 만들고, 있으면 바꾼 것을 사건 기록에 남긴다 */
-function savePlan(dir: string, work: string, input: PlanInput, a: Args): { plan: Plan; created: boolean; changed: boolean } {
+/**
+ * 계획을 적는다. 처음이면 새 작업을 만들고, 있으면 바꾼 것을 사건 기록에 남긴다.
+ * make는 잠금을 잡은 뒤에 지금 계획을 받아 새 계획을 만든다 (그 사이에 다른 세션이 바꾼 것을 덮어쓰지 않게).
+ * whole: 계획을 통째로 다시 낸 것. 이미 시작했거나 끝난 노드가 빠져 있으면 받지 않는다
+ */
+function savePlan(dir: string, work: string, make: (old: Plan | null) => PlanInput, a: Args, whole = false): { plan: Plan; created: boolean; changed: boolean } {
   const key = sessionKey();
   const by = a.flags.human || str(a, 'by') === 'human' ? 'human' : 'ai';
   const why = str(a, 'why')?.trim() || undefined;
   return withLock(workDir(dir, work), () => {
     const old = readPlan(dir, work);
+    const input = make(old);
     const at = nowIso();
     if (!old) {
       const plan: Plan = {
         work,
+        schema: SCHEMA,
         ...(str(a, 'title') ?? input.title ? { title: str(a, 'title') ?? input.title } : {}),
         ...(str(a, 'request') ? { request: str(a, 'request') } : {}),
         cwd: process.cwd(),
@@ -202,12 +223,27 @@ function savePlan(dir: string, work: string, input: PlanInput, a: Args): { plan:
     const request = str(a, 'request') ?? old.request;
     const sameOrder = old.nodes.map(n => n.id).join('\n') === input.nodes.map(n => n.id).join('\n');
     if (isEmptyDiff(diff) && sameOrder && title === old.title && request === old.request) return { plan: old, created: false, changed: false };
+    const gone = old.nodes.filter(n => diff.removed.includes(n.id));
+    // 통째로 낸 계획은 "여기 없는 노드는 뺀다"는 뜻이 된다. 다른 세션이 넣고 하는 중인 노드를 모른 채 내면 그 노드가 사라진다
+    const lost = whole ? gone.filter(n => n.status !== 'todo') : [];
+    if (lost.length) {
+      throw new Fail(
+        `이미 시작했거나 끝난 노드가 새 계획에 없어요: ${lost.map(n => `${n.id}(${MARK[n.status]} ${n.title})`).join(', ')}. 다른 세션이 넣은 노드일 수 있어요. muwi show ${work}로 지금 계획을 보고 그 노드를 넣어서 다시 내요. 정말 빼려면 muwi remove <id> --why "<이유>"로 하나씩 빼요.`,
+        2,
+      );
+    }
     if (!isEmptyDiff(diff) && !why) {
       throw new Fail(`${work}의 계획을 바꾸려면 --why "<이유>"를 적어요. 나중에 왜 바뀌었는지 볼 수 있게요. 사람이 바꾸라고 했으면 --human도 붙여요. 다른 새 작업이면 --work <새 이름>으로 적어요.`);
     }
-    const plan: Plan = { ...old, ...(title ? { title } : {}), ...(request ? { request } : {}), updatedAt: at, nodes: carryStatus(old.nodes, input.nodes) };
+    const plan: Plan = { ...old, schema: SCHEMA, ...(title ? { title } : {}), ...(request ? { request } : {}), updatedAt: at, nodes: carryStatus(old.nodes, input.nodes) };
     writePlan(dir, plan);
-    if (!isEmptyDiff(diff)) appendEvent(dir, work, { type: 'plan', by, ...(why ? { why } : {}), ...diff }, key, at);
+    if (!isEmptyDiff(diff)) {
+      appendEvent(dir, work, {
+        type: 'plan', by, ...(why ? { why } : {}), ...diff,
+        // 빠진 노드가 무엇이었는지 남긴다. 빠진 뒤에도 기록에서 볼 수 있다
+        ...(gone.length ? { gone: gone.map(n => ({ id: n.id, title: n.title, status: n.status })) } : {}),
+      }, key, at);
+    }
     return { plan, created: false, changed: true };
   });
 }
@@ -233,7 +269,7 @@ function cmdPlan(a: Args, dir: string) {
   if (str(a, 'work') ?? process.env.MUWI_WORK) work = resolveWork(a, dir);
   else {
     try {
-      work = resolveWork(a, dir, { sessionOnly: true });
+      work = resolveWork(a, dir, { sessionOnly: true, open: true });
     } catch {
       const works = listWorks(dir);
       throw new Fail(
@@ -241,7 +277,7 @@ function cmdPlan(a: Args, dir: string) {
       );
     }
   }
-  const { plan, created, changed } = savePlan(dir, work, input, a);
+  const { plan, created, changed } = savePlan(dir, work, () => input, a, true);
   join(dir, work);
   if (a.flags.json) return out(JSON.stringify({ work, created, changed, nodes: plan.nodes }, null, 2));
   if (!changed) return out(`바뀐 것이 없어요: ${work}`);
@@ -254,15 +290,17 @@ function cmdAdd(a: Args, dir: string) {
   const [id, title] = a.pos;
   if (!id || !title) throw new Fail('사용법: muwi add <id> "<제목>" [--after a,b] [--before c] [--run me|subagent|session] [--show pane|tab] --why "<이유>"');
   const work = resolveWork(a, dir);
-  const old = needPlan(dir, work);
-  if (old.nodes.some(n => n.id === id)) throw new Fail(`이미 있는 노드예요: ${id}`);
   const after = (str(a, 'after') ?? '').split(',').map(s => s.trim()).filter(Boolean);
   const before = str(a, 'before');
-  if (before && !old.nodes.some(n => n.id === before)) throw new Fail(`--before의 ${before}는 없는 노드예요. 있는 노드: ${old.nodes.map(n => n.id).join(', ')}`);
   const fresh = { id, title, after, ...(str(a, 'run') ? { run: str(a, 'run') } : {}), ...(str(a, 'show') ? { show: str(a, 'show') } : {}) } as NodeInput;
-  const { plan: input, problems } = parsePlan(addNode(old, fresh, before));
-  if (!input) throw new Fail(`노드를 넣지 못했어요:\n${problems.map(p => `  - ${p}`).join('\n')}`, 2);
-  const { plan } = savePlan(dir, work, input, a);
+  const { plan } = savePlan(dir, work, old => {
+    if (!old) throw new Fail(`작업이 없어요: ${work} (muwi status로 목록을 봐요)`);
+    if (old.nodes.some(n => n.id === id)) throw new Fail(`이미 있는 노드예요: ${id}`);
+    if (before && !old.nodes.some(n => n.id === before)) throw new Fail(`--before의 ${before}는 없는 노드예요. 있는 노드: ${old.nodes.map(n => n.id).join(', ')}`);
+    const { plan: input, problems } = parsePlan(addNode(old, fresh, before));
+    if (!input) throw new Fail(`노드를 넣지 못했어요:\n${problems.map(p => `  - ${p}`).join('\n')}`, 2);
+    return input;
+  }, a);
   join(dir, work);
   out(`노드를 넣었어요: ${id} (${work}, 노드 ${plan.nodes.length}개)`);
   printPlan(plan);
@@ -272,14 +310,21 @@ function cmdRemove(a: Args, dir: string) {
   const [id] = a.pos;
   if (!id) throw new Fail('사용법: muwi remove <id> --why "<이유>"');
   const work = resolveWork(a, dir);
-  const old = needPlan(dir, work);
-  if (!old.nodes.some(n => n.id === id)) throw new Fail(`없는 노드예요: ${id}. 있는 노드: ${old.nodes.map(n => n.id).join(', ')}`);
-  if (old.nodes.length === 1) throw new Fail('마지막 노드는 뺄 수 없어요');
-  const { plan: input, problems } = parsePlan(removeNode(old, id));
-  if (!input) throw new Fail(`노드를 빼지 못했어요:\n${problems.map(p => `  - ${p}`).join('\n')}`, 2);
-  const { plan } = savePlan(dir, work, input, a);
+  let was: NodeStatus = 'todo';
+  const { plan } = savePlan(dir, work, old => {
+    if (!old) throw new Fail(`작업이 없어요: ${work} (muwi status로 목록을 봐요)`);
+    const node = old.nodes.find(n => n.id === id);
+    if (!node) throw new Fail(`없는 노드예요: ${id}. 있는 노드: ${old.nodes.map(n => n.id).join(', ')}`);
+    if (old.nodes.length === 1) throw new Fail('마지막 노드는 뺄 수 없어요');
+    was = node.status;
+    const { plan: input, problems } = parsePlan(removeNode(old, id));
+    if (!input) throw new Fail(`노드를 빼지 못했어요:\n${problems.map(p => `  - ${p}`).join('\n')}`, 2);
+    return input;
+  }, a);
   join(dir, work);
   out(`노드를 뺐어요: ${id} (${work}, 노드 ${plan.nodes.length}개)`);
+  // 하던 노드를 뺀 것이면 알려 둔다. 그 노드의 기록은 muwi show의 "빠진 노드"에 남는다
+  if (was !== 'todo') out(`${id}는 ${{ doing: '하는 중', waiting: '사람을 기다리는 중', blocked: '막힌 상태', done: '끝난 상태', todo: '' }[was]}였어요. 기록은 남아 있어요 (muwi show ${work}의 빠진 노드).`);
   printPlan(plan);
 }
 
@@ -291,7 +336,7 @@ function cmdNode(id: string | undefined, action: string | undefined, text: strin
   const note = (text ?? str(a, 'result'))?.trim() || undefined;
   if (status === 'waiting' && !note) throw new Fail('무엇을 기다리는지 적어요: muwi node <id> wait "<사람에게 물어볼 것>"');
   if (status === 'blocked' && !note) throw new Fail('왜 막혔는지 적어요: muwi node <id> block "<이유>"');
-  const work = resolveWork(a, dir, { allowDone: true });
+  const work = resolveWork(a, dir);
   const key = sessionKey();
   const result = markNode(dir, work, id, status, note, key);
   if (!result) {
@@ -310,7 +355,7 @@ function cmdFlag(a: Args, dir: string) {
   const node = second !== undefined ? first : undefined;
   const text = (second ?? first)?.trim();
   if (!text) throw new Fail('사용법: muwi flag [<노드 id>] "<무엇이 문제였는지>"');
-  const work = resolveWork(a, dir, { allowDone: true });
+  const work = resolveWork(a, dir);
   const plan = needPlan(dir, work);
   if (node && !plan.nodes.some(n => n.id === node)) throw new Fail(`없는 노드예요: ${node}. 있는 노드: ${plan.nodes.map(n => n.id).join(', ')}`);
   appendEvent(dir, work, { type: 'flag', ...(node ? { node } : {}), text }, sessionKey());
@@ -330,27 +375,42 @@ function dur(ms: number) {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
-/** 노드를 누가 했는지 한마디로. 시작 전이면 계획에 적은 것 */
-function whoLine(v: WorkView, n: NodeView): string {
+/** 회차를 누가 했는지 한마디로 */
+function whoText(v: WorkView, who: Actor): string {
   const label = (key?: string) => (key ? v.sessions[key]?.label ?? sessionLabel(null, key) : '');
+  const count = (list: Actor['agents']) => {
+    const kinds = [...new Set(list.map(x => x.kind).filter(Boolean))].join(', ');
+    return `서브에이전트 ${list.length}개${kinds ? `(${kinds})` : ''}`;
+  };
+  const own = who.agents.filter(x => x.own);
+  const helped = who.agents.filter(x => !x.own);
+  if (who.kind === 'subagent') return own.length ? count(own) : `${count(helped)} · 세션 ${label(who.session)}이 시작함`;
+  const base = who.kind === 'session' ? `새 세션 ${label(who.session)}` : `세션 ${label(who.session)}`;
+  return [base, own.length ? count(own) : '', helped.length ? `${count(helped)}가 도움` : ''].filter(Boolean).join(' + ');
+}
+
+/** 노드를 누가 했는지. 시작 전이면 계획에 적은 것 */
+function whoLine(v: WorkView, n: NodeView): string {
   if (!n.who) {
     if (n.spawn && n.status === 'todo') return `새 세션 ${n.spawn.terminal} 뜨는 중`;
     return n.run && n.status === 'todo' ? `예정: ${runTag(n)}` : '';
   }
-  const kinds = [...new Set(n.who.agents.map(x => x.kind).filter(Boolean))].join(', ');
-  const subs = n.who.agents.length ? `서브에이전트 ${n.who.agents.length}개${kinds ? `(${kinds})` : ''}` : '';
-  const text =
-    n.who.kind === 'session' ? [`새 세션 ${label(n.who.session)}`, subs].filter(Boolean).join(' + ')
-    : n.who.kind === 'subagent' ? subs
-    : `세션 ${label(n.who.session)}`;
+  const text = whoText(v, n.who);
   return n.offPlan && n.run ? `${text} · 계획과 다름(${RUN_NAME[n.run]}으로 하기로 함)` : text;
 }
 
-function skillsLine(n: NodeView): string {
-  const read = n.skills.filter(s => s.state === 'read').map(s => `${s.skill}${s.count > 1 ? ` ×${s.count}` : ''}${s.via === 'file' ? '(파일)' : ''}${s.agent ? '(서브에이전트)' : ''}`);
-  const loaded = n.skills.filter(s => s.state === 'loaded').map(s => s.skill);
+/**
+ * 읽은 skill 한 줄. "없음"은 훅이 보고 있었는데 읽지 않았다는 뜻일 때만 쓴다.
+ * 훅이 그 세션을 보지 못했으면 "볼 수 없었음"이라고 적는다 (읽었는지 모른다).
+ */
+function skillsLine(t: Pick<Try, 'skills' | 'seen' | 'instant'>, started: boolean): string {
+  const read = t.skills.filter(s => s.state === 'read').map(s => `${s.skill}${s.count > 1 ? ` ×${s.count}` : ''}${s.via === 'file' ? '(파일)' : ''}${s.agent ? '(서브에이전트)' : ''}${s.guess ? '(확실하지 않음)' : ''}`);
+  const loaded = t.skills.filter(s => s.state === 'loaded').map(s => s.skill);
   const parts: string[] = [];
-  if (n.attempts > 0) parts.push(`읽은 skill: ${read.length ? read.join(', ') : '없음'}`);
+  if (started) {
+    if (!t.seen) parts.push('읽은 skill: 볼 수 없었음(이 세션에서 훅이 돌지 않았어요)');
+    else parts.push(`읽은 skill: ${read.length ? read.join(', ') : t.instant ? '기록 없음(시작과 끝을 한꺼번에 적었어요)' : '없음'}`);
+  }
   if (loaded.length) parts.push(`이미 읽은 상태: ${loaded.join(', ')}`);
   return parts.join(' · ');
 }
@@ -371,8 +431,18 @@ function printShow(v: WorkView) {
     out(`  ${MARK[n.status]} ${n.id.padEnd(width)}  ${n.title}${n.after.length ? `  ← ${n.after.join(', ')}` : ''}${meta ? `  (${meta})` : ''}`);
     const indent = ' '.repeat(width + 6);
     if (n.note) out(`${indent}${{ waiting: '기다리는 것', blocked: '막힌 이유', done: '결과' }[n.status as 'waiting' | 'blocked' | 'done'] ?? '메모'}: ${n.note}`);
-    const skills = skillsLine(n);
-    if (skills) out(`${indent}${skills}`);
+    if (n.tries.length > 1) {
+      // 다시 한 노드는 회차별로 보여 준다. 처음에 무슨 일이 있었는지가 다시 한 기록에 덮이지 않게
+      for (const t of n.tries) {
+        const head = [`${t.n}회차`, t.startedAt ? clockTime(t.startedAt) : '', t.spentMs > 0 ? dur(t.spentMs) : '', t.who ? whoText(v, t.who) : ''].filter(Boolean).join(' · ');
+        const result = t.note && t.n !== n.tries[n.tries.length - 1].n ? ` · ${{ waiting: '기다린 것', blocked: '막힌 이유', done: '결과' }[t.status as 'waiting' | 'blocked' | 'done'] ?? '메모'}: ${t.note}` : '';
+        out(`${indent}${head} · ${skillsLine(t, true)}${result}`);
+      }
+    } else {
+      const skills = skillsLine(n, n.attempts > 0);
+      if (skills) out(`${indent}${skills}`);
+    }
+    for (const sp of n.spawns) if (sp.task) out(`${indent}맡긴 말 (${sp.terminal}): ${sp.task.replace(/\s+/g, ' ').slice(0, 160)}${sp.task.length > 160 ? '…' : ''}`);
     for (const f of n.flags) out(`${indent}⚑ 문제 표시 (${clockTime(f.at)}): ${f.text}`);
   }
   const changes = v.changes.filter(c => !c.first);
@@ -393,11 +463,18 @@ function printShow(v: WorkView) {
     out('노드 밖에서 읽은 skill');
     for (const s of v.outside) out(`  ${clockTime(s.at)}  ${s.skill}${s.via === 'file' ? '(파일)' : ''}${s.agent ? '(서브에이전트)' : ''}${s.session ? `  세션 ${v.sessions[s.session]?.label ?? ''}` : ''}`);
   }
-  const loose = v.flags.filter(f => !f.node);
+  if (v.gone.length) {
+    out('');
+    out('빠진 노드');
+    for (const g of v.gone) out(`  ${clockTime(g.at)}  ${MARK[g.status]} ${g.id}  ${g.title}  이유: ${g.why ?? '(없음)'}`);
+  }
+  // 노드를 짚지 않은 표시와, 빠진 노드에 남긴 표시
+  const here = new Set(v.nodes.map(n => n.id));
+  const loose = v.flags.filter(f => !f.node || !here.has(f.node));
   if (loose.length) {
     out('');
     out('문제 표시');
-    for (const f of loose) out(`  ${clockTime(f.at)}  ${f.text}`);
+    for (const f of loose) out(`  ${clockTime(f.at)}  ${f.node ? `${f.node}(빠진 노드) · ` : ''}${f.text}`);
   }
   if (v.compacts.length) {
     out('');
@@ -411,7 +488,7 @@ async function withLayout(v: WorkView) {
 }
 
 async function cmdShow(a: Args, dir: string) {
-  const work = a.pos[0] ?? resolveWork(a, dir, { allowDone: true });
+  const work = a.pos[0] ?? resolveWork(a, dir, { guess: true });
   const v = loadView(dir, work);
   if (!v) throw new Fail(`작업이 없어요: ${work} (muwi status로 목록을 봐요)`);
   if (a.flags.json) return out(JSON.stringify(a.flags.layout ? await withLayout(v) : v, null, 2));
@@ -511,10 +588,11 @@ function cmdOpen(a: Args) {
   } catch {
     // 목록을 읽지 못하면 지금 보고 있는 칸 옆에 연다
   }
+  const before = focusedPane();
   const split = app(['do', 'pane.split', JSON.stringify({ direction: a.flags.right ? 'right' : 'down', mod: 'muwi', ...(pane ? { pane } : {}) })]);
   if (split.status !== 0) throw new Fail(`그래프 칸을 열지 못했어요: ${(split.stderr || split.stdout).trim()}`);
-  // 글자 입력이 그래프 칸으로 넘어가지 않게 터미널로 되돌린다
-  if (pane) app(['do', 'pane.focus', JSON.stringify({ pane })]);
+  // 글자 입력이 그래프 칸으로 넘어가지 않게, 키보드가 있던 칸으로 되돌린다
+  keepFocus(before, pane ? { pane } : undefined);
   let opened = '';
   try {
     opened = JSON.parse(split.stdout).pane ?? '';
@@ -526,19 +604,47 @@ function cmdOpen(a: Args) {
 
 const pause = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
-/** 띄운 세션을 pane이나 tab에 놓는다. 포커스가 새 칸으로 넘어가므로 원래 터미널로 되돌린다 */
+/** 지금 키보드가 있는 칸. 알 수 없으면 null */
+function focusedPane(): string | null {
+  try {
+    const pane = JSON.parse(herdrApp(['status']).out)?.focused_pane;
+    return typeof pane === 'string' && pane ? pane : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 칸을 새로 놓으면 조금 뒤에 키보드가 그 칸으로 옮겨 간다. 잠깐 지켜보다가 옮겨 갔으면 원래 있던 칸으로 되돌린다.
+ * 사람이 다른 칸에서 쓰고 있었다면 그 칸으로 돌아간다. muwi를 부른 터미널로 끌어오지 않는다.
+ * 원래 자리를 알 수 없을 때만 fallback(부른 터미널)으로 보낸다.
+ */
+function keepFocus(before: string | null, fallback?: { pane?: string; terminal?: string }) {
+  let calm = 0;
+  for (let i = 0; i < 8 && calm < 3; i++) {
+    pause(200);
+    if (!before) {
+      if (fallback) herdrApp(['do', 'pane.focus', JSON.stringify(fallback)]);
+      continue;
+    }
+    const now = focusedPane();
+    if (now && now !== before) {
+      herdrApp(['do', 'pane.focus', JSON.stringify({ pane: before })]);
+      calm = 0;
+    } else calm += 1;
+  }
+}
+
+/** 띄운 세션을 pane이나 tab에 놓는다. 키보드는 원래 있던 칸에 둔다 */
 function placeTerminal(terminal: string, place: string, lead: string): Ran {
+  const before = focusedPane();
   let kept: Ran = { ok: false, out: '', err: '' };
   // 방금 띄운 터미널을 앱이 아직 모를 수 있어서 몇 번 다시 해 본다
   for (let i = 0; i < 6 && !kept.ok; i++) {
     if (i) pause(400);
     kept = herdrApp(['do', 'terminal.keep', JSON.stringify({ terminal, place })]);
   }
-  // 놓는 일은 조금 뒤에 적용되고 그때 포커스가 옮겨 간다. 잠깐 지켜보며 되돌린다
-  for (let i = 0; i < 6; i++) {
-    herdrApp(['do', 'pane.focus', JSON.stringify({ terminal: lead })]);
-    pause(250);
-  }
+  keepFocus(before, { terminal: lead });
   return kept;
 }
 
@@ -591,7 +697,8 @@ function cmdRun(a: Args, dir: string) {
     placed = kept.ok ? show : `${show}에 놓지 못했어요 (${(kept.err || kept.out).trim().split('\n')[0]})`;
   }
 
-  appendEvent(dir, work, { type: 'spawn', node: id, terminal, name, ...(show ? { show } : {}) }, sessionKey());
+  // 맡긴 말도 남긴다. 나중에 "맡긴 쪽이 무엇을 모르고 일했나"를 볼 수 있게
+  appendEvent(dir, work, { type: 'spawn', node: id, terminal, name, ...(show ? { show } : {}), task: task.trim().slice(0, 2000) }, sessionKey());
   join(dir, work);
   out(`새 세션을 띄웠어요: ${name} (${terminal}) → 노드 ${id}${placed ? ` · ${placed}` : ''}`);
   if (!sent) out(`맡길 일이 아직 전달되지 않았어요. hc read ${terminal}로 화면을 보고(폴더 신뢰 확인이 떠 있을 수 있어요) 풀어 준 뒤 hc send ${terminal} "<맡길 일>"로 다시 보내요.`);
@@ -600,13 +707,13 @@ function cmdRun(a: Args, dir: string) {
 
 /** 끝난 노드를 맡았던 새 세션의 터미널을 닫는다. 판단 과정을 볼 수 있게 평소에는 남겨 두고, 사람이 정리하라고 할 때만 쓴다 */
 function cmdTidy(a: Args, dir: string) {
-  const work = a.pos[0] ?? resolveWork(a, dir, { allowDone: true });
+  const work = a.pos[0] ?? resolveWork(a, dir);
   const v = loadView(dir, work);
   if (!v) throw new Fail(`작업이 없어요: ${work} (muwi status로 목록을 봐요)`);
-  const targets = v.nodes.filter(n => n.spawn && n.status === 'done');
+  // 같은 노드에 세션을 여러 번 띄웠으면 전부 본다
+  const targets = v.nodes.filter(n => n.status === 'done').flatMap(n => [...new Set(n.spawns.map(sp => sp.terminal))].map(terminal => ({ n, terminal })));
   if (!targets.length) return out('닫을 세션이 없어요 (끝난 노드를 맡았던 새 세션만 닫아요)');
-  for (const n of targets) {
-    const terminal = n.spawn!.terminal;
+  for (const { n, terminal } of targets) {
     const got = hc(['get', terminal, '--json'], process.env, 5000);
     let labels: Record<string, string> = {};
     try {
