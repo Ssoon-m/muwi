@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { guardReason, handleHook, isScratchPath, skillFromPath } from '../src/hook.ts';
+import { markNode } from '../src/node.ts';
 import { attach, readSession, recordSkill } from '../src/session.ts';
 import { appendEvent, clock, readEvents, writeConfig, writePlan, type NodeStatus, type Plan } from '../src/store.ts';
 import { loadBoard, loadView } from '../src/view.ts';
@@ -23,12 +24,7 @@ function setup(nodes: { id: string; after?: string[] }[], work = 'w1') {
   writePlan(dir, plan);
   /** 노드 상태를 바꾸고 사건을 남긴다 (muwi node가 하는 일) */
   const node = (id: string, status: NodeStatus, session: string, note?: string) => {
-    const n = plan.nodes.find(x => x.id === id)!;
-    n.status = status;
-    if (note) n.note = note; else delete n.note;
-    plan.updatedAt = clock.now().toISOString();
-    writePlan(dir, plan);
-    appendEvent(dir, work, { type: 'node', node: id, status, ...(note ? { note } : {}) }, session);
+    assert.ok(markNode(dir, work, id, status, note, session, ENV));
     attach(dir, session, work, ENV);
   };
   const skill = (session: string, name: string) => recordSkill(dir, session, name, 'tool', {}, ENV);
@@ -105,6 +101,9 @@ test('회차와 걸린 시간: 끝낸 노드를 다시 하면 2회차, 사람을
   const impl = v.nodes.find(n => n.id === 'impl')!;
   const pr = v.nodes.find(n => n.id === 'pr')!;
   assert.equal(impl.attempts, 2);
+  // 회차마다 따로 남는다: 걸린 시간도, 그때의 결과도
+  assert.deepEqual(impl.tries.map(x => [x.n, x.spentMs / 60_000, x.status, x.note]), [[1, 10, 'done', undefined], [2, 5, 'done', '커밋 2개']]);
+  assert.deepEqual(pr.tries.map(x => [x.n, x.spentMs / 60_000]), [[1, 2]]);
   assert.equal(impl.spentMs, 15 * 60_000);
   assert.equal(impl.note, '커밋 2개');
   assert.equal(pr.attempts, 1);
@@ -207,6 +206,38 @@ test('nudge: 계획을 적지 않은 세션의 파일 수정은, 계획을 적�
   attach(t.dir, 'fresh', t.work, ENV);
   assert.deepEqual(handleHook(edit('fresh'), t.dir, 'nudge', ENV), {});
   assert.ok(fs.existsSync(path.join(t.dir, '.sessions', 'fresh.ok')));
+});
+
+test('nudge: 사람이 새로 일을 시키면 다시 따진다. skip은 그 요청까지만, 끝난 작업은 계속하는 것으로 치지 않는다', () => {
+  const t = setup([{ id: 'impl' }]);
+  const says = (session: string) => handleHook({ session_id: session, hook_event_name: 'UserPromptSubmit', prompt: '…' }, t.dir, 'record', ENV);
+  // skip: 이번에 시킨 일에만
+  handleHook(edit('s1'), t.dir, 'nudge', ENV);
+  const s = readSession(t.dir, 's1')!;
+  fs.writeFileSync(path.join(t.dir, '.sessions', 's1.json'), JSON.stringify({ ...s, skipped: { at: s.seenAt, reason: '오타' } }));
+  assert.deepEqual(handleHook(edit('s1'), t.dir, 'nudge', ENV), {});
+  assert.ok(fs.existsSync(path.join(t.dir, '.sessions', 's1.ok')));
+  says('s1');
+  assert.ok(!fs.existsSync(path.join(t.dir, '.sessions', 's1.ok')));
+  assert.equal(readSession(t.dir, 's1')!.skipped, undefined);
+  assert.ok(denied(handleHook(edit('s1'), t.dir, 'nudge', ENV)));
+
+  // 하던 작업에 끝나지 않은 노드가 있으면 계속하는 것으로 본다
+  at(1); t.node('impl', 'doing', 's2');
+  assert.deepEqual(handleHook(edit('s2'), t.dir, 'nudge', ENV), {});
+  says('s2');
+  assert.deepEqual(handleHook(edit('s2'), t.dir, 'nudge', ENV), {});
+  // 노드가 다 끝난 뒤에 새로 시키면 다시 묻는다. 그 작업의 연장일 수 있다고 알려 준다
+  at(2); t.node('impl', 'done', 's2');
+  assert.deepEqual(handleHook(edit('s2'), t.dir, 'nudge', ENV), {}); // 같은 요청 안에서는 그대로
+  says('s2');
+  const again = handleHook(edit('s2'), t.dir, 'nudge', ENV);
+  assert.ok(denied(again));
+  const reason = JSON.parse(again.stdout!).hookSpecificOutput.permissionDecisionReason;
+  assert.match(reason, /하던 작업\(w1\)은 노드가 다 끝났어요/);
+  assert.match(reason, /muwi add <id>/);
+  assert.match(reason, /muwi plan --work/);
+  assert.match(reason, /muwi skip/);
 });
 
 test('nudge: 계획을 적은 세션과 맡은 노드를 시작한 세션은 알리지 않는다', () => {

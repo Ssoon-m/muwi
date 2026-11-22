@@ -111,10 +111,10 @@ test('작업 고르기: 세션이 붙어 있는 작업을 쓰고, 다른 세션�
   const { muwi } = bench();
   muwi(['plan', '--work', 'one', PLAN], { session: 'lead' });
   muwi(['plan', '--work', 'two', PLAN], { session: 'other' });
-  // 세션도 --work도 없고 같은 폴더의 작업이 둘이면 고를 수 없다
+  // 적는 명령은 작업을 짐작하지 않는다. 이 세션이 붙은 작업이 없으면 이름을 요구하고, 이 폴더의 작업을 알려 준다
   const lost = muwi(['node', 'impl', 'start'], { session: null });
   assert.equal(lost.code, 1);
-  assert.match(lost.err, /어느 작업인지 알 수 없어요.*one, two|어느 작업인지 알 수 없어요.*two, one/s);
+  assert.match(lost.err, /어느 작업인지 알 수 없어요.*이 폴더의 작업: (one\(진행 중\), two\(진행 중\)|two\(진행 중\), one\(진행 중\))/s);
   assert.match(muwi(['node', 'impl', 'start', '--work', 'one'], { session: 'worker' }).out, /● impl 시작 \(one/);
   // 한 번 들어온 뒤로는 --work가 없어도 된다
   assert.match(muwi(['node', 'impl', 'done', '커밋 1개'], { session: 'worker' }).out, /✓ impl 끝 \(one/);
