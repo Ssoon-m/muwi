@@ -2,6 +2,9 @@
 //   plan.json     지금의 계획 (노드, 순서, 상태). AI가 muwi 명령으로 쓴다
 //   events.jsonl  일어난 일을 한 줄씩 (노드 시작·끝, 계획 변경과 이유, 읽은 skill, 문제 표시). muwi와 훅이 쓴다
 // 이 파일들은 기록일 뿐이다. 순서를 막거나 다음 할 일을 정하지 않는다.
+//
+// 훅이 본 사실(읽은 skill, 서브에이전트)은 적는 순간에 "어느 노드의 몇 번째 회차인지"를 같이 적는다.
+// 나중에 시각을 맞춰 보며 짐작하지 않는다. 그러려고 계획의 노드에 "지금 하고 있는 쪽"(by)을 적어 둔다.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -28,10 +31,24 @@ export type PlanNode = {
   run?: RunBy;
   /** 새 세션을 어디에 보여 줄지. AI가 정했을 때만 있다 */
   show?: ShowIn;
+  /** 몇 번째 하는 중인지 (회차). 시작한 적이 없으면 없다. 끝냈거나 막혔던 노드를 다시 시작하면 올라간다 */
+  attempt?: number;
+  /** 지금 이 노드를 하고 있는 쪽. 작업 중일 때만 있다 */
+  by?: Doer & { at: string };
 };
+
+/** 일을 한 쪽: 세션, 그리고 그 세션의 서브에이전트면 그 id */
+export type Doer = { session: string | null; agent?: string };
+
+/** 사건이 속한 자리: 어느 노드의 몇 번째 회차인지. guess는 확실하지 않을 때 (같은 쪽이 노드 여러 개를 동시에 하고 있었다) */
+export type Where = { node?: string; attempt?: number; guess?: boolean };
+
+/** 기록 형식의 판. 형식이 바뀌면 올린다 */
+export const SCHEMA = 2;
 
 export type Plan = {
   work: string;
+  schema?: number;
   /** 무슨 작업인지 한 줄 */
   title?: string;
   /** 사람이 시킨 말 그대로 */
@@ -44,14 +61,21 @@ export type Plan = {
 };
 
 export type EventBody =
-  | { type: 'plan'; by: 'ai' | 'human'; why?: string; first?: boolean; added: string[]; removed: string[]; changed: string[] }
-  | { type: 'node'; node: string; status: NodeStatus; note?: string }
-  /** agent: 서브에이전트가 읽었으면 그 서브에이전트의 id */
-  | { type: 'skill'; skill: string; via: 'tool' | 'file'; carried?: boolean; agent?: string }
-  /** 서브에이전트가 시작하고 끝난 것, 그리고 서브에이전트가 노드를 시작한 것(bind). 훅이 적는다 */
-  | { type: 'agent'; agent: string; what: 'start' | 'stop' | 'bind'; kind?: string; node?: string }
-  /** 노드를 맡길 새 세션을 띄웠다 (muwi run). terminal은 Herdr 터미널 주소 */
-  | { type: 'spawn'; node: string; terminal: string; name?: string; show?: ShowIn }
+  /** gone: 빠진 노드가 어떤 노드였는지 (빠진 뒤에도 기록에서 찾아볼 수 있게) */
+  | { type: 'plan'; by: 'ai' | 'human'; why?: string; first?: boolean; added: string[]; removed: string[]; changed: string[]; gone?: { id: string; title: string; status: NodeStatus }[] }
+  /**
+   * attempt: 몇 번째 회차의 일인지. agent: 서브에이전트가 한 것이면 그 id.
+   * seen: (시작할 때) 이 세션을 훅이 보고 있었는지. false면 이 회차에서 읽은 skill은 관찰하지 못한 것이다
+   */
+  | { type: 'node'; node: string; status: NodeStatus; note?: string; attempt?: number; agent?: string; seen?: boolean }
+  /** agent: 서브에이전트가 읽었으면 그 id. node·attempt: 읽을 때 하고 있던 노드 (없으면 어느 노드도 하고 있지 않았다) */
+  | ({ type: 'skill'; skill: string; via: 'tool' | 'file'; carried?: boolean; agent?: string } & Where)
+  /** 서브에이전트가 시작하고 끝난 것. 훅이 적는다. node·attempt: 뜰 때 그 세션이 하고 있던 노드 (그 노드를 도운 것으로 본다) */
+  | ({ type: 'agent'; agent: string; what: 'start' | 'stop'; kind?: string } & Where)
+  /** 노드를 맡길 새 세션을 띄웠다 (muwi run). terminal은 Herdr 터미널 주소, task는 그 세션에 맡긴 말 */
+  | { type: 'spawn'; node: string; terminal: string; name?: string; show?: ShowIn; task?: string }
+  /** muwi run으로 뜬 세션이 맡은 노드에 붙었다. 그 터미널에서 나중에 시작한 다른 대화는 다시 붙이지 않는다 */
+  | { type: 'join'; node: string; terminal: string }
   | { type: 'flag'; node?: string; text: string }
   | { type: 'session'; what: 'compact' };
 

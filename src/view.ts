@@ -1,33 +1,60 @@
 // 계획과 사건 기록을 합쳐 보여 줄 모양을 만든다 (그래프 화면, muwi show, 문제 진단이 모두 이걸 읽는다).
-//   노드마다: 몇 번째 하는 중인지, 얼마나 걸렸는지, 누가(계획을 낸 세션, 새 세션, 서브에이전트) 했는지, 하는 동안 읽은 skill
-//   작업마다: 계획이 바뀐 이유들, 문제 표시, 노드 밖에서 읽은 skill
+//   노드마다: 회차별로 누가 했는지, 얼마나 걸렸는지, 하는 동안 읽은 skill
+//   작업마다: 계획이 바뀐 이유들, 빠진 노드, 문제 표시, 노드 밖에서 읽은 skill
+// 사건에는 어느 노드의 몇 번째 회차인지가 적혀 있다. 여기서는 적힌 대로 모으기만 한다.
+// 시각을 맞춰 보며 짐작하지 않는다. 확실하지 않게 적힌 것(guess)과 관찰하지 못한 것(seen: false)은 그대로 드러낸다.
 import type { Event, NodeStatus, Plan, PlanNode, ShowIn } from './store.ts';
 import { clock, listWorks, readEvents, readPlan } from './store.ts';
 import { readSession, sessionLabel } from './session.ts';
 
 export type SkillUse = {
   skill: string;
-  /** read: 이 노드를 하는 동안 읽었다. loaded: 같은 세션이 그 전에 읽어서 내용을 갖고 있다 */
+  /** read: 이 회차를 하는 동안 읽었다. loaded: 이 회차를 한 세션이 그 전에 읽어서 내용을 갖고 있다 */
   state: 'read' | 'loaded';
-  /** 이 노드에서 읽은 횟수 (loaded면 0) */
+  /** 이 회차에서 읽은 횟수 (loaded면 0) */
   count: number;
   /** tool: Skill 도구로 불렀다. file: SKILL.md 파일을 직접 열었다 */
   via: 'tool' | 'file';
-  /** 서브에이전트만 읽었다. 그 내용은 서브에이전트가 끝나면 맡긴 세션에 남지 않는다 */
+  /** 서브에이전트만 읽었다. 그 내용은 서브에이전트가 끝나면 세션에 남지 않는다 */
   agent?: boolean;
+  /** 읽을 때 같은 쪽이 노드 여러 개를 하고 있어서, 이 노드의 것인지 확실하지 않다 */
+  guess?: boolean;
 };
 
-/** 노드를 실제로 한 쪽. 기록에서 본 것이지 계획에 적은 것이 아니다 */
+/** 회차를 한 쪽. 기록에 적힌 것이다 */
 export type Actor = {
-  /** me: 계획을 낸 세션이 직접. session: 다른 세션. subagent: 서브에이전트 */
+  /** me: 대화가 직접 했다. session: muwi run으로 뜬 새 세션이 했다. subagent: 서브에이전트가 했다 */
   kind: 'me' | 'session' | 'subagent';
   session?: string;
-  agents: { id: string; kind?: string }[];
+  /** 이 회차에 있었던 서브에이전트. own: 노드를 직접 시작했다. 아니면 그 세션이 이 노드를 하는 동안 떠서 도왔다 */
+  agents: { id: string; kind?: string; own?: boolean }[];
 };
 
+/** 노드를 한 번 한 것. 끝냈거나 막혔던 노드를 다시 시작하면 다음 회차가 된다 */
+export type Try = {
+  n: number;
+  startedAt?: string;
+  endedAt?: string;
+  /** 작업 중이던 시간 (ms). 사람을 기다린 시간은 넣지 않는다 */
+  spentMs: number;
+  /** 이 회차의 마지막 상태와 그때 남긴 한 줄 */
+  status: NodeStatus;
+  note?: string;
+  who?: Actor;
+  skills: SkillUse[];
+  /** 훅이 이 회차를 한 세션을 보고 있었나. false면 읽은 skill을 관찰하지 못한 것이다 ("없음"이 아니라 "모름") */
+  seen: boolean;
+  /** 시작을 적지 않았거나 시작과 끝을 한꺼번에 적었다. 하는 동안의 기록이 없다 */
+  instant: boolean;
+};
+
+export type Spawn = { at: string; terminal: string; name?: string; show?: ShowIn; /** 그 세션에 맡긴 말 */ task?: string };
+
+/** 노드. who·skills·seen·instant는 가장 최근 회차의 것이고, 회차별 기록은 tries에 있다 */
 export type NodeView = PlanNode & {
   /** 몇 번째 하는 중인가. 끝낸 노드를 다시 시작하면 올라간다 */
   attempts: number;
+  tries: Try[];
   startedAt?: string;
   endedAt?: string;
   /** 작업 중이던 시간의 합 (ms). 사람을 기다린 시간은 넣지 않는다 */
@@ -36,12 +63,14 @@ export type NodeView = PlanNode & {
   since?: string;
   /** 마지막으로 이 노드를 한 세션 */
   session?: string;
-  /** 실제로 누가 했나. 시작한 적이 없으면 없다 */
   who?: Actor;
   /** 끝난 노드가 계획에 적은 것(run)과 다르게 진행됐다 */
   offPlan?: boolean;
-  /** 이 노드를 맡기려고 띄운 새 세션 (muwi run) */
-  spawn?: { at: string; terminal: string; name?: string; show?: ShowIn };
+  seen: boolean;
+  instant: boolean;
+  /** 이 노드를 맡기려고 띄운 새 세션들 (muwi run). spawn은 가장 최근 것 */
+  spawn?: Spawn;
+  spawns: Spawn[];
   skills: SkillUse[];
   flags: { at: string; text: string }[];
 };
@@ -63,197 +92,211 @@ export type WorkView = {
   nodes: NodeView[];
   edges: { from: string; to: string }[];
   changes: Change[];
+  /** 계획에서 빠진 노드. 빠진 뒤에도 무엇이었는지 볼 수 있게 남긴다 */
+  gone: { at: string; id: string; title: string; status: NodeStatus; why?: string }[];
   flags: { at: string; node?: string; text: string }[];
   /** 어느 노드도 하고 있지 않을 때 읽은 skill (계획을 짜는 동안 등) */
   outside: { at: string; session: string | null; skill: string; via: 'tool' | 'file'; agent?: boolean }[];
   /** 대화가 요약된 시각들 */
   compacts: { at: string; session: string | null }[];
   sessions: Record<string, SessionInfo>;
-  /** 계획을 낸 세션 */
+  /** 계획을 처음 낸 세션 */
   lead: string | null;
-  /** 같이 일한 새 세션과 서브에이전트의 수 */
+  /** 같이 일한 새 세션(muwi run으로 뜬 것)과 서브에이전트의 수 */
   helpers: { sessions: number; subagents: number };
   counts: Record<NodeStatus, number> & { total: number };
 };
 
-type Interval = { session: string | null; from: number; to: number; open: boolean };
+type Doer = { session: string | null; agent?: string };
+type Draft = {
+  n: number;
+  startedAt?: string;
+  endedAt?: string;
+  spent: number;
+  openFrom: number | null;
+  status: NodeStatus;
+  note?: string;
+  /** 이 회차를 시작한 쪽들. 마지막이 지금(또는 끝까지) 한 쪽이다 */
+  doers: Doer[];
+  /** 시작을 적지 않고 끝낸 회차는 끝낸 세션이 한 것으로 본다 */
+  closer?: string;
+  seen: boolean;
+  /** main: 세션이 직접 읽은 적이 있다. sure: 확실하게 이 노드의 것으로 적힌 읽기가 있다 */
+  reads: Map<string, { count: number; via: 'tool' | 'file'; main: boolean; sure: boolean }>;
+  helpers: Set<string>;
+};
 
 const ms = (iso: string) => Date.parse(iso);
+/** 시작과 끝 사이가 이보다 짧고 그 사이에 적힌 것이 없으면 "한꺼번에 적었다"고 본다 */
+const INSTANT_MS = 3000;
 
 export function buildView(plan: Plan, events: Event[], sessions: Record<string, SessionInfo> = {}, now: number = clock.now().getTime()): WorkView {
-  const ids = new Set(plan.nodes.map(n => n.id));
-  const intervals = new Map<string, Interval[]>();
-  const attempts = new Map<string, number>();
-  const firstStart = new Map<string, string>();
-  const lastEnd = new Map<string, string>();
+  const byId = new Map(plan.nodes.map(n => [n.id, n]));
+  const drafts = new Map<string, Draft[]>();
   const since = new Map<string, string>();
-  const lastSession = new Map<string, string>();
-  /** 시작을 적지 않고 끝낸 노드는 끝낸 세션이 한 것으로 본다 */
-  const closedBy = new Map<string, string>();
   const prev = new Map<string, NodeStatus>();
-
-  for (const e of events) {
-    if (e.type !== 'node') continue;
-    const list = intervals.get(e.node) ?? [];
-    intervals.set(e.node, list);
-    const open = list[list.length - 1]?.open ? list[list.length - 1] : null;
-    const before = prev.get(e.node) ?? 'todo';
-    if (before !== e.status) since.set(e.node, e.at);
-    if (e.status === 'doing') {
-      if (!open) {
-        list.push({ session: e.session, from: ms(e.at), to: now, open: true });
-        // 기다리다 이어 하는 것은 같은 회차다. 처음이거나, 끝냈거나 막혔던 걸 다시 하면 새 회차
-        if (before !== 'waiting') attempts.set(e.node, (attempts.get(e.node) ?? 0) + 1);
-        if (!firstStart.has(e.node)) firstStart.set(e.node, e.at);
-      } else if (e.session && open.session !== e.session) {
-        // 다른 세션이 이어받았다
-        open.to = ms(e.at);
-        open.open = false;
-        list.push({ session: e.session, from: ms(e.at), to: now, open: true });
-      }
-      if (e.session) lastSession.set(e.node, e.session);
-      lastEnd.delete(e.node);
-    } else {
-      if (open) {
-        open.to = ms(e.at);
-        open.open = false;
-      }
-      if (e.status === 'done') lastEnd.set(e.node, e.at);
-      if (e.session && e.status !== 'todo') closedBy.set(e.node, e.session);
-    }
-    prev.set(e.node, e.status);
-  }
-  // 계획에서 끝난 걸로 적힌 노드는 열린 구간이 남아 있어도 닫는다 (기록이 한 줄 빠졌을 때)
-  for (const n of plan.nodes) {
-    if (n.status === 'doing') continue;
-    for (const iv of intervals.get(n.id) ?? []) if (iv.open) iv.open = false;
-  }
-
-  const lead = events.find(e => e.type === 'plan')?.session ?? null;
-  const planned = new Map(plan.nodes.map(n => [n.id, n.run]));
-
-  // 서브에이전트가 어느 노드를 했는지 찾는다.
-  //   서브에이전트가 노드를 직접 시작했으면(bind) 그 노드.
-  //   아니면 띄운 세션이 그때 하고 있던 노드: 서브에이전트로 하기로 한 노드 > 아직 서브에이전트가 붙지 않은 노드 > 가장 늦게 시작한 노드
-  type Sub = { id: string; kind?: string; node?: string };
-  const subs = new Map<string, Sub>();
-  const subsOf = new Map<string, string[]>();
-  /** 서브에이전트가 직접 시작한 노드. 세션 id가 부모와 같아서 구간만 보면 부모가 한 것처럼 보인다 */
-  const startedBySub = new Set<string>();
-  const give = (sub: Sub, node: string) => {
-    if (sub.node === node) return;
-    if (sub.node) subsOf.set(sub.node, (subsOf.get(sub.node) ?? []).filter(id => id !== sub.id));
-    sub.node = node;
-    subsOf.set(node, [...(subsOf.get(node) ?? []), sub.id]);
-  };
-  for (const e of events) {
-    if (e.type !== 'agent') continue;
-    const sub = subs.get(e.agent) ?? { id: e.agent };
-    subs.set(e.agent, sub);
-    if (e.kind) sub.kind = e.kind;
-    if (e.what === 'bind' && e.node && ids.has(e.node)) {
-      give(sub, e.node);
-      startedBySub.add(e.node);
-    }
-    else if (e.what === 'start' && !sub.node) {
-      const t = ms(e.at);
-      let best: { node: string; want: number; load: number; from: number } | null = null;
-      for (const [node, list] of intervals) {
-        if (!ids.has(node)) continue;
-        for (const iv of list) {
-          if (iv.session !== e.session || t < iv.from || t > iv.to) continue;
-          const c = { node, want: planned.get(node) === 'subagent' ? 1 : 0, load: subsOf.get(node)?.length ?? 0, from: iv.from };
-          if (!best || c.want > best.want || (c.want === best.want && (c.load < best.load || (c.load === best.load && c.from > best.from)))) best = c;
-        }
-      }
-      if (best) give(sub, best.node);
-    }
-  }
-
-  // skill 사건을 노드에 붙인다.
-  //   서브에이전트가 읽은 것: 그 서브에이전트가 한 노드.
-  //   세션이 읽은 것: 그 세션이 그 시각에 하고 있던 노드. 여러 개면 서브에이전트가 시작한 노드를 빼고 가장 늦게 시작한 노드
-  const reads = new Map<string, Map<string, { count: number; via: 'tool' | 'file'; agent: boolean }>>();
+  /** 서브에이전트의 종류 (Explore 등) */
+  const kinds = new Map<string, string>();
+  const seenAgents = new Set<string>();
+  /** 노드를 직접 시작한 서브에이전트 */
+  const owners = new Set<string>();
+  /** muwi run으로 떠서 맡은 노드에 붙은 세션 */
+  const joined = new Set<string>();
+  const spawns = new Map<string, Spawn[]>();
   const outside: WorkView['outside'] = [];
   const skillEvents = events.filter((e): e is Event & { type: 'skill' } => e.type === 'skill');
-  for (const e of skillEvents) {
-    if (e.carried) continue;
-    let target: string | null = null;
-    if (e.agent) target = subs.get(e.agent)?.node ?? null;
-    else {
-      const t = ms(e.at);
-      let best: { node: string; own: number; from: number } | null = null;
-      for (const [node, list] of intervals) {
-        if (!ids.has(node)) continue;
-        for (const iv of list) {
-          if (iv.session !== e.session || t < iv.from || t > iv.to) continue;
-          const c = { node, own: startedBySub.has(node) ? 0 : 1, from: iv.from };
-          if (!best || c.own > best.own || (c.own === best.own && c.from > best.from)) best = c;
-        }
+
+  const find = (node?: string, n?: number) => (node && n ? drafts.get(node)?.find(d => d.n === n) : undefined);
+
+  for (const e of events) {
+    if (e.type === 'node') {
+      if (!byId.has(e.node)) continue;
+      const list = drafts.get(e.node) ?? [];
+      drafts.set(e.node, list);
+      const n = e.attempt ?? list[list.length - 1]?.n ?? 1;
+      let d = list.find(x => x.n === n);
+      if (!d) {
+        d = { n, spent: 0, openFrom: null, status: e.status, doers: [], seen: false, reads: new Map(), helpers: new Set() };
+        list.push(d);
+        list.sort((a, b) => a.n - b.n);
       }
-      target = best?.node ?? null;
+      if ((prev.get(e.node) ?? 'todo') !== e.status) since.set(e.node, e.at);
+      prev.set(e.node, e.status);
+      d.status = e.status;
+      if (e.note) d.note = e.note;
+      else if (e.status === 'doing' || e.status === 'todo') delete d.note;
+      if (e.status === 'doing') {
+        d.startedAt ??= e.at;
+        delete d.endedAt;
+        if (d.openFrom === null) d.openFrom = ms(e.at);
+        const last = d.doers[d.doers.length - 1];
+        if (!last || last.session !== e.session || last.agent !== e.agent) d.doers.push({ session: e.session, ...(e.agent ? { agent: e.agent } : {}) });
+        if (e.agent) {
+          owners.add(e.agent);
+          seenAgents.add(e.agent);
+        }
+        d.seen = Boolean(e.seen);
+      } else {
+        if (d.openFrom !== null) {
+          d.spent += Math.max(0, ms(e.at) - d.openFrom);
+          d.openFrom = null;
+        }
+        if (e.status === 'done' || e.status === 'blocked') d.endedAt = e.at;
+        if (e.session) d.closer = e.session;
+      }
+    } else if (e.type === 'skill') {
+      if (e.carried) continue;
+      const d = find(e.node, e.attempt);
+      if (!d) {
+        outside.push({ at: e.at, session: e.session, skill: e.skill, via: e.via, ...(e.agent ? { agent: true } : {}) });
+        continue;
+      }
+      const cur = d.reads.get(e.skill);
+      d.reads.set(e.skill, {
+        count: (cur?.count ?? 0) + 1,
+        via: cur?.via === 'tool' ? 'tool' : e.via,
+        main: Boolean(cur?.main) || !e.agent,
+        sure: Boolean(cur?.sure) || !e.guess,
+      });
+    } else if (e.type === 'agent') {
+      seenAgents.add(e.agent);
+      if (e.kind) kinds.set(e.agent, e.kind);
+      if (e.what === 'start') find(e.node, e.attempt)?.helpers.add(e.agent);
+    } else if (e.type === 'join') {
+      if (e.session) joined.add(e.session);
+    } else if (e.type === 'spawn') {
+      spawns.set(e.node, [...(spawns.get(e.node) ?? []), { at: e.at, terminal: e.terminal, ...(e.name ? { name: e.name } : {}), ...(e.show ? { show: e.show } : {}), ...(e.task ? { task: e.task } : {}) }]);
     }
-    if (!target || !ids.has(target)) {
-      outside.push({ at: e.at, session: e.session, skill: e.skill, via: e.via, ...(e.agent ? { agent: true } : {}) });
-      continue;
-    }
-    const m = reads.get(target) ?? new Map();
-    reads.set(target, m);
-    const cur = m.get(e.skill);
-    m.set(e.skill, { count: (cur?.count ?? 0) + 1, via: cur?.via === 'tool' ? 'tool' : e.via, agent: (cur ? cur.agent : true) && Boolean(e.agent) });
   }
 
-  const spawns = new Map<string, NonNullable<NodeView['spawn']>>();
-  for (const e of events) {
-    if (e.type === 'spawn') spawns.set(e.node, { at: e.at, terminal: e.terminal, ...(e.name ? { name: e.name } : {}), ...(e.show ? { show: e.show } : {}) });
-  }
+  /** muwi run으로 뜬 세션인가: 붙은 기록이 있거나, 그 노드를 맡기려고 띄운 터미널에서 도는 세션이다 */
+  const spawnedFor = (session: string | null | undefined, node: string) => {
+    if (!session) return false;
+    if (joined.has(session)) return true;
+    const terminal = sessions[session]?.terminal;
+    return Boolean(terminal && (spawns.get(node) ?? []).some(s => s.terminal === terminal));
+  };
 
   const flags = events.filter((e): e is Event & { type: 'flag' } => e.type === 'flag');
 
   const nodes: NodeView[] = plan.nodes.map(n => {
-    const list = intervals.get(n.id) ?? [];
-    const read = reads.get(n.id) ?? new Map<string, { count: number; via: 'tool' | 'file'; agent: boolean }>();
-    const session = lastSession.get(n.id) ?? (n.status === 'todo' ? undefined : closedBy.get(n.id));
-    const agents = (subsOf.get(n.id) ?? []).map(id => ({ id, ...(subs.get(id)?.kind ? { kind: subs.get(id)!.kind } : {}) }));
-    let who: Actor | undefined;
-    if (session || agents.length) {
-      const kind: Actor['kind'] = session && lead && session !== lead ? 'session' : agents.length ? 'subagent' : 'me';
-      who = { kind, ...(session ? { session } : {}), agents };
-    }
-    // 이 노드를 한 세션이 노드를 시작하기 전에 읽어 둔 skill.
-    // 서브에이전트는 빈 상태에서 시작하므로 서브에이전트가 한 노드에는 붙이지 않고, 서브에이전트가 읽은 것도 세지 않는다
-    const loaded = new Map<string, 'tool' | 'file'>();
-    if (who?.kind !== 'subagent') {
-      for (const iv of list) {
+    const list = drafts.get(n.id) ?? [];
+    const tries: Try[] = list.map((d, i) => {
+      // 계획에서 작업 중이 아닌 노드는 열린 구간이 남아 있어도 닫는다 (기록이 한 줄 빠졌을 때)
+      const running = d.openFrom !== null && n.status === 'doing' && i === list.length - 1;
+      const spentMs = d.spent + (running ? Math.max(0, now - d.openFrom!) : 0);
+      const owner: Doer | undefined = d.doers[d.doers.length - 1] ?? (d.closer ? { session: d.closer } : undefined);
+      const own = [...new Set(d.doers.map(x => x.agent).filter((x): x is string => Boolean(x)))];
+      const helped = [...d.helpers].filter(id => !owners.has(id));
+      let who: Actor | undefined;
+      if (owner) {
+        // 서브에이전트가 직접 시작했으면 서브에이전트의 것. 세션이 시작해 놓고 서브에이전트를 띄운 경우는,
+        // 계획에 서브에이전트로 하기로 적어 둔 노드일 때만 서브에이전트가 한 것으로 본다. 그 밖에는 도운 것이다
+        const kind: Actor['kind'] =
+          owner.agent ? 'subagent'
+          : spawnedFor(owner.session, n.id) ? 'session'
+          : n.run === 'subagent' && helped.length ? 'subagent'
+          : 'me';
+        who = {
+          kind,
+          ...(owner.session ? { session: owner.session } : {}),
+          agents: [
+            ...own.map(id => ({ id, ...(kinds.get(id) ? { kind: kinds.get(id) } : {}), own: true })),
+            ...helped.map(id => ({ id, ...(kinds.get(id) ? { kind: kinds.get(id) } : {}) })),
+          ],
+        };
+      }
+      // 이 회차를 한 세션이 시작하기 전에 읽어 둔 skill. 서브에이전트는 빈 상태에서 시작하므로 붙이지 않고,
+      // 서브에이전트가 읽은 것은 세션이 읽어 둔 것으로 치지 않는다
+      const loaded = new Map<string, 'tool' | 'file'>();
+      const from = d.startedAt ?? d.endedAt;
+      if (owner?.session && who?.kind !== 'subagent' && from) {
         for (const e of skillEvents) {
-          if (e.agent || e.session !== iv.session || ms(e.at) >= iv.from) continue;
-          if (!read.has(e.skill) && !loaded.has(e.skill)) loaded.set(e.skill, e.via);
+          if (e.agent || e.session !== owner.session || ms(e.at) >= ms(from)) continue;
+          if (!d.reads.get(e.skill)?.main && !loaded.has(e.skill)) loaded.set(e.skill, e.via);
         }
       }
-    }
-    const skills: SkillUse[] = [
-      ...[...read].map(([skill, v]) => ({ skill, state: 'read' as const, count: v.count, via: v.via, ...(v.agent ? { agent: true } : {}) })),
-      ...[...loaded].map(([skill, via]) => ({ skill, state: 'loaded' as const, count: 0, via })),
-    ];
+      const skills: SkillUse[] = [
+        ...[...d.reads].map(([skill, r]) => ({ skill, state: 'read' as const, count: r.count, via: r.via, ...(r.main ? {} : { agent: true }), ...(r.sure ? {} : { guess: true }) })),
+        ...[...loaded].filter(([skill]) => !d.reads.has(skill)).map(([skill, via]) => ({ skill, state: 'loaded' as const, count: 0, via })),
+      ];
+      const quick = Boolean(d.startedAt && d.endedAt && ms(d.endedAt) - ms(d.startedAt) < INSTANT_MS && d.reads.size === 0 && d.helpers.size === 0);
+      return {
+        n: d.n,
+        ...(d.startedAt ? { startedAt: d.startedAt } : {}),
+        ...(d.endedAt ? { endedAt: d.endedAt } : {}),
+        spentMs,
+        status: d.status,
+        ...(d.note ? { note: d.note } : {}),
+        ...(who ? { who } : {}),
+        skills,
+        seen: d.seen || d.reads.size > 0,
+        instant: !d.startedAt || quick,
+      };
+    });
+    const last = tries[tries.length - 1];
+    const mine = spawns.get(n.id) ?? [];
     const view: NodeView = {
       ...n,
-      attempts: attempts.get(n.id) ?? 0,
-      spentMs: list.reduce((sum, iv) => sum + Math.max(0, (iv.open ? now : iv.to) - iv.from), 0),
-      skills,
+      attempts: n.attempt ?? last?.n ?? 0,
+      tries,
+      spentMs: tries.reduce((sum, t) => sum + t.spentMs, 0),
+      seen: last?.seen ?? false,
+      instant: last?.instant ?? false,
+      spawns: mine,
+      skills: last?.skills ?? [],
       flags: flags.filter(f => f.node === n.id).map(f => ({ at: f.at, text: f.text })),
     };
-    const started = firstStart.get(n.id);
-    const ended = lastEnd.get(n.id);
+    const started = tries.find(t => t.startedAt)?.startedAt;
     const changedAt = since.get(n.id);
     if (started) view.startedAt = started;
-    if (ended && n.status === 'done') view.endedAt = ended;
+    if (last?.endedAt && n.status === 'done') view.endedAt = last.endedAt;
     if (changedAt) view.since = changedAt;
-    if (session) view.session = session;
-    if (who) view.who = who;
+    if (last?.who?.session) view.session = last.who.session;
+    if (last?.who) view.who = last.who;
     // 계획과 달랐는지는 끝난 뒤에만 본다. 하는 중에는 서브에이전트가 아직 뜨지 않았을 수 있다
-    if (n.run && who && n.status === 'done' && n.run !== who.kind) view.offPlan = true;
-    const spawn = spawns.get(n.id);
-    if (spawn) view.spawn = spawn;
+    if (n.run && last?.who && n.status === 'done' && n.run !== last.who.kind) view.offPlan = true;
+    if (mine.length) view.spawn = mine[mine.length - 1];
     return view;
   });
 
@@ -266,6 +309,7 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
     : counts.total > 0 && counts.done === counts.total ? 'done'
     : 'idle';
 
+  const planEvents = events.filter((e): e is Event & { type: 'plan' } => e.type === 'plan');
   const lastAt = events.length ? events[events.length - 1].at : plan.updatedAt;
   return {
     work: plan.work,
@@ -276,18 +320,18 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
     updatedAt: lastAt > plan.updatedAt ? lastAt : plan.updatedAt,
     state,
     nodes,
-    edges: plan.nodes.flatMap(n => n.after.filter(a => ids.has(a)).map(a => ({ from: a, to: n.id }))),
-    changes: events
-      .filter((e): e is Event & { type: 'plan' } => e.type === 'plan')
-      .map(e => ({ at: e.at, by: e.by, why: e.why, first: Boolean(e.first), added: e.added, removed: e.removed, changed: e.changed })),
+    edges: plan.nodes.flatMap(n => n.after.filter(a => byId.has(a)).map(a => ({ from: a, to: n.id }))),
+    changes: planEvents.map(e => ({ at: e.at, by: e.by, why: e.why, first: Boolean(e.first), added: e.added, removed: e.removed, changed: e.changed })),
+    // 같은 id로 다시 넣은 노드는 빠진 것으로 치지 않는다
+    gone: planEvents.flatMap(e => (e.gone ?? []).filter(g => !byId.has(g.id)).map(g => ({ at: e.at, id: g.id, title: g.title, status: g.status, ...(e.why ? { why: e.why } : {}) }))),
     flags: flags.map(f => ({ at: f.at, node: f.node, text: f.text })),
     outside,
     compacts: events.filter(e => e.type === 'session').map(e => ({ at: e.at, session: e.session })),
     sessions,
-    lead,
+    lead: planEvents[0]?.session ?? null,
     helpers: {
-      sessions: new Set(nodes.map(n => (n.who?.kind === 'session' ? n.who.session : undefined)).filter(Boolean)).size,
-      subagents: subs.size,
+      sessions: new Set(nodes.flatMap(n => n.tries).map(t => (t.who?.kind === 'session' ? t.who.session : undefined)).filter(Boolean)).size,
+      subagents: seenAgents.size,
     },
     counts,
   };

@@ -110,13 +110,13 @@ export function diffPlan(old: PlanNode[], next: NodeInput[]): PlanDiff {
 
 export const isEmptyDiff = (d: PlanDiff) => !d.added.length && !d.removed.length && !d.changed.length;
 
-/** 새 계획의 노드에 이전 상태를 이어 붙인다. 같은 id면 하던 상태 그대로, 새 노드는 아직(todo) */
+/** 새 계획의 노드에 이전 상태를 이어 붙인다. 같은 id면 하던 상태·회차·하고 있는 쪽 그대로, 새 노드는 아직(todo) */
 export function carryStatus(old: PlanNode[], next: NodeInput[]): PlanNode[] {
   const before = new Map(old.map(n => [n.id, n]));
   return next.map(n => {
     const b = before.get(n.id);
     const status: NodeStatus = b?.status ?? 'todo';
-    return { ...shape(n), status, ...(b?.note ? { note: b.note } : {}) };
+    return { ...shape(n), status, ...(b?.note ? { note: b.note } : {}), ...(b?.attempt ? { attempt: b.attempt } : {}), ...(b?.by ? { by: b.by } : {}) };
   });
 }
 

@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { appendEvent, nowIso, readEvents, readJson, readPlan, writeJson } from './store.ts';
+import type { Plan, Where } from './store.ts';
 
 export type Session = {
   key: string;
@@ -19,8 +20,17 @@ export type Session = {
   loaded: Record<string, string>;
   /** 계획 없이 파일을 고치려 해서 처음 알린 시각 (nudge 훅) */
   nudged?: string;
-  /** 계획 없이 진행하겠다고 밝혔다 (muwi skip) */
+  /** 계획 없이 진행하겠다고 밝혔다 (muwi skip). 사람이 다음 말을 하면 지워진다 */
   skipped?: { at: string; reason: string };
+  /** 훅이 이 세션을 마지막으로 본 시각. 있으면 이 세션이 읽은 skill을 관찰할 수 있다 */
+  hooked?: string;
+  /**
+   * 서브에이전트가 곧 시작할 노드. 명령만 봐서는 누가 실행하는지 알 수 없어서(세션 id가 같다)
+   * 훅이 명령을 보고 적어 두고, muwi node … start가 읽어서 그 서브에이전트가 시작한 것으로 적는다
+   */
+  starting?: Record<string, { agent: string; at: string }>;
+  /** 이 세션의 서브에이전트가 하는 노드(own) 또는 뜰 때 세션이 하고 있던 노드(도운 노드) */
+  agents?: Record<string, Where & { work: string; own: boolean }>;
   startedAt: string;
   seenAt: string;
 };
@@ -47,6 +57,24 @@ const sessionFile = (dir: string, key: string) => path.join(dir, '.sessions', `$
 export const readSession = (dir: string, key: string) => readJson<Session>(sessionFile(dir, key));
 
 /**
+ * 지금 이 쪽(세션, 또는 그 세션의 서브에이전트)이 하고 있는 노드. 계획에 적어 둔 "하고 있는 쪽"에서 읽는다.
+ * 훅이 사실을 적는 순간에 불러서 그 사실이 어느 노드의 몇 번째 회차 것인지 같이 적는다.
+ */
+export function whereNow(plan: Plan, session: Pick<Session, 'key' | 'agents'>, agent?: string): Where {
+  const doing = plan.nodes.filter(n => n.status === 'doing' && n.by?.session === session.key && (n.by?.agent ?? undefined) === agent);
+  if (doing.length) {
+    const last = doing.reduce((a, b) => ((a.by?.at ?? '') >= (b.by?.at ?? '') ? a : b));
+    // 같은 쪽이 노드 여러 개를 동시에 하고 있으면 가장 늦게 시작한 것으로 적고, 확실하지 않다고 표시한다
+    return { node: last.id, attempt: last.attempt ?? 1, ...(doing.length > 1 ? { guess: true } : {}) };
+  }
+  if (!agent) return {};
+  // 노드를 직접 시작하지 않은 서브에이전트는 뜰 때 세션이 하고 있던 노드의 일을 돕는 것으로 본다
+  const noted = session.agents?.[agent];
+  if (!noted?.node || noted.work !== plan.work || !plan.nodes.some(n => n.id === noted.node)) return {};
+  return { node: noted.node, attempt: noted.attempt ?? 1, ...(noted.guess ? { guess: true } : {}) };
+}
+
+/**
  * "이 세션은 더 알릴 것이 없다"는 표시. 작업에 붙었거나 계획 없이 진행하겠다고 밝혔을 때 남긴다.
  * hook.sh가 이 파일을 보고 파일 수정마다 node를 띄우지 않고 바로 끝낸다.
  */
@@ -54,6 +82,18 @@ export function markSettled(dir: string, key: string) {
   const file = path.join(dir, '.sessions', `${safe(key)}.ok`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, '');
+}
+
+/** 이번 요청에서 이미 확인이 끝난 세션인가 */
+export const isSettled = (dir: string, key: string) => fs.existsSync(path.join(dir, '.sessions', `${safe(key)}.ok`));
+
+/** 사람이 새로 말을 걸었다. 계획을 적었는지 다시 따지게 표시를 지우고, 앞에서 한 skip도 끝낸다 */
+export function unsettle(dir: string, key: string) {
+  try {
+    fs.rmSync(path.join(dir, '.sessions', `${safe(key)}.ok`), { force: true });
+  } catch {
+    // 지우지 못해도 다음 확인에서 다시 본다
+  }
 }
 
 /** 세션 파일을 만들거나 고친다. 환경에서 알 수 있는 것(도구, 폴더, 터미널)을 채운다 */
@@ -108,9 +148,11 @@ export function recordSkill(dir: string, key: string, skill: string, via: 'tool'
   const old = readSession(dir, key);
   const loaded = { ...(old?.loaded ?? {}) };
   if (!agent && !loaded[skill]) loaded[skill] = at;
-  const session = touchSession(dir, key, { ...patch, loaded }, env);
-  if (session.work && readPlan(dir, session.work)) {
-    appendEvent(dir, session.work, { type: 'skill', skill, via, ...(agent ? { agent } : {}) }, key, at);
+  const session = touchSession(dir, key, { ...patch, loaded, hooked: at }, env);
+  const plan = session.work ? readPlan(dir, session.work) : null;
+  if (session.work && plan) {
+    // 읽는 순간에 하고 있던 노드를 같이 적는다
+    appendEvent(dir, session.work, { type: 'skill', skill, via, ...(agent ? { agent } : {}), ...whereNow(plan, session, agent) }, key, at);
   }
   return session;
 }
