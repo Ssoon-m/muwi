@@ -6,7 +6,7 @@ AI에게 일을 맡기면 AI가 그 일의 진행 계획을 스스로 짜고, �
 
 ![muwi 그래프: 새 세션이 맡은 노드 둘과 서브에이전트가 한 노드](docs/panel.png)
 
-muwi는 Claude Code와 Herdr 앱에서 동작합니다. Claude Code 플러그인이 AI의 계획과 진행을 기록하고, Herdr 앱이 그 기록을 그래프로 보여 줍니다.
+muwi는 Claude Code와 [Herdr 앱](https://herdr.dev)에서 동작합니다. Claude Code 플러그인이 AI의 계획과 진행을 기록하고, Herdr 앱이 그 기록을 그래프로 보여 줍니다.
 
 ## muwi를 쓰면 좋은 점
 
@@ -42,7 +42,7 @@ muwi에는 AI가 순서에서 벗어나는 것을 막는 기능이 없습니다.
 
 ## 설치하기
 
-Claude Code, Herdr 앱, Node 24 이상이 필요합니다.
+Claude Code, [Herdr 앱](https://herdr.dev), Node 24 이상이 필요합니다.
 
 1. 터미널에서 플러그인을 설치하세요.
 
