@@ -28,7 +28,8 @@ function setup(nodes: { id: string; after?: string[] }[], work = 'w1') {
     attach(dir, session, work, ENV);
   };
   const skill = (session: string, name: string) => recordSkill(dir, session, name, 'tool', {}, ENV);
-  const view = () => loadView(dir, work)!;
+  // 빈 환경을 준다: Herdr에 물어보지 않는다 (테스트가 이 컴퓨터의 터미널 상태에 기대지 않게)
+  const view = () => loadView(dir, work, ENV)!;
   const skillsOf = (id: string) => view().nodes.find(n => n.id === id)!.skills.map(s => `${s.skill}:${s.state}${s.count > 1 ? `x${s.count}` : ''}`).sort();
   return { dir, work, plan, node, skill, view, skillsOf };
 }
@@ -127,7 +128,7 @@ test('작업 상태: 나를 기다림 > 막힘 > 작업 중 > 끝. 목록도 그
   };
   mk('bbb', 'done');
   mk('ccc', 'doing');
-  const board = loadBoard(a.dir);
+  const board = loadBoard(a.dir, ENV);
   assert.deepEqual(board.works.map(w => `${w.work}:${w.state}`), ['aaa:waiting', 'ccc:doing', 'bbb:done']);
   assert.deepEqual(board.works[0].active.map(n => `${n.id}:${n.status}`), ['x:doing', 'y:waiting']);
 });

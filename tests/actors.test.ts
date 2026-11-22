@@ -9,9 +9,10 @@ import { handleHook, nodeStartIn } from '../src/hook.ts';
 import { markNode } from '../src/node.ts';
 import { terminalName } from '../src/herdr.ts';
 import { parsePlan, diffPlan, carryStatus, addNode } from '../src/plan.ts';
-import { attach, readSession } from '../src/session.ts';
+import { closedSessions } from '../src/live.ts';
+import { attach, readSession, touchSession } from '../src/session.ts';
 import { appendEvent, clock, readEvents, readPlan, writePlan, type NodeStatus, type Plan, type RunBy } from '../src/store.ts';
-import { loadView } from '../src/view.ts';
+import { PAST_DAYS, loadBoard, loadView } from '../src/view.ts';
 
 const CLI = path.resolve(import.meta.dirname, '../src/cli.ts');
 const ENV = {} as NodeJS.ProcessEnv;
@@ -43,7 +44,8 @@ function setup(nodes: { id: string; after?: string[]; run?: RunBy }[], work = 'w
     runs: (agent: string, command: string, session = 'lead') => hook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, agent_id: agent }, 'guard', session),
   };
   const reads = (skill: string, session = 'lead') => hook({ hook_event_name: 'PostToolUse', tool_name: 'Skill', tool_input: { skill } }, 'record', session);
-  const view = () => loadView(dir, work)!;
+  // 빈 환경을 준다: Herdr에 물어보지 않는다 (테스트가 이 컴퓨터의 터미널 상태에 기대지 않게)
+  const view = () => loadView(dir, work, ENV)!;
   const of = (id: string) => view().nodes.find(n => n.id === id)!;
   const skillsOf = (id: string) => of(id).skills.map(s => `${s.skill}:${s.state}${s.agent ? ':sub' : ''}${s.guess ? ':guess' : ''}`).sort();
   return { dir, work, node, hook, sub, reads, view, of, skillsOf };
@@ -251,7 +253,7 @@ function fakeHerdr(labels: Record<string, string> | null, focus = 'pUSER') {
   const at = path.join(bin, 'focus');
   fs.writeFileSync(at, focus);
   const get = labels ? JSON.stringify({ address: 't7', labels }) : '';
-  fs.writeFileSync(path.join(bin, 'hc'), `#!/bin/sh\nprintf 'hc' >> "${log}"; for a in "$@"; do printf ' [%s]' "$a" >> "${log}"; done; echo >> "${log}"\ncase "$1" in\n  run) echo '{"address":"t7","first_message":{"sent":true}}' ;;\n  get) ${get ? `echo '${get}'` : 'exit 1'} ;;\n  *) echo '{}' ;;\nesac\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'hc'), `#!/bin/sh\nprintf 'hc' >> "${log}"; for a in "$@"; do printf ' [%s]' "$a" >> "${log}"; done; echo >> "${log}"\ncase "$1" in\n  run) echo '{"address":"t7","first_message":{"sent":true}}' ;;\n  get) ${get ? `echo '${get}'` : 'exit 1'} ;;\n  ls) echo '{"terminals":[{"address":"t2","state":"live","status":"working"},{"address":"t7","state":"live","status":"working"}]}' ;;\n  *) echo '{}' ;;\nesac\n`, { mode: 0o755 });
   fs.writeFileSync(path.join(bin, 'herdr-app'), `#!/bin/sh
 if [ "$1" = status ]; then printf '{"focused_pane":"%s"}' "$(cat "${at}")"; exit 0; fi
 printf 'app' >> "${log}"; for a in "$@"; do printf ' [%s]' "$a" >> "${log}"; done; echo >> "${log}"
@@ -305,7 +307,8 @@ test('라벨이 없는 터미널이나 Herdr 밖의 세션은 평소처럼 시�
   assert.equal(s.of('impl').status, 'todo');
   const out = s.hook({ hook_event_name: 'SessionStart' }, 'record', 'plain', ENV);
   assert.match(JSON.parse(out.stdout!).hookSpecificOutput.additionalContext, /작업 진행 방식/);
-  assert.equal(fake.calls().split('\n').filter(Boolean).length, 1);
+  // 터미널에 지금 도는 세션을 붙이고(label), 맡은 노드가 있는지 본다(get). Herdr 밖의 세션은 hc를 부르지 않는다
+  assert.deepEqual(fake.calls().split('\n').filter(Boolean), ['hc [label] [t9] [muwi.session=other]', 'hc [get] [t9] [--json]']);
 });
 
 function bench() {
@@ -518,4 +521,94 @@ test('muwi show: 다시 한 노드는 회차별로, 훅이 보지 못한 세션�
   assert.match(shown, /\n +1회차 · [^\n]*읽은 skill: 기록 없음\(시작과 끝을 한꺼번에 적었어요\) · 결과: feature\/x\n +2회차 · [^\n]*이미 읽은 상태: branch-rule/);
   const json = JSON.parse(muwi(['show', 'shop-1', '--json']).out);
   assert.deepEqual(json.nodes.find((n: any) => n.id === 'impl').tries.map((x: any) => [x.n, x.note]), [[1, 'feature/x'], [2, 'feature/PROJ-1']]);
+});
+
+/** hc ls와 hc get의 답을 정해 둔 흉내 hc. terminals: 살아 있는 터미널, owners: 터미널에 붙은 muwi.session 라벨 */
+function fakeHc(terminals: { address: string; status?: string | null }[], owners: Record<string, string> = {}) {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-live-'));
+  const list = JSON.stringify({ terminals: terminals.map(x => ({ address: x.address, state: 'live', status: x.status === undefined ? 'working' : x.status })) });
+  const cases = Object.entries(owners).map(([addr, key]) => `    ${addr}) echo '${JSON.stringify({ address: addr, labels: { 'muwi.session': key } })}' ;;`).join('\n');
+  fs.writeFileSync(path.join(bin, 'hc'), `#!/bin/sh\ncase "$1" in\n  ls) echo '${list}' ;;\n  get)\n    case "$2" in\n${cases}\n    *) echo '{"labels":{}}' ;;\n    esac ;;\n  *) echo '{}' ;;\nesac\n`, { mode: 0o755 });
+  return { MUWI_HC: path.join(bin, 'hc'), PATH: process.env.PATH } as NodeJS.ProcessEnv;
+}
+
+test('세션이 닫혔는지는 Herdr에 물어본다: 터미널이 없거나, 에이전트가 돌지 않거나, 다른 대화가 그 터미널을 쓰고 있으면 닫힌 것', () => {
+  const seenAt = '2026-11-22T05:10:00.000Z';
+  const sessions = {
+    gone: { terminal: 't3', seenAt },      // 터미널을 닫았다
+    shell: { terminal: 't4', seenAt },     // Claude를 끝내고 셸만 남았다
+    cleared: { terminal: 't5', seenAt },   // 같은 칸에서 /clear 하고 다른 대화를 시작했다
+    alive: { terminal: 't6', seenAt },     // 그대로 돌고 있다
+    nolabel: { terminal: 't7', seenAt },   // 라벨이 없다 (옛 판에서 시작했다). 터미널이 살아 있으면 살아 있는 것으로 본다
+    unknown: { seenAt },                   // 터미널을 모른다 (Herdr 밖). 판단하지 않는다
+  };
+  const env = fakeHc(
+    [{ address: 't4', status: null }, { address: 't5' }, { address: 't6' }, { address: 't7' }],
+    { t5: 'someone-else', t6: 'alive' },
+  );
+  const closed = closedSessions(sessions, Object.keys(sessions), env);
+  assert.deepEqual([...closed.keys()].sort(), ['cleared', 'gone', 'shell']);
+  assert.equal(closed.get('gone'), Date.parse(seenAt));
+  // Herdr 밖이면(hc가 없으면) 아무것도 닫혔다고 하지 않는다
+  assert.equal(closedSessions(sessions, Object.keys(sessions), { MUWI_HC: '/no/such/hc' } as NodeJS.ProcessEnv).size, 0);
+});
+
+test('하던 세션이 닫힌 노드는 "세션이 닫힘"으로 보이고, 시간은 거기서 멈추고, 작업은 맨 위에서 내려온다', () => {
+  const s = setup([{ id: 'impl' }, { id: 'pr', after: ['impl'] }]);
+  const herdr = { HC_TERMINAL_ID: 't3' } as NodeJS.ProcessEnv;
+  at(1); touchSession(s.dir, 'worker', {}, herdr); s.node('impl', 'doing', 'worker');
+  at(4); touchSession(s.dir, 'worker', {}, herdr); // 세션이 마지막으로 무언가를 한 때
+  at(60);
+  const alive = fakeHc([{ address: 't3' }], { t3: 'worker' });
+  const dead = fakeHc([]);
+  // 살아 있을 때: 평소처럼 작업 중이고 시간이 계속 간다
+  let v = loadView(s.dir, s.work, alive)!;
+  assert.deepEqual([v.state, v.nodes[0].closed, v.nodes[0].spentMs / 60_000], ['doing', undefined, 59]);
+  // 터미널을 닫았다: 상태는 그대로 두고(끝났는지 모른다) 닫혔다고만 표시한다. 시간은 마지막으로 본 때까지
+  v = loadView(s.dir, s.work, dead)!;
+  assert.deepEqual([v.state, v.nodes[0].status, v.nodes[0].closed, v.nodes[0].spentMs / 60_000], ['stalled', 'doing', true, 3]);
+  // 닫힌 세션이 남긴 "나를 기다림"은 작업을 맨 위로 올리지 않는다
+  at(61); s.node('impl', 'waiting', 'worker', 'PR 올릴까요?');
+  assert.equal(loadView(s.dir, s.work, alive)!.state, 'waiting');
+  assert.equal(loadView(s.dir, s.work, dead)!.state, 'stalled');
+  // 새 대화가 이어받으면 다시 살아난다 (같은 회차를 이어 한다)
+  at(62); s.node('impl', 'doing', 'tomorrow');
+  v = loadView(s.dir, s.work, dead)!;
+  assert.deepEqual([v.state, v.nodes[0].closed, v.nodes[0].attempts, v.nodes[0].who!.session], ['doing', undefined, 1, 'tomorrow']);
+});
+
+test('세션이 시작될 때 터미널에 그 세션의 이름을 붙인다', () => {
+  const s = setup([{ id: 'impl' }]);
+  const fake = fakeHerdr(null);
+  s.hook({ hook_event_name: 'SessionStart', source: 'startup' }, 'record', 'conv-1', { HC_TERMINAL_ID: 't4', MUWI_HC: fake.hc, PATH: process.env.PATH } as NodeJS.ProcessEnv);
+  assert.match(fake.calls(), /^hc \[label\] \[t4\] \[muwi\.session=conv-1\]$/m);
+});
+
+test('지난 작업: 끝났거나 멈춘 채로 오래된 작업은 접는다. 살아 있는 세션이 하는 작업은 오래돼도 접지 않는다', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-past-'));
+  const herdr = (t: string) => ({ HC_TERMINAL_ID: t }) as NodeJS.ProcessEnv;
+  const make = (work: string, session: string, terminal: string, done: boolean) => {
+    const plan: Plan = { work, createdAt: new Date(T0).toISOString(), updatedAt: new Date(T0).toISOString(), nodes: [{ id: 'n', title: 'n', after: [], status: 'todo' }] };
+    writePlan(dir, plan);
+    touchSession(dir, session, {}, herdr(terminal));
+    markNode(dir, work, 'n', 'doing', undefined, session, ENV);
+    if (done) markNode(dir, work, 'n', 'done', undefined, session, ENV);
+  };
+  at(0);
+  make('old-done', 's1', 't1', true);
+  make('old-stalled', 's2', 't2', false);   // 하던 세션을 닫아 버렸다
+  make('old-live', 's3', 't3', false);      // 오래됐지만 아직 돌고 있다
+  const env = fakeHc([{ address: 't3' }, { address: 't4' }], { t3: 's3', t4: 's4' });
+  at(60 * 24 * (PAST_DAYS + 1));
+  make('new-done', 's4', 't4', true);
+  const board = loadBoard(dir, env);
+  assert.deepEqual(board.works.map(w => `${w.work}:${w.state}:${w.past ? '지난' : '지금'}`), [
+    'old-live:doing:지금', 'old-stalled:stalled:지난', 'new-done:done:지금', 'old-done:done:지난',
+  ]);
+  assert.deepEqual(board.works.find(w => w.work === 'old-stalled')!.active, [{ id: 'n', title: 'n', status: 'doing', closed: true }]);
+  // muwi status는 지난 작업을 접어 두고, --all이면 다 보여 준다
+  const run = (args: string[]) => spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir, MUWI_HC: env.MUWI_HC! } });
+  // (명령은 지금 시각으로 본다: 방금 만든 작업들은 모두 "지금"이다)
+  assert.match(run(['status']).stdout, /멈춤 +old-stalled[^\n]*\n +● n +n \(세션이 닫힘\)/);
+  assert.doesNotMatch(run(['status']).stdout, /지난 작업/);
 });
