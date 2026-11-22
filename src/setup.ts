@@ -158,7 +158,7 @@ export type Install = {
   at: string;
 };
 
-export type Places = { home: string; bin: string; herdr: string; codex: string; claude: string };
+export type Places = { home: string; bin: string; herdr: string; codex: string; claude: string; nodeCache: string };
 
 export function places(env: NodeJS.ProcessEnv = process.env): Places {
   const home = env.HOME || os.homedir();
@@ -168,6 +168,8 @@ export function places(env: NodeJS.ProcessEnv = process.env): Places {
     herdr: env.HERDR_APP_HOME || path.join(home, '.config', 'herdr-app'),
     codex: env.CODEX_HOME || path.join(home, '.codex'),
     claude: env.CLAUDE_CONFIG_DIR || path.join(home, '.claude'),
+    // src/find-node.sh가 로그인 셸에서 찾은 Node 경로를 적어 두는 곳
+    nodeCache: path.join(env.XDG_CACHE_HOME || path.join(home, '.cache'), 'muwi', 'node'),
   };
 }
 
@@ -229,6 +231,9 @@ export function runSetup(o: SetupOptions): Install {
   const install: Install = { root: o.root, version: o.version, at: nowIso() };
   const block = fs.readFileSync(path.join(o.root, 'hooks', 'instructions.md'), 'utf8');
   const skill = path.join(o.root, 'skills', 'muwi');
+
+  // Node를 바꿨으면 setup을 다시 실행해서 알린다. 다음 실행 때 로그인 셸에서 다시 찾는다
+  fs.rmSync(p.nodeCache, { force: true });
 
   if (fs.existsSync(p.bin) && !isOurWrapper(p.bin)) {
     log(`${p.bin}에 다른 파일이 있어서 명령은 넣지 않았어요.`);

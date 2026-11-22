@@ -6,8 +6,8 @@
 
 ### 수정
 
-- Herdr가 띄우는 세션과 그래프 칸에서 nvm의 Node를 찾지 못해 muwi가 동작하지 않던 문제를 고쳤습니다. 이 둘은 셸 설정을 읽지 않아서 PATH에 nvm의 Node가 없습니다. 이제 명령과 훅이 PATH 다음으로 nvm의 기본 버전, volta·fnm·mise·asdf, Homebrew·시스템 Node를 차례로 찾습니다 (`src/find-node.sh`).
-- `muwi setup`이 만드는 `~/.local/bin/muwi`가 setup 때의 Node 경로를 고정하지 않습니다. 실행할 때마다 Node를 찾으므로 nvm의 기본 버전을 바꾸면 따라가고, 그 버전을 지워도 깨지지 않습니다. setup을 실행한 Node는 다른 곳에서 못 찾을 때만 씁니다.
+- Herdr가 띄우는 세션과 그래프 칸에서 nvm·mise의 Node를 찾지 못해 muwi가 동작하지 않던 문제를 고쳤습니다. 이 둘은 셸 설정을 읽지 않아서 PATH에 그 Node가 없습니다. 이제 PATH에서 못 찾으면 VS Code처럼 로그인 셸에 물어 PATH를 받아 오고, 찾은 경로를 `~/.cache/muwi/node`에 캐시합니다 (`src/find-node.sh`). 캐시는 그 Node가 없어지거나 `muwi setup`을 다시 실행하면 버립니다.
+- `muwi setup`이 만드는 `~/.local/bin/muwi`가 setup 때의 Node 경로를 고정하지 않습니다. 쓰던 Node를 지워도 깨지지 않습니다. setup을 실행한 Node는 다른 곳에서 못 찾을 때만 씁니다.
 
 ### 변경
 
