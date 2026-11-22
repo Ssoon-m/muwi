@@ -27,6 +27,7 @@ claude --plugin-dir .         # 설치하지 않고 이 폴더를 플러그인�
 | `src/session.ts`, `src/hook.ts` | 세션 이름표, 훅 입력 처리 (읽은 skill, 서브에이전트, `muwi run`으로 뜬 세션 붙이기) |
 | `src/node.ts` | 노드 상태 적기 (명령과 훅이 같이 씁니다) |
 | `src/herdr.ts` | Herdr 부르기: 세션은 `hc`, 화면 배치는 `herdr-app` |
+| `src/live.ts` | 노드를 하던 세션이 아직 살아 있는지 Herdr에 물어보기 |
 | `src/view.ts` | 계획과 사건 기록을 합쳐 보여 줄 모양 만들기 |
 | `src/layout.ts`, `src/vendor/` | 그래프 배치 (elkjs) |
 | `src/setup.ts` | `muwi setup` |
