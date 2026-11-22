@@ -206,11 +206,13 @@ function installMod(root: string, appHome: string): string {
   return to;
 }
 
-export type SetupOptions = { root: string; version: string; dir: string; env?: NodeJS.ProcessEnv; claude?: boolean; log?: (line: string) => void };
+export type SetupOptions = { root: string; version: string; dir: string; env?: NodeJS.ProcessEnv; claude?: boolean; codex?: boolean; log?: (line: string) => void };
 
 /**
- * 플러그인 밖의 것을 넣는다: 터미널용 명령, Herdr 앱 칸(앱이 있을 때), Codex(있을 때).
+ * 플러그인 밖의 것을 넣는다: 터미널용 명령, Herdr 앱 칸(앱이 있을 때).
+ * codex를 주면 Codex에 지침과 사용법 skill을 넣는다 (Codex에는 훅이 없어 계획 기록만 된다).
  * claude를 주면 플러그인 없이 쓰는 경우로 보고 Claude Code 훅과 사용법 skill도 넣는다.
+ * 전에 넣었던 것은 다시 실행할 때 옵션을 주지 않아도 새 위치로 맞춘다.
  */
 export function runSetup(o: SetupOptions): Install {
   const env = o.env ?? process.env;
@@ -237,7 +239,7 @@ export function runSetup(o: SetupOptions): Install {
     log('Herdr 앱이 없어 그래프 칸은 건너뛰었어요.');
   }
 
-  if (fs.existsSync(p.codex)) {
+  if (o.codex || before?.codex) {
     const agents = path.join(p.codex, 'AGENTS.md');
     const to = path.join(p.codex, 'skills', 'muwi');
     installBlock(agents, block);
@@ -247,7 +249,6 @@ export function runSetup(o: SetupOptions): Install {
     log(`Codex 지침과 사용법 skill: ${agents}, ${to}`);
   }
 
-  // 플러그인으로 넣었다가 --claude 없이 다시 실행해도, 전에 직접 넣은 훅은 새 위치로 맞춘다
   if (o.claude || before?.claude) {
     const settings = path.join(p.claude, 'settings.json');
     const to = path.join(p.claude, 'skills', 'muwi');

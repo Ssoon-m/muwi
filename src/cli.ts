@@ -39,8 +39,9 @@ const HELP = `사용법: muwi <명령>
   muwi open [--right]                  Herdr 앱에서 그래프 칸을 이 터미널 아래(--right면 오른쪽)에 연다
 
   설치와 설정
-  muwi setup [--claude]              터미널용 muwi 명령, Herdr 앱 그래프 칸, Codex 지침을 넣는다
-                                     (--claude: 플러그인 없이 쓸 때 Claude Code 훅과 skill도 넣는다)
+  muwi setup                         터미널용 muwi 명령과 Herdr 앱 그래프 칸을 넣는다
+  muwi setup --claude                플러그인 없이 쓸 때: Claude Code 훅과 사용법 skill도 넣는다
+  muwi setup --codex                 Codex에 지침과 사용법 skill을 넣는다 (훅이 없어 계획 기록만 된다)
   muwi setup --remove                setup으로 넣은 것을 뺀다
   muwi config [nudge|guard on|off]   계획 알림(nudge), push·PR 앞에서 묻기(guard)를 켜고 끈다
   muwi --version
@@ -434,7 +435,7 @@ function version(): string {
 
 function cmdSetup(a: Args, dir: string) {
   if (a.flags.remove) return removeSetup(dir, out);
-  const install = runSetup({ root: ROOT, version: version(), dir, claude: Boolean(a.flags.claude), log: out });
+  const install = runSetup({ root: ROOT, version: version(), dir, claude: Boolean(a.flags.claude), codex: Boolean(a.flags.codex), log: out });
   if (install.herdr) {
     const checked = checkMod(install.herdr);
     if (checked && checked !== 'ok') out(`Herdr 앱 칸 점검에서 문제가 나왔어요:\n${checked}`);

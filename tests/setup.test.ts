@@ -102,9 +102,14 @@ test('muwi setup: 있는 도구에만 넣고, 무엇을 넣었는지 적어 둔�
   assert.deepEqual(readInstall(h.records), install);
 });
 
-test('muwi setup: Herdr 앱 칸과 Codex 지침·skill을 넣고, --remove로 뺀다', () => {
+test('muwi setup: Herdr 앱 칸을 넣고, --codex를 주면 Codex 지침·skill도 넣고, --remove로 뺀다', () => {
   const h = home('herdr', 'codex');
   fs.writeFileSync(path.join(h.dir, '.codex', 'AGENTS.md'), '# 내 Codex 규칙\n');
+  // Codex가 있어도 --codex를 주지 않으면 건드리지 않는다
+  runSetup({ root: ROOT, version: '0.1.0', dir: h.records, env: h.env });
+  assert.equal(fs.readFileSync(path.join(h.dir, '.codex', 'AGENTS.md'), 'utf8'), '# 내 Codex 규칙\n');
+  runSetup({ root: ROOT, version: '0.1.0', dir: h.records, env: h.env, codex: true });
+  // 한 번 넣은 뒤로는 옵션 없이 다시 실행해도 유지한다 (업데이트 때 새 위치로 맞추기 위해)
   runSetup({ root: ROOT, version: '0.1.0', dir: h.records, env: h.env });
   const mod = path.join(h.dir, '.config', 'herdr-app', 'mods', 'muwi');
   assert.deepEqual(fs.readdirSync(mod).sort(), ['arc.svg', 'main.js', 'mod.json']);
