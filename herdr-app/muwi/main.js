@@ -10,7 +10,7 @@ import { exec, home, theme, watchFolder, checking, shared, setShared, agents, pa
 
 const SELECTED = "muwi.selected";
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const STATE_NAME = { waiting: "나를 기다림", blocked: "막힘", doing: "작업 중", done: "끝", idle: "노드 사이" };
+const STATE_NAME = { waiting: "나를 기다림", blocked: "막힘", doing: "작업 중", stalled: "멈춤", done: "끝", idle: "노드 사이" };
 const STATUS_NAME = { todo: "아직", doing: "작업 중", waiting: "나를 기다림", blocked: "막힘", done: "끝" };
 const AGENT_NAME = { working: "세션 작업 중", blocked: "세션이 입력을 기다림", done: "세션이 멈춤", idle: "세션이 멈춤" };
 const RUN_NAME = { me: "직접", subagent: "서브에이전트", session: "새 세션" };
@@ -76,14 +76,18 @@ const SAMPLE = (() => {
     node("read", "티켓·기획 읽기", "done", 28, { note: "요구사항 2건", skills: [{ skill: "spec-reader", state: "read", count: 1, via: "tool" }] }),
     node("impl", "구현", "doing", 308, { session: "s1", attempts: 3, who, tries, skills: tries[2].skills, run: "session", show: "pane", offPlan: true,
       spawn: { at: "2026-01-01T00:00:00.000Z", terminal: "t9", task: "견본으로 맡긴 말" }, spawns: [{ at: "2026-01-01T00:00:00.000Z", terminal: "t9", task: "견본으로 맡긴 말" }] }),
-    node("pr", "PR 올리기", "waiting", 588, { note: "PR 올릴까요?", seen: false, flags: [{ at: "2026-01-01T00:00:00.000Z", text: "견본" }] }),
+    node("pr", "PR 올리기", "waiting", 588, { note: "PR 올릴까요?", seen: false, closed: true, session: "s1", flags: [{ at: "2026-01-01T00:00:00.000Z", text: "견본" }] }),
   ];
   const work = {
     work: "sample", title: "견본 작업", request: "견본", state: "waiting", updatedAt: "2026-01-01T00:00:00.000Z",
     counts: { total: 3, todo: 0, doing: 1, waiting: 1, blocked: 0, done: 1 },
   };
   return {
-    works: [{ ...work, active: [{ id: "pr", title: "PR 올리기", status: "waiting", note: "PR 올릴까요?" }] }],
+    works: [
+      { ...work, past: false, active: [{ id: "pr", title: "PR 올리기", status: "waiting", note: "PR 올릴까요?" }] },
+      { ...work, work: "stalled", title: "멈춘 작업", state: "stalled", past: false, active: [{ id: "x", title: "하던 일", status: "doing", closed: true }] },
+      { ...work, work: "old", title: "지난 작업", state: "done", past: true, active: [] },
+    ],
     errors: [],
     selected: {
       ...work, nodes, edges: [], outside: [], compacts: [], flags: [], lead: "s1", helpers: { sessions: 1, subagents: 2 },
@@ -126,6 +130,7 @@ export default class Muwi extends View {
     this.canvasSize = null;
     this.focusKey = null;
     this.stale = false;
+    this.showPast = false;
     if (checking()) {
       this.data = SAMPLE;
       this.node = "impl";
@@ -222,7 +227,7 @@ export default class Muwi extends View {
 
   colors(t) {
     // 나를 기다림은 Herdr가 "사람이 필요함"에 쓰는 색, 막힘은 그와 구별되는 색
-    return { todo: t.input, doing: t.working, waiting: t.blocked, blocked: t.ansi5 ?? t.blocked, done: t.done, idle: t.muted };
+    return { todo: t.input, doing: t.working, waiting: t.blocked, blocked: t.ansi5 ?? t.blocked, done: t.done, idle: t.muted, stalled: t.muted };
   }
 
   render(_cx) {
@@ -323,37 +328,52 @@ export default class Muwi extends View {
 
   workMark(t, w, c) {
     if (w.state === "doing") return div().w(14).flex_none().text_color(c.doing).frames(SPIN, 90);
-    const mark = { waiting: "⏸", blocked: "✗", done: "✓", idle: "○" }[w.state] ?? "•";
+    const mark = { waiting: "⏸", blocked: "✗", stalled: "◌", done: "✓", idle: "○" }[w.state] ?? "•";
     return div().w(14).flex_none().text_color(c[w.state] ?? t.muted).child(mark);
   }
 
-  /** 작업 목록: 제목 / 지금 눈여겨볼 노드 한 줄 */
+  /**
+   * 작업 목록: 제목 / 지금 눈여겨볼 노드 한 줄.
+   * 끝났거나 멈춘 채로 오래된 작업(past)은 맨 아래에 "지난 작업 N개"로 접어 둔다. 지우지는 않는다
+   */
   list(t, works, selected, now, fill) {
     const c = this.colors(t);
     const box = fill ? v_flex().flex_1().min_h(0) : v_flex().flex_none();
+    const row = (w) => {
+      const on = w.work === selected;
+      const first = w.active.find((n) => n.status === "waiting" && !n.closed) ?? w.active.find((n) => n.status === "blocked" && !n.closed) ?? w.active[0];
+      const line = w.state === "done" ? "모든 노드가 끝났어요"
+        : first ? `${first.title}${first.closed ? " · 세션이 닫힘" : first.note ? ` · ${first.note}` : ""}` : `${w.counts.done}/${w.counts.total} 끝`;
+      return h_flex().id(`work-${w.work}`).px(8).py(6).gap(8).items_center().rounded(7)
+        .bg(on ? t.selected : t.chrome).hover((s) => s.bg(on ? t.selected : t.hover)).cursor_pointer()
+        .on_click((_e, cx) => this.select(w.work, cx))
+        .child(this.workMark(t, w, c))
+        .child(v_flex().flex_1().min_w(0).gap(1)
+          .child(div().truncate().text_size(12).text_color(on ? t.foreground : t.muted).when(on, (el) => el.font_medium()).child(w.title ?? w.work))
+          .child(h_flex().gap(6).text_size(10.5)
+            .child(div().flex_1().min_w(0).truncate().text_color(c[w.state] ?? t.dim).child(line))
+            .child(div().flex_none().text_color(t.dim).child(ago(w.updatedAt, now)))));
+    };
+    const current = works.filter((w) => !w.past);
+    const past = works.filter((w) => w.past);
+    // 접어 둔 작업을 보고 있으면 펼쳐 둔다
+    const open = this.showPast || past.some((w) => w.work === selected);
     return box.id("works").overflow_y_scrollbar().px(8).pb(8).gap(2)
-      .children(works.map((w) => {
-        const on = w.work === selected;
-        const first = w.active.find((n) => n.status === "waiting") ?? w.active.find((n) => n.status === "blocked") ?? w.active[0];
-        const line = w.state === "done" ? "모든 노드가 끝났어요"
-          : first ? `${first.title}${first.note ? ` · ${first.note}` : ""}` : `${w.counts.done}/${w.counts.total} 끝`;
-        return h_flex().id(`work-${w.work}`).px(8).py(6).gap(8).items_center().rounded(7)
-          .bg(on ? t.selected : t.chrome).hover((s) => s.bg(on ? t.selected : t.hover)).cursor_pointer()
-          .on_click((_e, cx) => this.select(w.work, cx))
-          .child(this.workMark(t, w, c))
-          .child(v_flex().flex_1().min_w(0).gap(1)
-            .child(div().truncate().text_size(12).text_color(on ? t.foreground : t.muted).when(on, (el) => el.font_medium()).child(w.title ?? w.work))
-            .child(h_flex().gap(6).text_size(10.5)
-              .child(div().flex_1().min_w(0).truncate().text_color(c[w.state] ?? t.dim).child(line))
-              .child(div().flex_none().text_color(t.dim).child(ago(w.updatedAt, now)))));
-      }));
+      .children(current.map(row))
+      .when(past.length > 0, (el) => el
+        .child(h_flex().id("past-toggle").px(8).py(6).gap(8).items_center().rounded(7).cursor_pointer()
+          .hover((s) => s.bg(t.hover))
+          .on_click((_e, cx) => { this.showPast = !open; cx.notify(); })
+          .child(div().w(14).flex_none().text_size(10).text_color(t.dim).child(open ? "▾" : "▸"))
+          .child(div().flex_1().text_size(11).text_color(t.dim).child(`지난 작업 ${past.length}개`)))
+        .when(open, (el2) => el2.children(past.map(row))));
   }
 
   /** 좁을 때는 목록 대신 한 줄로 */
   chips(t, works, selected) {
     const c = this.colors(t);
     return h_flex().id("chips").flex_none().h(34).px(10).gap(6).items_center().overflow_x_hidden().border_b(1).border_color(t.border)
-      .children(works.slice(0, 8).map((w) => {
+      .children([...works.filter((w) => !w.past), ...works.filter((w) => w.past)].slice(0, 8).map((w) => {
         const on = w.work === selected;
         return h_flex().id(`chip-${w.work}`).h(22).px(8).gap(5).flex_none().items_center().rounded(11)
           .bg(on ? t.selected : t.surface).border_1().border_color(on ? t.accent : t.border).cursor_pointer()
@@ -397,6 +417,8 @@ export default class Muwi extends View {
 
   statusIcon(t, n, color, size) {
     const circle = () => div().size(size).flex_none().rounded_full().flex().items_center().justify_center();
+    // 하던 세션이 닫혔다: 돌지 않는 빈 원으로. 끝난 것도 하는 중도 아니다
+    if (n.closed) return circle().border(1.5).border_color(t.muted).text_size(size * 0.62).font_semibold().text_color(t.muted).child("–");
     if (n.status === "doing") {
       return div().size(size).flex_none().relative()
         .child(div().absolute().left(0).top(0).size(size).rounded_full().border(2).border_color(tint(color, 0.28)))
@@ -411,6 +433,7 @@ export default class Muwi extends View {
   /** 카드 둘째 줄: 상태에 따라 가장 궁금한 것 하나 */
   metaOf(view, n) {
     const times = n.spentMs > 0 ? dur(n.spentMs) : null;
+    if (n.closed) return ["세션이 닫힘", times, n.status !== "doing" ? n.note : null].filter(Boolean).join(" · ");
     if (n.status === "waiting" || n.status === "blocked") return n.note ?? STATUS_NAME[n.status];
     if (n.status === "doing") {
       const agent = this.agentOf(view, n);
@@ -503,8 +526,9 @@ export default class Muwi extends View {
       if (!n) continue;
       const x = X(p.x), y = Y(p.y), w = p.w * z, h = p.h * z;
       if (x > cw || y > ch || x + w < 0 || y + h < 0) continue; // 화면 밖은 그리지 않는다
-      const color = c[n.status];
-      const active = n.status === "doing" || n.status === "waiting" || n.status === "blocked";
+      // 하던 세션이 닫힌 노드는 눈에 띄게 그리지 않는다. 지금 일어나는 일이 아니다
+      const color = n.closed ? t.muted : c[n.status];
+      const active = !n.closed && (n.status === "doing" || n.status === "waiting" || n.status === "blocked");
       const picked = this.node === n.id;
       if (active) {
         glows.push(div().absolute().left(x - 6 * z).top(y - 6 * z).w(w + 12 * z).h(h + 12 * z).rounded(12 * z).bg(color)
@@ -613,7 +637,7 @@ export default class Muwi extends View {
         .child(line("노드를 누르면 그 노드의 기록이 보여요", t.dim));
     }
 
-    const color = c[n.status];
+    const color = n.closed ? t.muted : c[n.status];
     const agent = this.agentOf(view, n);
     const terminal = this.terminalOf(view, n);
     const sessionName = (key) => {
@@ -670,8 +694,10 @@ export default class Muwi extends View {
       .child(v_flex().gap(4)
         .child(div().text_size(13).font_semibold().child(n.title))
         .child(h_flex().gap(6).items_center()
-          .child(this.pill(t, STATUS_NAME[n.status], n.status === "todo" ? t.muted : color))
+          .child(this.pill(t, n.closed ? `멈춤 · ${STATUS_NAME[n.status]}이던 중` : STATUS_NAME[n.status], n.status === "todo" ? t.muted : color))
           .child(div().text_size(10.5).text_color(t.dim).child(n.id))))
+      .when(Boolean(n.closed), (el) => el.child(v_flex().gap(3).child(label("세션이 닫힘"))
+        .child(line("이 노드를 하던 세션이 닫혔어요. 일이 끝났는지는 알 수 없어요. 이어서 하려면 새 대화에서 이 작업을 이어 달라고 하면 돼요."))))
       .when(Boolean(n.note), (el) => el.child(v_flex().gap(3)
         .child(label({ waiting: "기다리는 것", blocked: "막힌 이유", done: "결과" }[n.status] ?? "메모"))
         .child(line(n.note, n.status === "done" ? t.foreground : color))))
