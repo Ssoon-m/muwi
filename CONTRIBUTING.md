@@ -14,6 +14,8 @@ claude --plugin-dir .         # 설치하지 않고 이 폴더를 플러그인�
 
 `muwi setup`은 `$MUWI_DIR`과 상관없이 홈 폴더(`~/.local/bin`, Herdr 앱 모드 폴더)에 씁니다. 시험 삼아 실행했으면 `muwi setup --remove`로 되돌립니다.
 
+테스트는 Herdr를 실제로 부르지 않습니다. `MUWI_HC`와 `MUWI_HERDR_APP`으로 `hc`와 `herdr-app` 자리에 흉내 내는 스크립트를 넣습니다.
+
 ## 구성
 
 | 경로 | 내용 |
@@ -22,7 +24,9 @@ claude --plugin-dir .         # 설치하지 않고 이 폴더를 플러그인�
 | `bin/muwi` | 명령. `src/cli.ts`를 Node로 바로 실행합니다 |
 | `src/cli.ts` | 명령 처리 |
 | `src/store.ts`, `src/plan.ts` | 기록 파일 읽고 쓰기, 계획 형식 확인과 비교 |
-| `src/session.ts`, `src/hook.ts` | 세션 이름표, 훅 입력 처리 |
+| `src/session.ts`, `src/hook.ts` | 세션 이름표, 훅 입력 처리 (읽은 skill, 서브에이전트, `muwi run`으로 뜬 세션 붙이기) |
+| `src/node.ts` | 노드 상태 적기 (명령과 훅이 같이 씁니다) |
+| `src/herdr.ts` | Herdr 부르기: 세션은 `hc`, 화면 배치는 `herdr-app` |
 | `src/view.ts` | 계획과 사건 기록을 합쳐 보여 줄 모양 만들기 |
 | `src/layout.ts`, `src/vendor/` | 그래프 배치 (elkjs) |
 | `src/setup.ts` | `muwi setup` |
@@ -35,7 +39,8 @@ claude --plugin-dir .         # 설치하지 않고 이 폴더를 플러그인�
 
 ## 바꿀 때
 
-- 순서를 강제하거나 결과 형식을 검사하는 기능은 넣지 않습니다. muwi는 적어 두고 보여 주기만 합니다 ([왜](README.md#왜)).
+- 순서를 강제하거나 결과 형식을 검사하는 기능은 넣지 않습니다. "이런 일은 새 세션으로" 같은 판단 기준도 넣지 않습니다. muwi는 적어 두고 보여 주고, AI가 시키면 세션을 띄울 뿐입니다 ([왜](README.md#왜)).
+- Herdr가 이미 하는 일(세션 띄우기, 기다리기, 말 걸기)은 다시 만들지 않고 `hc`를 부릅니다.
 - 동작을 바꾸면 테스트를 같이 고치고, 명령이나 옵션이 바뀌면 `muwi --help`, [명령 목록](docs/usage.md#명령-목록), 사용법 skill을 같이 맞춥니다.
 - 커밋은 역할별로 나누고 `feat(범위): 설명`, `fix`, `docs`, `test`, `chore` 형식으로 씁니다.
 

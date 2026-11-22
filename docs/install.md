@@ -1,6 +1,6 @@
 # 설치
 
-Node 22.18 이상이 필요합니다. 빌드나 `npm install`은 없습니다.
+Node 22.18 이상이 필요합니다. 빌드나 `npm install`은 없습니다. muwi는 한 번 실행된 Node의 경로를 기억해서(`~/.muwi/.node`), 셸 설정을 읽지 않는 곳에서 낮은 버전의 Node가 잡혀도 그 Node로 실행됩니다.
 
 ## Claude Code 플러그인
 
@@ -22,7 +22,7 @@ Claude Code 안에서는 이렇게 합니다.
 | 무엇 | 어떻게 |
 | --- | --- |
 | `muwi` 명령 | 플러그인의 `bin/`이 Claude Code의 Bash 도구에서 바로 보입니다 |
-| 훅 | 세션 시작, 읽은 skill 기록, 계획 알림, push 앞에서 묻기 |
+| 훅 | 세션 시작, 읽은 skill과 서브에이전트 기록, 계획 알림, push 앞에서 묻기 |
 | 지침 | 세션이 시작될 때마다 훅이 넣어 줍니다 |
 | 사용법 skill | `muwi` |
 
@@ -42,6 +42,7 @@ muwi setup
 | 그래프 칸 | `~/.config/herdr-app/mods/muwi` | Herdr 앱이 있을 때 |
 
 - 무엇을 넣었는지는 `~/.muwi/install.json`에 적어 둡니다.
+- AI가 노드를 새 세션에 맡기는 기능(`muwi run`)도 Herdr 앱 안에서만 됩니다. 따로 설치할 것은 없습니다.
 - 플러그인이 업데이트돼 설치 위치가 바뀌면, 다음 세션이 시작될 때 위 항목을 새 위치로 맞춥니다.
 
 ## 설정
