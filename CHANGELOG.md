@@ -1,5 +1,12 @@
 # 변경 기록
 
+## 0.1.1 (2026-11-22)
+
+- `muwi setup`이 Codex를 건드리지 않습니다. Codex에 지침과 사용법 skill을 넣으려면 `muwi setup --codex`를 씁니다 (전에 넣었던 것은 계속 새 위치로 맞춥니다)
+- `muwi open`이 연 칸의 id를 알려 줍니다
+- README에 핵심만 남기고 나머지를 `docs/`로 옮겼습니다. 그래프 칸 화면을 넣었습니다
+- 설치 안내를 `claude plugin install muwi --marketplace Ssoon-m/muwi` 한 줄로 바꿨습니다
+
 ## 0.1.0 (2026-11-22)
 
 처음 버전.
