@@ -46,6 +46,7 @@ const HELP = `사용법: muwi <명령>
   보기
   muwi status [--all] [--json]         작업 목록 (나를 기다리는 작업이 위). 오래된 작업은 접어 두고, --all이면 다 보여 준다
   muwi show [<작업>] [--json]           작업 하나의 기록: 노드, 읽은 skill, 계획이 바뀐 이유, 문제 표시
+  muwi session                         이 세션이 붙어 있는 작업과 읽은 skill
   muwi open [--right]                  Herdr 앱에서 그래프 칸을 이 터미널 아래(--right면 오른쪽)에 연다
 
   설치와 설정
