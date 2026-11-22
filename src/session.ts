@@ -98,15 +98,19 @@ export function attach(dir: string, key: string, work: string, env: NodeJS.Proce
   return touchSession(dir, key, { work }, env);
 }
 
-/** 세션이 skill을 읽었다. 세션 파일에 남기고, 붙어 있는 작업이 있으면 그 작업의 사건 기록에도 적는다 */
-export function recordSkill(dir: string, key: string, skill: string, via: 'tool' | 'file', patch: Partial<Session> = {}, env: NodeJS.ProcessEnv = process.env) {
+/**
+ * 세션이 skill을 읽었다. 세션 파일에 남기고, 붙어 있는 작업이 있으면 그 작업의 사건 기록에도 적는다.
+ * 서브에이전트(agent)가 읽은 것은 세션의 "읽어 둔 skill"에 넣지 않는다. 서브에이전트는 빈 상태에서 시작하고,
+ * 끝나면 읽은 내용이 세션에 남지 않기 때문이다.
+ */
+export function recordSkill(dir: string, key: string, skill: string, via: 'tool' | 'file', patch: Partial<Session> = {}, env: NodeJS.ProcessEnv = process.env, agent?: string) {
   const at = nowIso();
   const old = readSession(dir, key);
   const loaded = { ...(old?.loaded ?? {}) };
-  if (!loaded[skill]) loaded[skill] = at;
+  if (!agent && !loaded[skill]) loaded[skill] = at;
   const session = touchSession(dir, key, { ...patch, loaded }, env);
   if (session.work && readPlan(dir, session.work)) {
-    appendEvent(dir, session.work, { type: 'skill', skill, via }, key, at);
+    appendEvent(dir, session.work, { type: 'skill', skill, via, ...(agent ? { agent } : {}) }, key, at);
   }
   return session;
 }

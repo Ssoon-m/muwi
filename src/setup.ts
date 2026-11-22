@@ -53,6 +53,8 @@ export function mergeHooks(settings: Settings, hookCommand: string): Settings {
   };
   const cmd = (extra = '') => ({ type: 'command', command: `${hookCommand}${extra}` });
   add('SessionStart', { hooks: [cmd()] });
+  add('SubagentStart', { hooks: [cmd()] });
+  add('SubagentStop', { hooks: [cmd()] });
   add('PostToolUse', { matcher: 'Skill|Read', hooks: [cmd()] });
   add('PreToolUse', { matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [cmd(' nudge')] });
   add('PreToolUse', { matcher: 'Bash', hooks: [cmd(' guard')] });

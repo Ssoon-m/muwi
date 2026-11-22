@@ -1,9 +1,20 @@
 // 계획의 모양을 확인하고, 이전 계획과 무엇이 달라졌는지 찾는다.
 // 여기서 보는 것은 형식뿐이다 (id가 겹치지 않는가, 없는 노드를 가리키지 않는가, 돌고 도는 선이 없는가).
 // 어떤 노드를 둘지, 어떤 순서로 할지는 계획을 쓰는 쪽(AI)이 정한다.
-import type { NodeStatus, Plan, PlanNode } from './store.ts';
+import { RUN_BY, SHOW_IN } from './store.ts';
+import type { NodeStatus, Plan, PlanNode, RunBy, ShowIn } from './store.ts';
 
-export type PlanInput = { title?: string; nodes: { id: string; title: string; after: string[] }[] };
+export type NodeInput = { id: string; title: string; after: string[]; run?: RunBy; show?: ShowIn };
+export type PlanInput = { title?: string; nodes: NodeInput[] };
+
+/** 노드에서 계획에 해당하는 부분만 (상태와 메모는 뺀다) */
+const shape = (n: NodeInput): NodeInput => ({
+  id: n.id,
+  title: n.title,
+  after: [...n.after],
+  ...(n.run ? { run: n.run } : {}),
+  ...(n.show ? { show: n.show } : {}),
+});
 
 const NODE_ID = /^[A-Za-z0-9가-힣][A-Za-z0-9가-힣_.-]*$/;
 const MAX_NODES = 60;
@@ -28,7 +39,17 @@ export function parsePlan(raw: unknown): { plan?: PlanInput; problems: string[] 
     if (typeof n.title !== 'string' || !n.title.trim()) problems.push(`${n.id}: title이 없어요`);
     const after = n.after === undefined ? [] : typeof n.after === 'string' ? [n.after] : n.after;
     if (!Array.isArray(after) || after.some((a: unknown) => typeof a !== 'string')) return problems.push(`${n.id}: after는 노드 id 목록이어야 해요`);
-    nodes.push({ id: n.id, title: String(n.title ?? '').trim(), after: [...new Set(after as string[])] });
+    // 누가 할지와 어디에 보여 줄지는 적어도 되고 안 적어도 된다. 적었으면 값만 확인한다
+    if (n.run !== undefined && !RUN_BY.includes(n.run)) problems.push(`${n.id}: run은 ${RUN_BY.join(', ')} 중 하나예요 (정하지 않았으면 빼요)`);
+    if (n.show !== undefined && !SHOW_IN.includes(n.show)) problems.push(`${n.id}: show는 ${SHOW_IN.join(', ')} 중 하나예요`);
+    if (n.show !== undefined && n.run !== 'session') problems.push(`${n.id}: show는 run이 session일 때만 적어요`);
+    nodes.push({
+      id: n.id,
+      title: String(n.title ?? '').trim(),
+      after: [...new Set(after as string[])],
+      ...(RUN_BY.includes(n.run) ? { run: n.run as RunBy } : {}),
+      ...(SHOW_IN.includes(n.show) && n.run === 'session' ? { show: n.show as ShowIn } : {}),
+    });
   });
   for (const n of nodes) {
     for (const a of n.after) {
@@ -73,8 +94,8 @@ export type PlanDiff = { added: string[]; removed: string[]; changed: string[] }
 
 const sameList = (a: string[], b: string[]) => a.length === b.length && [...a].sort().join('\n') === [...b].sort().join('\n');
 
-/** 이전 계획과 비교해 생긴 노드, 없어진 노드, 제목이나 순서가 달라진 노드를 찾는다 */
-export function diffPlan(old: PlanNode[], next: PlanInput['nodes']): PlanDiff {
+/** 이전 계획과 비교해 생긴 노드, 없어진 노드, 제목·순서·누가 할지가 달라진 노드를 찾는다 */
+export function diffPlan(old: PlanNode[], next: NodeInput[]): PlanDiff {
   const before = new Map(old.map(n => [n.id, n]));
   const nextIds = new Set(next.map(n => n.id));
   return {
@@ -82,7 +103,7 @@ export function diffPlan(old: PlanNode[], next: PlanInput['nodes']): PlanDiff {
     removed: old.filter(n => !nextIds.has(n.id)).map(n => n.id),
     changed: next.filter(n => {
       const b = before.get(n.id);
-      return b !== undefined && (b.title !== n.title || !sameList(b.after, n.after));
+      return b !== undefined && (b.title !== n.title || !sameList(b.after, n.after) || b.run !== n.run || b.show !== n.show);
     }).map(n => n.id),
   };
 }
@@ -90,12 +111,12 @@ export function diffPlan(old: PlanNode[], next: PlanInput['nodes']): PlanDiff {
 export const isEmptyDiff = (d: PlanDiff) => !d.added.length && !d.removed.length && !d.changed.length;
 
 /** 새 계획의 노드에 이전 상태를 이어 붙인다. 같은 id면 하던 상태 그대로, 새 노드는 아직(todo) */
-export function carryStatus(old: PlanNode[], next: PlanInput['nodes']): PlanNode[] {
+export function carryStatus(old: PlanNode[], next: NodeInput[]): PlanNode[] {
   const before = new Map(old.map(n => [n.id, n]));
   return next.map(n => {
     const b = before.get(n.id);
     const status: NodeStatus = b?.status ?? 'todo';
-    return { id: n.id, title: n.title, after: n.after, status, ...(b?.note ? { note: b.note } : {}) };
+    return { ...shape(n), status, ...(b?.note ? { note: b.note } : {}) };
   });
 }
 
@@ -103,9 +124,9 @@ export function carryStatus(old: PlanNode[], next: PlanInput['nodes']): PlanNode
  * 노드 하나를 끼워 넣는다. before를 주면 그 노드가 새 노드 다음에 오게 선을 다시 잇는다.
  * 목록에서의 자리도 흐름을 따라 잡는다 (before 앞, 없으면 after 노드들 바로 뒤). 그림과 목록이 읽는 순서대로 나온다.
  */
-export function addNode(plan: Plan, node: { id: string; title: string; after: string[] }, before?: string): PlanInput {
-  const nodes = plan.nodes.map(n => ({ id: n.id, title: n.title, after: [...n.after] }));
-  const fresh = { id: node.id, title: node.title, after: [...node.after] };
+export function addNode(plan: Plan, node: NodeInput, before?: string): PlanInput {
+  const nodes = plan.nodes.map(shape);
+  const fresh = shape(node);
   const target = before ? nodes.find(n => n.id === before) : undefined;
   if (target) {
     // 예: impl → check 사이에 lint를 넣으면 impl → lint → check가 된다
@@ -124,8 +145,7 @@ export function removeNode(plan: Plan, id: string): PlanInput {
   const nodes = plan.nodes
     .filter(n => n.id !== id)
     .map(n => ({
-      id: n.id,
-      title: n.title,
+      ...shape(n),
       after: n.after.includes(id) ? [...new Set([...n.after.filter(a => a !== id), ...(gone?.after ?? [])])] : [...n.after],
     }));
   return { title: plan.title, nodes };

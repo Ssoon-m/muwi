@@ -4,11 +4,16 @@
 // nudge 모드는 계획을 적지 않은 세션이 파일을 고치려 할 때 알려 준다. 지침만으로는 계획을 적지 않는 때가 있어서다.
 //   계획을 적거나(muwi plan, muwi node … start) 계획 없이 진행하겠다고 밝히면(muwi skip) 그 뒤로는 지나간다. 순서는 막지 않는다.
 // guard 모드(선택 설치)는 push·PR·댓글처럼 되돌릴 수 없는 명령 앞에서 사람에게 묻게 한다.
+// 서브에이전트가 한 일은 훅 입력의 agent_id로 구분한다 (서브에이전트는 세션 id가 부모와 같다).
+// muwi run으로 뜬 새 세션은 시작할 때 맡은 작업에 붙이고 노드를 시작한 것으로 적는다.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { appendEvent, nowIso, readConfig, readPlan } from './store.ts';
-import { markSettled, recordSkill, sessionKey, touchSession } from './session.ts';
+import type { PlanNode } from './store.ts';
+import { attach, markSettled, readSession, recordSkill, sessionKey, touchSession } from './session.ts';
+import { spawnedFor } from './herdr.ts';
+import { markNode } from './node.ts';
 import { instructionText } from './setup.ts';
 
 /** muwi가 설치된 곳 (이 파일의 위 폴더) */
@@ -64,6 +69,45 @@ export function guardReason(command: unknown): string | null {
 
 export type HookResult = { stdout?: string };
 
+/** 명령에 `muwi node <id> start`가 있으면 그 노드(와 --work로 준 작업)를 돌려준다 */
+export function nodeStartIn(command: unknown): { node: string; work?: string } | null {
+  if (typeof command !== 'string') return null;
+  const m = command.match(/(?:^|[\s;&|(/])muwi\s+(?:node\s+(\S+)\s+start|start\s+(\S+))(?=$|[\s;&|)])/);
+  if (!m) return null;
+  const node = (m[1] ?? m[2]).replace(/^['"]|['"]$/g, '');
+  const w = command.match(/--work(?:=|\s+)['"]?([^\s'";&|)]+)/);
+  return { node, ...(w ? { work: w[1] } : {}) };
+}
+
+/** muwi run으로 뜬 세션에 알려 줄 말. 맡은 노드와 적는 법만 말한다 */
+export function childNote(work: string, node: Pick<PlanNode, 'id' | 'title'>): string {
+  return [
+    '## 이 세션이 맡은 노드 (muwi)',
+    '',
+    `이 세션은 작업 \`${work}\`의 노드 \`${node.id}\`(${node.title})를 맡아서 떴다. 이 작업에는 이미 붙어 있고, 노드의 시작도 적혀 있다.`,
+    '',
+    '- 계획을 새로 만들지 않는다. 맡은 일을 쪼개야 하면 `muwi add`로 같은 계획에 노드를 넣는다.',
+    `- 끝나면 \`muwi node ${node.id} done "<결과 한 줄>"\`을 적는다.`,
+    `- 사람의 결정이 필요하면 \`muwi node ${node.id} wait "<물어볼 것>"\`, 스스로 풀 수 없으면 \`muwi node ${node.id} block "<이유>"\`을 적는다.`,
+    '- 전체 계획과 다른 노드의 진행은 `muwi show`로 본다.',
+  ].join('\n');
+}
+
+/** muwi run으로 뜬 세션이면 맡은 작업에 붙이고 노드를 시작한 것으로 적는다. 그 세션에 알려 줄 말을 돌려준다 */
+function adoptSpawn(dir: string, key: string, env: NodeJS.ProcessEnv): string {
+  const terminal = env.HC_TERMINAL_ID;
+  if (!terminal) return '';
+  const got = spawnedFor(terminal, env);
+  if (!got) return '';
+  const node = readPlan(dir, got.work)?.nodes.find(n => n.id === got.node);
+  if (!node) return '';
+  const already = readSession(dir, key)?.work === got.work;
+  attach(dir, key, got.work, env);
+  // 대화가 요약돼 다시 시작한 것이면 상태는 건드리지 않는다. 기다리거나 끝난 노드도 그대로 둔다
+  if (!already && (node.status === 'todo' || node.status === 'doing')) markNode(dir, got.work, got.node, 'doing', undefined, key);
+  return childNote(got.work, node);
+}
+
 export const NUDGE = [
   'muwi: 이 세션은 아직 작업 계획을 적지 않았어요. 사람은 그 계획을 그래프로 보면서 진행을 확인해요. 아래 둘 중 하나를 하고 수정을 다시 시도하세요.',
   '1) 파일을 고치는 작업이면 계획을 적는다 (작은 작업이면 노드 두세 개로 충분해요):',
@@ -88,8 +132,21 @@ export function handleHook(payload: any, dir: string, mode: 'record' | 'guard' |
   const event = payload.hook_event_name;
   const tool = payload.tool_name;
 
+  const key: string | null = typeof payload.session_id === 'string' && payload.session_id ? payload.session_id : sessionKey(env);
+  /** 서브에이전트 안에서 일어난 일이면 그 서브에이전트의 id */
+  const agent: string | undefined = typeof payload.agent_id === 'string' && payload.agent_id ? payload.agent_id : undefined;
+
   if (mode === 'guard') {
     if (event !== 'PreToolUse' || tool !== 'Bash') return {};
+    // 서브에이전트가 노드를 시작하면 그 노드를 그 서브에이전트가 한 것으로 적는다.
+    // 명령만 봐서는 누가 실행했는지 알 수 없어서(세션 id가 부모와 같다) 훅에서 잇는다
+    const started = agent && key ? nodeStartIn(payload.tool_input?.command) : null;
+    if (started && agent && key) {
+      const work = started.work ?? readSession(dir, key)?.work;
+      if (work && readPlan(dir, work)?.nodes.some(n => n.id === started.node)) {
+        appendEvent(dir, work, { type: 'agent', agent, what: 'bind', node: started.node }, key);
+      }
+    }
     if (!readConfig(dir).guard) return {};
     const reason = guardReason(payload.tool_input?.command);
     if (!reason) return {};
@@ -104,7 +161,6 @@ export function handleHook(payload: any, dir: string, mode: 'record' | 'guard' |
     };
   }
 
-  const key: string | null = typeof payload.session_id === 'string' && payload.session_id ? payload.session_id : sessionKey(env);
   if (!key) return {};
   const cwd = typeof payload.cwd === 'string' ? payload.cwd : undefined;
   const patch = { tool: 'claude' as const, ...(cwd ? { cwd } : {}) };
@@ -136,9 +192,19 @@ export function handleHook(payload: any, dir: string, mode: 'record' | 'guard' |
     if (payload.source === 'compact' && session.work && readPlan(dir, session.work)) {
       appendEvent(dir, session.work, { type: 'session', what: 'compact' }, key);
     }
-    const text = sessionInstructions(root);
+    const text = [sessionInstructions(root), adoptSpawn(dir, key, env)].filter(Boolean).join('\n\n');
     if (!text) return {};
     return { stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } }) };
+  }
+
+  if (event === 'SubagentStart' || event === 'SubagentStop') {
+    if (!agent) return {};
+    const session = touchSession(dir, key, patch, env);
+    if (session.work && readPlan(dir, session.work)) {
+      const kind = typeof payload.agent_type === 'string' && payload.agent_type ? payload.agent_type : undefined;
+      appendEvent(dir, session.work, { type: 'agent', agent, what: event === 'SubagentStart' ? 'start' : 'stop', ...(kind ? { kind } : {}) }, key);
+    }
+    return {};
   }
 
   if (event !== 'PostToolUse') return {};
@@ -146,10 +212,10 @@ export function handleHook(payload: any, dir: string, mode: 'record' | 'guard' |
     const skill = payload.tool_input?.skill;
     if (typeof skill !== 'string' || !skill) return {};
     if (payload.tool_response && payload.tool_response.success === false) return {};
-    recordSkill(dir, key, skill, 'tool', patch, env);
+    recordSkill(dir, key, skill, 'tool', patch, env, agent);
   } else if (tool === 'Read') {
     const skill = skillFromPath(payload.tool_input?.file_path);
-    if (skill) recordSkill(dir, key, skill, 'file', patch, env);
+    if (skill) recordSkill(dir, key, skill, 'file', patch, env, agent);
   }
   return {};
 }

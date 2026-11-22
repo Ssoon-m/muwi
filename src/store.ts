@@ -9,6 +9,13 @@ import path from 'node:path';
 export type NodeStatus = 'todo' | 'doing' | 'waiting' | 'blocked' | 'done';
 export const STATUSES: NodeStatus[] = ['todo', 'doing', 'waiting', 'blocked', 'done'];
 
+/** 누가 하나: me 계획을 낸 세션이 직접, subagent 서브에이전트, session 새 세션. 정하는 것은 계획을 쓰는 쪽(AI)이다 */
+export type RunBy = 'me' | 'subagent' | 'session';
+export const RUN_BY: RunBy[] = ['me', 'subagent', 'session'];
+/** 새 세션을 Herdr 앱의 어디에 보여 줄지 */
+export type ShowIn = 'pane' | 'tab';
+export const SHOW_IN: ShowIn[] = ['pane', 'tab'];
+
 export type PlanNode = {
   id: string;
   title: string;
@@ -17,6 +24,10 @@ export type PlanNode = {
   status: NodeStatus;
   /** 마지막으로 남긴 한 줄: 끝났으면 결과, 기다리면 물어볼 것, 막혔으면 이유 */
   note?: string;
+  /** 누가 할지. AI가 정했을 때만 있다 (없으면 정하지 않은 것) */
+  run?: RunBy;
+  /** 새 세션을 어디에 보여 줄지. AI가 정했을 때만 있다 */
+  show?: ShowIn;
 };
 
 export type Plan = {
@@ -35,7 +46,12 @@ export type Plan = {
 export type EventBody =
   | { type: 'plan'; by: 'ai' | 'human'; why?: string; first?: boolean; added: string[]; removed: string[]; changed: string[] }
   | { type: 'node'; node: string; status: NodeStatus; note?: string }
-  | { type: 'skill'; skill: string; via: 'tool' | 'file'; carried?: boolean }
+  /** agent: 서브에이전트가 읽었으면 그 서브에이전트의 id */
+  | { type: 'skill'; skill: string; via: 'tool' | 'file'; carried?: boolean; agent?: string }
+  /** 서브에이전트가 시작하고 끝난 것, 그리고 서브에이전트가 노드를 시작한 것(bind). 훅이 적는다 */
+  | { type: 'agent'; agent: string; what: 'start' | 'stop' | 'bind'; kind?: string; node?: string }
+  /** 노드를 맡길 새 세션을 띄웠다 (muwi run). terminal은 Herdr 터미널 주소 */
+  | { type: 'spawn'; node: string; terminal: string; name?: string; show?: ShowIn }
   | { type: 'flag'; node?: string; text: string }
   | { type: 'session'; what: 'compact' };
 
