@@ -481,8 +481,15 @@ function cmdOpen(a: Args) {
   }
   const split = app(['do', 'pane.split', JSON.stringify({ direction: a.flags.right ? 'right' : 'down', mod: 'muwi', ...(pane ? { pane } : {}) })]);
   if (split.status !== 0) throw new Fail(`그래프 칸을 열지 못했어요: ${(split.stderr || split.stdout).trim()}`);
+  // 글자 입력이 그래프 칸으로 넘어가지 않게 터미널로 되돌린다
   if (pane) app(['do', 'pane.focus', JSON.stringify({ pane })]);
-  out('그래프 칸을 열었어요. 닫으려면 그 칸의 닫기 버튼을 눌러요.');
+  let opened = '';
+  try {
+    opened = JSON.parse(split.stdout).pane ?? '';
+  } catch {
+    // 칸 id를 모르면 안내만 한다
+  }
+  out(`그래프 칸을 열었어요${opened ? ` (${opened})` : ''}. 닫으려면 그 칸의 닫기 버튼을 눌러요.`);
 }
 
 /** 이 세션은 계획 없이 진행한다고 밝힌다. 계획을 적지 않은 세션의 파일 수정을 막던 안내가 그친다 */
