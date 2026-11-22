@@ -1,6 +1,6 @@
 {
   "name": "muwi",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "AI가 스스로 짠 작업 플로우를 기록하고 그래프로 보여 준다. 순서를 정해 주지 않고, 간 길을 지켜본다.",
   "author": {
     "name": "SoonMin"
