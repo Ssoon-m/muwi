@@ -14,7 +14,7 @@ import {
   SCHEMA, SHOW_IN, appendEvent, checkWorkName, listWorks, nowIso, readConfig, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
   type Config, type NodeStatus, type Plan, type RunBy, type ShowIn,
 } from './store.ts';
-import { loadBoard, loadView, type Actor, type NodeView, type Try, type WorkView } from './view.ts';
+import { PAST_DAYS, loadBoard, loadView, type Actor, type NodeView, type Try, type WorkView } from './view.ts';
 
 const HELP = `사용법: muwi <명령>
 
@@ -44,7 +44,7 @@ const HELP = `사용법: muwi <명령>
   muwi skip "<이유>"                   이 세션은 계획 없이 진행한다 (한 곳만 고치는 일, 기록할 작업이 아닐 때)
 
   보기
-  muwi status [--json]                 작업 목록 (나를 기다리는 작업이 위)
+  muwi status [--all] [--json]         작업 목록 (나를 기다리는 작업이 위). 오래된 작업은 접어 두고, --all이면 다 보여 준다
   muwi show [<작업>] [--json]           작업 하나의 기록: 노드, 읽은 skill, 계획이 바뀐 이유, 문제 표시
   muwi open [--right]                  Herdr 앱에서 그래프 칸을 이 터미널 아래(--right면 오른쪽)에 연다
 
@@ -178,7 +178,7 @@ function readPlanText(a: Args): string {
 }
 
 const MARK: Record<NodeStatus, string> = { todo: '○', doing: '●', waiting: '⏸', blocked: '✗', done: '✓' };
-const STATE_NAME: Record<WorkView['state'], string> = { waiting: '나를 기다림', blocked: '막힘', doing: '작업 중', done: '끝', idle: '노드 사이' };
+const STATE_NAME: Record<WorkView['state'], string> = { waiting: '나를 기다림', blocked: '막힘', doing: '작업 중', stalled: '멈춤', done: '끝', idle: '노드 사이' };
 
 const RUN_NAME: Record<RunBy, string> = { me: '직접', subagent: '서브에이전트', session: '새 세션' };
 const runTag = (n: { run?: RunBy; show?: ShowIn }) => (n.run ? `${RUN_NAME[n.run]}${n.show ? `, ${n.show}` : ''}` : '');
@@ -426,7 +426,8 @@ function printShow(v: WorkView) {
   out('노드');
   const width = Math.max(...v.nodes.map(n => n.id.length));
   for (const n of v.nodes) {
-    const who = whoLine(v, n);
+    // 하던 세션이 닫혔으면 그렇게 적는다. 상태는 그대로 두지만 지금 하고 있는 쪽이 없다
+    const who = [whoLine(v, n), n.closed ? '세션이 닫힘' : ''].filter(Boolean).join(' · ');
     const meta = [n.attempts > 1 ? `${n.attempts}회차` : '', n.spentMs > 0 ? dur(n.spentMs) : '', who].filter(Boolean).join(' · ');
     out(`  ${MARK[n.status]} ${n.id.padEnd(width)}  ${n.title}${n.after.length ? `  ← ${n.after.join(', ')}` : ''}${meta ? `  (${meta})` : ''}`);
     const indent = ' '.repeat(width + 6);
@@ -499,17 +500,21 @@ function cmdStatus(a: Args, dir: string) {
   const board = loadBoard(dir);
   if (a.flags.json) return out(JSON.stringify({ dir, ...board }, null, 2));
   if (!board.works.length) out(`기록된 작업이 없어요 (${dir})`);
+  // 끝났거나 멈춘 채로 오래된 작업은 접어 둔다. --all이면 다 보여 준다
+  const past = board.works.filter(w => w.past);
   for (const w of board.works) {
+    if (w.past && !a.flags.all) continue;
     out(`${STATE_NAME[w.state].padEnd(7)} ${w.work}  ${w.counts.done}/${w.counts.total}${w.title ? `  ${w.title}` : ''}`);
-    for (const n of w.active) out(`          ${MARK[n.status]} ${n.id}  ${n.title}${n.note ? ` : ${n.note}` : ''}`);
+    for (const n of w.active) out(`          ${MARK[n.status]} ${n.id}  ${n.title}${n.closed ? ' (세션이 닫힘)' : ''}${n.note ? ` : ${n.note}` : ''}`);
   }
+  if (past.length && !a.flags.all) out(`지난 작업 ${past.length}개는 접어 뒀어요 (${PAST_DAYS}일 넘게 바뀐 것이 없는 작업). muwi status --all로 봐요.`);
   for (const e of board.errors) out(`⚠ ${e.work}: ${e.message}`);
 }
 
-/** 그래프 화면이 한 번에 읽는 것: 작업 목록과, 고른 작업의 기록과 좌표 */
 async function cmdBoard(a: Args, dir: string) {
   const board = loadBoard(dir);
-  const pick = str(a, 'work') ?? board.works[0]?.work;
+  // 고른 작업이 없으면 맨 위 작업을 보여 준다. 접어 둔 지난 작업보다 지금 작업이 먼저다
+  const pick = str(a, 'work') ?? (board.works.find(w => !w.past) ?? board.works[0])?.work;
   let selected = null;
   if (pick) {
     const v = loadView(dir, pick);
