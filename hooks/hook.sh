@@ -29,6 +29,19 @@ case "${1:-}" in
     ;;
   *)
     case "$payload" in
+      *'"SessionStart"'*)
+        # Node가 24보다 낮으면 muwi가 실행되지 않고 훅은 조용히 넘어간다. 세션에 한 번 알려서 사람이 알게 한다
+        v=$(node -v 2>/dev/null)
+        major=${v#v}
+        major=${major%%.*}
+        case "$major" in '' | *[!0-9]*) major=0 ;; esac
+        if [ "$major" -lt 24 ]; then
+          printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"muwi: 이 세션에서 잡히는 Node가 '"${v:-없음}"'라서 muwi가 동작하지 않는다. Node 24 이상이 필요하다. 계획 기록 없이 평소대로 진행하고, 이 사실을 사용자에게 한 번 알린다."}}'
+          exit 0
+        fi
+        ;;
+    esac
+    case "$payload" in
       *'"SessionStart"'* | *'"SubagentStart"'* | *'"SubagentStop"'* | *'"Skill"'* | *SKILL.md*) ;;
       *) exit 0 ;;
     esac

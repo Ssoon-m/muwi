@@ -295,22 +295,31 @@ test('hook.sh: 서브에이전트의 시작·끝과 서브에이전트가 실행
   assert.deepEqual(events, ['start:ag9:Explore', 'bind:ag9:rev', 'skill:team-rules:ag9', 'stop:ag9:Explore']);
 });
 
-test('bin/muwi: PATH의 node가 낮거나 없어도, 전에 실행했던 node를 기억해서 쓴다', () => {
-  const bin = path.resolve(import.meta.dirname, '../bin/muwi');
+test('Node가 낮으면 무엇이 필요한지 알린다 (조용히 실패하지 않는다)', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-node-'));
   const old = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-oldnode-'));
-  // 22.14인 척하는 node: 버전 확인에서는 실패하고, TypeScript 파일은 실행하지 못한다
-  fs.writeFileSync(path.join(old, 'node'), '#!/bin/sh\nif [ "$1" = "-v" ]; then echo v22.14.0; exit 0; fi\nexit 1\n', { mode: 0o755 });
-  const run = (p: string) => spawnSync('/bin/sh', [bin, '--version'], { encoding: 'utf8', env: { PATH: p, HOME: dir, MUWI_DIR: dir } });
-  const stale = run(`${old}:/usr/bin:/bin`);
+  // 22.14인 척하는 node: TypeScript 파일을 실행하지 못한다
+  fs.writeFileSync(path.join(old, 'node'), '#!/bin/sh\nif [ "$1" = "-v" ]; then echo v22.14.0; exit 0; fi\necho "ERR_UNKNOWN_FILE_EXTENSION" >&2\nexit 1\n', { mode: 0o755 });
+  const env = (p: string) => ({ PATH: p, HOME: dir, MUWI_DIR: dir });
+  const bin = path.resolve(import.meta.dirname, '../bin/muwi');
+  const stale = spawnSync('/bin/sh', [bin, '--version'], { encoding: 'utf8', env: env(`${old}:/usr/bin:/bin`) });
   assert.equal(stale.status, 1);
-  assert.match(stale.stderr, /Node 22\.18 이상이 필요해요 \(지금: v22\.14\.0\)/);
-  // 맞는 node로 한 번 실행하면 그 경로를 적어 둔다
-  const good = run(`${path.dirname(process.execPath)}:/usr/bin:/bin`);
+  assert.match(stale.stderr, /muwi: Node 24 이상이 필요해요 \(지금: v22\.14\.0\)/);
+  const good = spawnSync('/bin/sh', [bin, '--version'], { encoding: 'utf8', env: env(`${path.dirname(process.execPath)}:/usr/bin:/bin`) });
   assert.equal(good.status, 0, good.stderr);
-  assert.equal(fs.readFileSync(path.join(dir, '.node'), 'utf8').trim(), process.execPath);
-  // 그 뒤로는 PATH의 node가 낮아도 실행된다
-  const after = run(`${old}:/usr/bin:/bin`);
-  assert.equal(after.status, 0, after.stderr);
-  assert.match(after.stdout, /^\d+\.\d+\.\d+/);
+  assert.match(good.stdout, /^\d+\.\d+\.\d+/);
+  assert.equal(good.stderr, '');
+  // 기록 폴더에 node 경로 같은 것을 남기지 않는다
+  assert.deepEqual(fs.readdirSync(dir), []);
+
+  // 훅은 실패해도 세션을 방해하지 않으므로, 세션이 시작될 때 한 번 알려 준다
+  const sh = path.resolve(import.meta.dirname, '../hooks/hook.sh');
+  const start = JSON.stringify({ hook_event_name: 'SessionStart', session_id: 's1' });
+  const told = spawnSync('sh', [sh], { input: start, encoding: 'utf8', env: env(`${old}:/usr/bin:/bin`) });
+  assert.equal(told.status, 0);
+  const note = JSON.parse(told.stdout).hookSpecificOutput;
+  assert.equal(note.hookEventName, 'SessionStart');
+  assert.match(note.additionalContext, /Node가 v22\.14\.0라서 muwi가 동작하지 않는다\. Node 24 이상이 필요하다/);
+  const fine = spawnSync('sh', [sh], { input: start, encoding: 'utf8', env: env(`${path.dirname(process.execPath)}:/usr/bin:/bin`) });
+  assert.match(JSON.parse(fine.stdout).hookSpecificOutput.additionalContext, /작업 진행 방식 \(muwi\)/);
 });

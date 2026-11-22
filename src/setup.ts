@@ -177,7 +177,7 @@ const WRAPPER_MARK = '# muwi setup이 만든 파일';
 
 /** 터미널과 Herdr 앱에서 쓸 muwi 명령. 설치된 위치와 node를 절대 경로로 적어 둔다 */
 function wrapper(root: string): string {
-  return `#!/bin/sh\n${WRAPPER_MARK}. 고치지 말고 muwi setup을 다시 실행해요.\nexec "${process.execPath}" --disable-warning=ExperimentalWarning "${path.join(root, 'src', 'cli.ts')}" "$@"\n`;
+  return `#!/bin/sh\n${WRAPPER_MARK}. 고치지 말고 muwi setup을 다시 실행해요.\nexec "${process.execPath}" "${path.join(root, 'src', 'cli.ts')}" "$@"\n`;
 }
 
 function isOurWrapper(file: string): boolean {

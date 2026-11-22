@@ -3,7 +3,6 @@
 // 이 명령은 적어 두기만 한다. 순서를 막거나 다음에 할 일을 정하지 않는다.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import path from 'node:path';
 import { LABEL_NODE, LABEL_WORK, hc, herdrApp, terminalName, type Ran } from './herdr.ts';
 import { layoutGraph, layoutProblems } from './layout.ts';
 import { ROOT, handleHook } from './hook.ts';
@@ -67,6 +66,9 @@ class Fail extends Error {
     this.code = code;
   }
 }
+
+/** 필요한 Node의 가장 낮은 버전 */
+const NODE_MIN = 24;
 
 const out = (s: string) => process.stdout.write(s + '\n');
 
@@ -524,22 +526,6 @@ function cmdOpen(a: Args) {
 
 const pause = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
-/**
- * 지금 muwi를 실행한 node를 기록 폴더에 적어 둔다. bin/muwi가 다음부터 이 node를 쓴다.
- * 셸 설정을 읽지 않는 곳(Herdr가 띄운 세션의 훅)에서는 PATH의 node가 낮아서 실행되지 않을 수 있다.
- */
-function rememberNode(dir: string) {
-  const file = path.join(dir, '.node');
-  try {
-    const saved = fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim() : '';
-    if (saved && fs.existsSync(saved)) return;
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(file, process.execPath + '\n');
-  } catch {
-    // 적지 못해도 명령은 그대로 한다
-  }
-}
-
 /** 띄운 세션을 pane이나 tab에 놓는다. 포커스가 새 칸으로 넘어가므로 원래 터미널로 되돌린다 */
 function placeTerminal(terminal: string, place: string, lead: string): Ran {
   let kept: Ran = { ok: false, out: '', err: '' };
@@ -662,8 +648,10 @@ function cmdSession(dir: string) {
 async function main(argv: string[]) {
   const [cmd, ...rest] = argv;
   const a = parseArgs(rest);
+  // TypeScript를 바로 실행하므로 Node 24(LTS) 이상에서만 돈다
+  const major = Number(process.versions.node.split('.')[0]);
+  if (major < NODE_MIN) throw new Fail(`muwi는 Node ${NODE_MIN} 이상이 필요해요 (지금: ${process.version})`);
   const dir = runsDir();
-  rememberNode(dir);
   switch (cmd) {
     case 'plan': return cmdPlan(a, dir);
     case 'add': return cmdAdd(a, dir);
