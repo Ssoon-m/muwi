@@ -1,0 +1,4 @@
+# herdr-app check가 만드는 파일
+gpui-kit.d.ts
+herdr.d.ts
+jsconfig.json
