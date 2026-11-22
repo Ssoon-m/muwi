@@ -87,7 +87,12 @@ function home(...tools: ('herdr' | 'codex')[]) {
 test('muwi setup: 있는 도구에만 넣고, 무엇을 넣었는지 적어 둔다', () => {
   const h = home();
   const lines: string[] = [];
+  // 로그인 셸에서 찾아 둔 Node 경로는 setup을 다시 하면 버린다
+  const nodeCache = path.join(h.dir, '.cache', 'muwi', 'node');
+  fs.mkdirSync(path.dirname(nodeCache), { recursive: true });
+  fs.writeFileSync(nodeCache, '/old/node\n');
   const install = runSetup({ root: ROOT, version: '0.1.0', dir: h.records, env: h.env, log: l => lines.push(l) });
+  assert.equal(fs.existsSync(nodeCache), false);
   // 터미널용 명령은 항상. 설치 위치의 bin/muwi를 부르고, setup을 실행한 node는 못 찾을 때만 쓰도록 넘긴다
   const bin = path.join(h.dir, '.local', 'bin', 'muwi');
   assert.equal(install.bin, bin);
