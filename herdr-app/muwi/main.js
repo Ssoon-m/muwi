@@ -61,12 +61,22 @@ function roundPath(b, pts, r) {
 /** herdr-app check가 그래프를 그리는 코드까지 확인할 수 있게 하는 작은 견본 */
 const SAMPLE = (() => {
   const node = (id, title, status, x, extra = {}) => ({
-    id, title, after: [], status, attempts: status === "todo" ? 0 : 1, spentMs: 65000, skills: [], flags: [], ...extra,
+    id, title, after: [], status, attempts: status === "todo" ? 0 : 1, spentMs: 65000, skills: [], flags: [], tries: [], spawns: [], seen: true, instant: false, ...extra,
   });
+  // 견본은 화면의 모든 갈래를 한 번씩 지나가게 만든다 (herdr-app check가 이걸로 그려 본다):
+  // 다시 한 노드, 서브에이전트가 도운 회차, 훅이 보지 못한 회차, 한꺼번에 적은 회차, 새 세션에 맡긴 노드, 빠진 노드
+  const who = { kind: "me", session: "s1", agents: [{ id: "a1", kind: "Explore" }] };
+  const tries = [
+    { n: 1, startedAt: "2026-01-01T00:00:00.000Z", endedAt: "2026-01-01T00:01:00.000Z", spentMs: 60000, status: "done", note: "처음 결과", who: { kind: "me", session: "s1", agents: [] }, skills: [], seen: false, instant: false },
+    { n: 2, startedAt: "2026-01-01T00:02:00.000Z", endedAt: "2026-01-01T00:02:01.000Z", spentMs: 1000, status: "blocked", note: "막힘", who: { kind: "subagent", session: "s1", agents: [{ id: "a2", own: true }] }, skills: [], seen: true, instant: true },
+    { n: 3, startedAt: "2026-01-01T00:03:00.000Z", spentMs: 5000, status: "doing", who, seen: true, instant: false,
+      skills: [{ skill: "team-rules", state: "read", count: 2, via: "file", agent: true, guess: true }, { skill: "spec-reader", state: "loaded", count: 0, via: "tool" }] },
+  ];
   const nodes = [
     node("read", "티켓·기획 읽기", "done", 28, { note: "요구사항 2건", skills: [{ skill: "spec-reader", state: "read", count: 1, via: "tool" }] }),
-    node("impl", "구현", "doing", 308, { session: "s1", skills: [{ skill: "spec-reader", state: "loaded", count: 0, via: "tool" }] }),
-    node("pr", "PR 올리기", "waiting", 588, { note: "PR 올릴까요?", flags: [{ at: "2026-01-01T00:00:00.000Z", text: "견본" }] }),
+    node("impl", "구현", "doing", 308, { session: "s1", attempts: 3, who, tries, skills: tries[2].skills, run: "session", show: "pane", offPlan: true,
+      spawn: { at: "2026-01-01T00:00:00.000Z", terminal: "t9", task: "견본으로 맡긴 말" }, spawns: [{ at: "2026-01-01T00:00:00.000Z", terminal: "t9", task: "견본으로 맡긴 말" }] }),
+    node("pr", "PR 올리기", "waiting", 588, { note: "PR 올릴까요?", seen: false, flags: [{ at: "2026-01-01T00:00:00.000Z", text: "견본" }] }),
   ];
   const work = {
     work: "sample", title: "견본 작업", request: "견본", state: "waiting", updatedAt: "2026-01-01T00:00:00.000Z",
@@ -76,7 +86,8 @@ const SAMPLE = (() => {
     works: [{ ...work, active: [{ id: "pr", title: "PR 올리기", status: "waiting", note: "PR 올릴까요?" }] }],
     errors: [],
     selected: {
-      ...work, nodes, edges: [], outside: [], compacts: [], flags: [],
+      ...work, nodes, edges: [], outside: [], compacts: [], flags: [], lead: "s1", helpers: { sessions: 1, subagents: 2 },
+      gone: [{ at: "2026-01-01T00:00:00.000Z", id: "lint", title: "lint", status: "todo", why: "견본" }],
       changes: [{ at: "2026-01-01T00:00:00.000Z", by: "human", why: "견본", first: false, added: ["pr"], removed: [], changed: [] }],
       sessions: { s1: { label: "t1", tool: "claude", terminal: "t1" } },
       layout: {
@@ -360,13 +371,16 @@ export default class Muwi extends View {
   }
 
   /**
-   * 카드 오른쪽 위의 표시: 누가 하는가. 계획을 낸 세션이 직접 하면 비워 둔다.
+   * 카드 오른쪽 위의 표시: 누가 하는가. 대화가 직접 하면 비워 둔다.
    * planned: 아직 시작 전이고 계획에 그렇게 적혀 있다 (흐리게 그린다)
    */
   tagOf(n) {
     if (n.who) {
       if (n.who.kind === "session") return { text: "세션", planned: false };
-      if (n.who.kind === "subagent") return { text: n.who.agents.length > 1 ? `서브 ×${n.who.agents.length}` : "서브", planned: false };
+      const subs = n.who.agents.length;
+      if (n.who.kind === "subagent") return { text: subs > 1 ? `서브 ×${subs}` : "서브", planned: false };
+      // 세션이 직접 했고, 그동안 뜬 서브에이전트가 도왔다
+      if (subs > 0) return { text: subs > 1 ? `+서브 ×${subs}` : "+서브", planned: false };
       return null;
     }
     if (n.status !== "todo") return null;
@@ -396,7 +410,7 @@ export default class Muwi extends View {
 
   /** 카드 둘째 줄: 상태에 따라 가장 궁금한 것 하나 */
   metaOf(view, n) {
-    const times = [n.spentMs > 0 ? dur(n.spentMs) : null, n.attempts > 1 ? `${n.attempts}회차` : null].filter(Boolean).join(" · ");
+    const times = n.spentMs > 0 ? dur(n.spentMs) : null;
     if (n.status === "waiting" || n.status === "blocked") return n.note ?? STATUS_NAME[n.status];
     if (n.status === "doing") {
       const agent = this.agentOf(view, n);
@@ -404,7 +418,11 @@ export default class Muwi extends View {
       return [n.who?.kind === "subagent" ? "서브에이전트" : null, times, quiet].filter(Boolean).join(" · ") || "작업 중";
     }
     if (n.status === "done") return [times, n.note].filter(Boolean).join(" · ");
-    if (n.spawn) return "새 세션이 뜨는 중";
+    if (n.spawn) {
+      // 폴더 신뢰 확인이나 권한 확인에서 멈춰 있으면 그렇게 보여 준다. 사람이 그 칸에서 답해야 한다
+      const agent = this.agentOf(view, n);
+      return agent?.status === "blocked" ? AGENT_NAME.blocked : "새 세션이 뜨는 중";
+    }
     return "";
   }
 
@@ -509,6 +527,8 @@ export default class Muwi extends View {
           .child(h_flex().gap(5 * z).items_center()
             .child(div().flex_1().min_w(0).truncate().text_size(12.5 * z).text_color(n.status === "todo" ? t.muted : t.foreground)
               .when(active, (el) => el.font_semibold()).child(n.title))
+            // 다시 한 노드는 눈에 띄게: 여기서 뭔가 걸렸다는 신호다
+            .when(n.attempts > 1, (el) => el.child(chip(`${n.attempts}회차`, t.accent, false)))
             .when(Boolean(tag), (el) => el.child(chip(tag.text, t.muted, tag.planned)))
             .when(Boolean(n.offPlan), (el) => el.child(chip("≠계획", t.blocked, false))))
           .child(h_flex().gap(6 * z).items_center().text_size(10.5 * z)
@@ -584,6 +604,8 @@ export default class Muwi extends View {
               .child(div().flex_1().min_w(0).truncate().text_color(t.muted)
                 .child([...ch.added.map((id) => `+${id}`), ...ch.removed.map((id) => `−${id}`), ...ch.changed.map((id) => `~${id}`)].join(" "))))
             .child(line(ch.why ?? "(이유 없음)")))))
+        .when((view.gone ?? []).length > 0, (el) => el.child(v_flex().gap(3).child(label("빠진 노드"))
+          .children(view.gone.map((g) => line(`${g.title} (${STATUS_NAME[g.status] ?? g.status}) · ${g.why ?? "이유 없음"}`)))))
         .when(view.outside.length > 0, (el) => el.child(v_flex().gap(3).child(label("노드 밖에서 읽은 skill"))
           .child(line([...new Set(view.outside.map((s) => s.skill))].join(", ")))))
         .when(loose.length > 0, (el) => el.child(v_flex().gap(3).child(label("문제 표시"))
@@ -592,22 +614,53 @@ export default class Muwi extends View {
     }
 
     const color = c[n.status];
-    const info = n.session ? view.sessions?.[n.session] : null;
     const agent = this.agentOf(view, n);
     const terminal = this.terminalOf(view, n);
-    const subKinds = [...new Set((n.who?.agents ?? []).map((a) => a.kind).filter(Boolean))].join(", ");
-    const subs = n.who?.agents?.length ? `서브에이전트 ${n.who.agents.length}개${subKinds ? ` (${subKinds})` : ""}` : null;
-    const session = `${info?.label ?? ""}${info?.tool && info.tool !== "unknown" ? ` (${info.tool})` : ""}`;
-    // 실제로 한 쪽. 시작 전이면 계획에 적은 것이나 뜨는 중인 세션
-    const whoText = n.who
-      ? (n.who.kind === "session" ? [`새 세션 ${session}`, subs].filter(Boolean).join(" + ")
-        : n.who.kind === "subagent" ? `${subs} · 띄운 세션 ${info?.label ?? ""}`
-        : `계획을 낸 세션 ${session}`)
-      : n.spawn ? `새 세션 ${n.spawn.terminal} · 뜨는 중`
-      : null;
+    const sessionName = (key) => {
+      const i = key ? view.sessions?.[key] : null;
+      return `${i?.label ?? ""}${i?.tool && i.tool !== "unknown" ? ` (${i.tool})` : ""}`;
+    };
+    /** 회차를 누가 했는지 한 줄 */
+    const whoOf = (who) => {
+      const count = (list) => {
+        const kinds = [...new Set(list.map((a) => a.kind).filter(Boolean))].join(", ");
+        return `서브에이전트 ${list.length}개${kinds ? ` (${kinds})` : ""}`;
+      };
+      const own = who.agents.filter((a) => a.own);
+      const helped = who.agents.filter((a) => !a.own);
+      if (who.kind === "subagent") return own.length ? count(own) : `${count(helped)} · 세션 ${view.sessions?.[who.session]?.label ?? ""}이 시작함`;
+      const base = who.kind === "session" ? `새 세션 ${sessionName(who.session)}` : `세션 ${sessionName(who.session)}`;
+      return [base, own.length ? count(own) : null, helped.length ? `${count(helped)}가 도움` : null].filter(Boolean).join(" + ");
+    };
+    // 실제로 한 쪽. 시작 전이면 뜨는 중인 세션
+    const whoText = n.who ? whoOf(n.who) : n.spawn ? `새 세션 ${n.spawn.terminal} · 뜨는 중` : null;
     const plannedText = n.run ? `계획: ${RUN_NAME[n.run] ?? n.run}${n.show ? `, ${n.show}` : ""}` : null;
-    const read = n.skills.filter((s) => s.state === "read");
-    const loaded = n.skills.filter((s) => s.state === "loaded");
+    /**
+     * 한 회차(또는 한 번만 한 노드)의 읽은 skill.
+     * "읽은 skill이 없어요"는 훅이 보고 있었는데 읽지 않았을 때만 쓴다. 보지 못했으면 그렇게 적는다.
+     */
+    const skillRows = (x) => {
+      const read = x.skills.filter((s) => s.state === "read");
+      const loaded = x.skills.filter((s) => s.state === "loaded");
+      const rows = [];
+      if (x.seen === false) rows.push(line("읽은 skill을 볼 수 없었어요 (이 세션에서 훅이 돌지 않았어요)", t.blocked));
+      else if (read.length === 0) rows.push(line(x.instant ? "시작과 끝을 한꺼번에 적어서 하는 동안의 기록이 없어요" : "하는 동안 읽은 skill이 없어요", t.dim));
+      for (const s of read) {
+        rows.push(h_flex().gap(6).items_center()
+          .child(div().size(6).flex_none().rounded_full().bg(t.done))
+          .child(line(`${s.skill}${s.count > 1 ? ` ×${s.count}` : ""}${s.via === "file" ? " (파일을 직접 읽음)" : ""}${s.agent ? " · 서브에이전트가 읽음" : ""}${s.guess ? " · 확실하지 않음" : ""}`, t.foreground)));
+      }
+      if (loaded.length > 0) {
+        rows.push(div().pt(2).text_size(10).text_color(t.dim).child("이미 읽은 상태 (같은 세션이 앞에서 읽음)"));
+        for (const s of loaded) {
+          rows.push(h_flex().gap(6).items_center()
+            .child(div().size(6).flex_none().rounded_full().border(1).border_color(t.muted))
+            .child(line(s.skill)));
+        }
+      }
+      return rows;
+    };
+    const tries = n.tries ?? [];
     const times = [
       n.startedAt ? `${clock(n.startedAt)} 시작` : null,
       n.spentMs > 0 ? `${dur(n.spentMs)} 작업` : null,
@@ -633,17 +686,18 @@ export default class Muwi extends View {
               .on_click(() => run(panes().some((p) => p.terminal === terminal) ? "pane.focus" : "terminal.peek", { terminal }))
               .child("터미널로 가기")))))
         .when(Boolean(plannedText), (el) => el.child(line(n.offPlan ? `${plannedText} · 계획과 다르게 했어요` : plannedText, n.offPlan ? t.blocked : t.dim)))))
-      .child(v_flex().gap(4).child(label("읽은 skill"))
-        .when(read.length === 0 && n.attempts > 0, (el) => el.child(line("이 노드를 하는 동안 읽은 skill이 없어요", t.dim)))
+      .child(v_flex().gap(4).child(label(tries.length > 1 ? "회차별 기록" : "읽은 skill"))
         .when(n.attempts === 0, (el) => el.child(line("아직 시작하지 않았어요", t.dim)))
-        .children(read.map((s) => h_flex().gap(6).items_center()
-          .child(div().size(6).rounded_full().bg(t.done))
-          .child(line(`${s.skill}${s.count > 1 ? ` ×${s.count}` : ""}${s.via === "file" ? " (파일을 직접 읽음)" : ""}${s.agent ? " · 서브에이전트가 읽음" : ""}`, t.foreground))))
-        .when(loaded.length > 0, (el) => el
-          .child(div().pt(2).text_size(10).text_color(t.dim).child("이미 읽은 상태 (같은 세션이 앞에서 읽음)"))
-          .children(loaded.map((s) => h_flex().gap(6).items_center()
-            .child(div().size(6).rounded_full().border(1).border_color(t.muted))
-            .child(line(s.skill))))))
+        .children(tries.length > 1
+          ? tries.map((x) => v_flex().gap(3).pt(2)
+            .child(h_flex().gap(6).items_center()
+              .child(div().flex_none().px(5).rounded(4).border(1).border_color(tint(t.accent, 0.6)).text_size(10).text_color(t.accent).child(`${x.n}회차`))
+              .child(div().flex_1().min_w(0).truncate().text_size(10.5).text_color(t.dim)
+                .child([x.startedAt ? clock(x.startedAt) : null, x.spentMs > 0 ? dur(x.spentMs) : null, x.who ? whoOf(x.who) : null].filter(Boolean).join(" · "))))
+            .children(skillRows(x))
+            .when(Boolean(x.note), (el) => el.child(line(`${{ waiting: "기다린 것", blocked: "막힌 이유", done: "결과" }[x.status] ?? "메모"}: ${x.note}`))))
+          : n.attempts > 0 ? skillRows(n) : []))
+      .when(Boolean(n.spawn?.task), (el) => el.child(v_flex().gap(3).child(label("맡긴 말")).child(line(n.spawn.task))))
       .when(n.flags.length > 0, (el) => el.child(v_flex().gap(3).child(label("문제 표시"))
         .children(n.flags.map((f) => line(`⚑ ${f.text} (${ago(f.at, now)})`, t.blocked)))));
   }
