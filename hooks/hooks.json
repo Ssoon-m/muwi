@@ -1,7 +1,10 @@
 {
-  "description": "muwi: 세션이 시작될 때 지침을 넣고, 읽은 skill과 서브에이전트를 기록하고, 계획을 적지 않은 세션의 파일 수정을 알린다",
+  "description": "muwi: 세션이 시작될 때 지침을 넣고, 읽은 skill과 서브에이전트를 기록하고, 계획 없이 파일을 고치려 하면 알린다",
   "hooks": {
     "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/hook.sh\"" }] }
+    ],
+    "UserPromptSubmit": [
       { "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/hook.sh\"" }] }
     ],
     "SubagentStart": [
