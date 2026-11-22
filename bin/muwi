@@ -1,12 +1,15 @@
 #!/bin/sh
 # muwi 명령. src/cli.ts를 Node로 바로 실행한다. Node 24 이상이 필요하다.
+# 셸 설정 없이 실행될 때(Herdr가 띄운 세션, 그래프 칸)도 Node를 찾도록 src/find-node.sh를 쓴다.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-node "$ROOT/src/cli.ts" "$@"
+. "$ROOT/src/find-node.sh"
+NODE=$(muwi_find_node)
+"$NODE" "$ROOT/src/cli.ts" "$@"
 code=$?
 # TypeScript를 바로 읽지 못하는 Node(22.18 미만)는 알기 어려운 오류를 낸다. 무엇이 필요한지 한 줄 덧붙인다.
 # 그보다 높고 24보다 낮은 Node는 cli.ts가 직접 알린다.
 if [ "$code" -ne 0 ]; then
-  v=$(node -v 2>/dev/null)
+  v=$("$NODE" -v 2>/dev/null)
   rest=${v#v}
   major=${rest%%.*}
   rest=${rest#*.}

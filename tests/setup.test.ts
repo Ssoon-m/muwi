@@ -88,10 +88,10 @@ test('muwi setup: 있는 도구에만 넣고, 무엇을 넣었는지 적어 둔�
   const h = home();
   const lines: string[] = [];
   const install = runSetup({ root: ROOT, version: '0.1.0', dir: h.records, env: h.env, log: l => lines.push(l) });
-  // 터미널용 명령은 항상. 설치 위치와 node를 절대 경로로 적는다
+  // 터미널용 명령은 항상. 설치 위치의 bin/muwi를 부르고, setup을 실행한 node는 못 찾을 때만 쓰도록 넘긴다
   const bin = path.join(h.dir, '.local', 'bin', 'muwi');
   assert.equal(install.bin, bin);
-  assert.match(fs.readFileSync(bin, 'utf8'), new RegExp(`"${ROOT}/src/cli.ts"`));
+  assert.match(fs.readFileSync(bin, 'utf8'), new RegExp(`MUWI_SETUP_NODE="${process.execPath}" exec "${ROOT}/bin/muwi"`));
   assert.ok(fs.statSync(bin).mode & 0o100);
   // Herdr 앱도 Codex도 없으면 건너뛴다. Claude Code 설정은 플러그인 몫이라 건드리지 않는다
   assert.equal(install.herdr, undefined);
@@ -162,6 +162,6 @@ test('업데이트로 설치 위치나 버전이 바뀌면, setup을 한 적이 
   const next = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-next-'));
   for (const d of ['hooks', 'skills', 'herdr-app']) fs.cpSync(path.join(ROOT, d), path.join(next, d), { recursive: true });
   assert.equal(refreshSetup({ root: next, version: '0.2.0', dir: h.records, env: h.env }), true);
-  assert.match(fs.readFileSync(path.join(h.dir, '.local', 'bin', 'muwi'), 'utf8'), new RegExp(`"${next}/src/cli.ts"`));
+  assert.match(fs.readFileSync(path.join(h.dir, '.local', 'bin', 'muwi'), 'utf8'), new RegExp(`"${next}/bin/muwi"`));
   assert.equal(readInstall(h.records)!.version, '0.2.0');
 });
