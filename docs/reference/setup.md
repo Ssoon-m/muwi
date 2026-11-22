@@ -10,7 +10,7 @@ muwi가 무엇을 어디에 설치하는지, 설정으로 무엇을 바꿀 수 �
 | Node | 24 이상. 빌드나 `npm install`은 필요 없습니다 |
 | [Herdr 앱](https://herdr.dev) | 그래프를 보거나 새 세션을 띄울 때 필요합니다 |
 
-PATH에 Node가 없는 곳(Herdr가 띄우는 세션, 그래프 칸)에서는 muwi가 nvm 같은 버전 관리 도구의 기본 버전을 직접 찾습니다. 찾는 순서와 확인 방법은 [문제 해결하기](../guides/troubleshooting.md#node-24-이상이-필요하다고-나올-때)에 있습니다.
+PATH에 Node가 없는 곳(Herdr가 띄우는 세션, 그래프 칸)에서는 muwi가 로그인 셸에 물어 Node를 찾고 `~/.cache/muwi/node`에 적어 둡니다. Node 버전을 바꿨다면 `muwi setup`을 다시 실행하세요. 캐시를 버리고 다시 찾습니다. 자세한 내용은 [문제 해결하기](../guides/troubleshooting.md#node-24-이상이-필요하다고-나올-때)에 있습니다.
 
 ## 플러그인이 설치하는 것
 
@@ -112,4 +112,4 @@ muwi setup --remove
 claude plugin uninstall muwi
 ```
 
-기록(`~/.muwi/`)은 남습니다. 필요 없으면 폴더를 지우세요.
+기록(`~/.muwi/`)과 Node 경로 캐시(`~/.cache/muwi/`)는 남습니다. 필요 없으면 폴더를 지우세요.

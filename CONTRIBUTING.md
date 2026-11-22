@@ -26,7 +26,7 @@ claude --plugin-dir .                     # 설치하지 않고 이 폴더를 �
 | --- | --- |
 | `.claude-plugin/` | Claude Code 플러그인 정보와 마켓 정보 |
 | `bin/muwi` | 명령. `src/cli.ts`를 Node로 실행합니다 |
-| `src/find-node.sh` | 셸 설정 없이 실행될 때도 Node 24 이상을 찾습니다 (명령과 훅이 함께 씁니다) |
+| `src/find-node.sh` | 셸 설정 없이 실행될 때 로그인 셸에 물어 Node 24 이상을 찾고 캐시합니다 (명령과 훅이 함께 씁니다) |
 | `src/cli.ts` | 명령 처리 |
 | `src/store.ts`, `src/plan.ts` | 기록 파일 읽고 쓰기, 계획 형식 확인과 비교 |
 | `src/node.ts` | 노드 상태 기록 (명령과 훅이 함께 씁니다) |

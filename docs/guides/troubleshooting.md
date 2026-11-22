@@ -29,21 +29,23 @@ Claude Code 세션에서 `muwi setup`을 실행하세요. AI에게 "muwi setup �
 
 muwi는 Node 24 이상에서 실행됩니다. Node가 낮으면 명령이 "Node 24 이상이 필요해요"라고 알리고, 세션이 시작될 때 AI에게도 알립니다.
 
-muwi는 실행할 때마다 다음 순서로 Node 24 이상을 찾습니다.
+muwi는 다음 순서로 Node 24 이상을 찾습니다.
 
 1. PATH의 `node`
-2. nvm의 기본 버전 (`nvm alias default`로 정한 버전)
-3. volta, fnm, mise, asdf의 기본 버전
-4. Homebrew와 시스템에 설치한 Node (`/opt/homebrew/bin`, `/usr/local/bin`)
-5. `muwi setup`을 실행한 Node (`~/.local/bin/muwi`로 실행할 때만)
+2. 캐시에 적어 둔 경로 (`~/.cache/muwi/node`)
+3. 로그인 셸의 PATH. 찾으면 캐시에 적습니다
+4. `muwi setup`을 실행한 Node (`~/.local/bin/muwi`로 실행할 때만)
 
-Herdr가 띄우는 세션과 그래프 칸은 셸 설정(`~/.zshrc` 같은)을 읽지 않아서 PATH에 nvm의 Node가 없습니다. 그래도 muwi는 2번에서 nvm의 기본 버전을 찾습니다. nvm의 기본 버전을 바꾸면 muwi도 따라갑니다.
+Herdr가 띄우는 세션과 그래프 칸은 셸 설정(`~/.zshrc` 같은)을 읽지 않아서, nvm이나 mise로 고른 Node가 PATH에 없습니다. 그래서 muwi는 VS Code처럼 로그인 셸(`$SHELL -ilc`)을 한 번 띄워 터미널과 같은 PATH를 받아 옵니다. 셸 설정으로 PATH를 정하는 방법이면 무엇이든 찾습니다. 셸을 띄우는 데 1초쯤 걸리므로 찾은 경로는 캐시에 적어 두고 다음부터 씁니다. 셸 설정이 10초 안에 끝나지 않으면 기다리지 않습니다.
 
-"Node 24 이상이 필요해요"가 나오면 위의 곳 중 하나에 Node 24 이상을 두세요. nvm을 쓴다면 기본 버전을 24 이상으로 정하세요.
+캐시는 다음 경우에 버립니다.
 
-```sh
-nvm alias default 24
-```
+- 캐시한 Node가 없어지거나 24보다 낮아졌을 때
+- `muwi setup`을 다시 실행했을 때
+
+**Node 버전을 바꿨다면 `muwi setup`을 다시 실행하세요.** 예를 들어 `nvm alias default 26`으로 바꿔도 전에 쓰던 버전이 남아 있으면 muwi는 그 버전을 계속 씁니다.
+
+셸에서도 Node를 찾지 못하면 그 사실을 캐시에 적고 1시간 동안 다시 묻지 않습니다. Node를 설치했다면 `muwi setup`을 다시 실행하세요.
 
 Herdr가 띄우는 세션에서 동작하는지는 이렇게 확인하세요.
 
