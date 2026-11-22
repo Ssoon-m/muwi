@@ -5,6 +5,7 @@
 // 시각을 맞춰 보며 짐작하지 않는다. 확실하지 않게 적힌 것(guess)과 관찰하지 못한 것(seen: false)은 그대로 드러낸다.
 import type { Event, NodeStatus, Plan, PlanNode, ShowIn } from './store.ts';
 import { clock, listWorks, readEvents, readPlan } from './store.ts';
+import { closedSessions } from './live.ts';
 import { readSession, sessionLabel } from './session.ts';
 
 export type SkillUse = {
@@ -68,6 +69,8 @@ export type NodeView = PlanNode & {
   offPlan?: boolean;
   seen: boolean;
   instant: boolean;
+  /** 끝나지 않았는데 이 노드를 하던 세션이 닫혔다. 하다가 멈춘 것이다 (끝났는지는 알 수 없다) */
+  closed?: boolean;
   /** 이 노드를 맡기려고 띄운 새 세션들 (muwi run). spawn은 가장 최근 것 */
   spawn?: Spawn;
   spawns: Spawn[];
@@ -76,9 +79,10 @@ export type NodeView = PlanNode & {
 };
 
 export type Change = { at: string; by: 'ai' | 'human'; why?: string; first: boolean; added: string[]; removed: string[]; changed: string[] };
-export type WorkState = 'waiting' | 'blocked' | 'doing' | 'done' | 'idle';
+/** stalled: 끝나지 않은 노드가 있는데 그 노드를 하던 세션이 모두 닫혔다 */
+export type WorkState = 'waiting' | 'blocked' | 'doing' | 'stalled' | 'done' | 'idle';
 
-export type SessionInfo = { label: string; tool: string; terminal?: string; herdrPane?: string };
+export type SessionInfo = { label: string; tool: string; terminal?: string; herdrPane?: string; /** 이 세션이 마지막으로 무언가를 적은 시각 */ seenAt?: string };
 
 export type WorkView = {
   work: string;
@@ -87,7 +91,7 @@ export type WorkView = {
   cwd?: string;
   createdAt: string;
   updatedAt: string;
-  /** waiting: 사람을 기다리는 노드가 있다 > blocked: 막힌 노드가 있다 > doing > done: 모두 끝 > idle: 노드 사이 */
+  /** waiting: 사람을 기다리는 노드가 있다 > blocked: 막힌 노드가 있다 > doing > stalled: 하던 세션이 닫혀 멈췄다 > done: 모두 끝 > idle: 노드 사이 */
   state: WorkState;
   nodes: NodeView[];
   edges: { from: string; to: string }[];
@@ -130,7 +134,10 @@ const ms = (iso: string) => Date.parse(iso);
 /** 시작과 끝 사이가 이보다 짧고 그 사이에 적힌 것이 없으면 "한꺼번에 적었다"고 본다 */
 const INSTANT_MS = 3000;
 
-export function buildView(plan: Plan, events: Event[], sessions: Record<string, SessionInfo> = {}, now: number = clock.now().getTime()): WorkView {
+/**
+ * closed: 닫힌 세션과 그 세션을 마지막으로 본 시각 (live.ts). 주지 않으면 모두 살아 있는 것으로 본다.
+ */
+export function buildView(plan: Plan, events: Event[], sessions: Record<string, SessionInfo> = {}, now: number = clock.now().getTime(), closed: Map<string, number> = new Map()): WorkView {
   const byId = new Map(plan.nodes.map(n => [n.id, n]));
   const drafts = new Map<string, Draft[]>();
   const since = new Map<string, string>();
@@ -224,8 +231,10 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
     const tries: Try[] = list.map((d, i) => {
       // 계획에서 작업 중이 아닌 노드는 열린 구간이 남아 있어도 닫는다 (기록이 한 줄 빠졌을 때)
       const running = d.openFrom !== null && n.status === 'doing' && i === list.length - 1;
-      const spentMs = d.spent + (running ? Math.max(0, now - d.openFrom!) : 0);
       const owner: Doer | undefined = d.doers[d.doers.length - 1] ?? (d.closer ? { session: d.closer } : undefined);
+      // 하던 세션이 닫혔으면 시간은 그 세션을 마지막으로 본 때까지만 센다. 닫힌 뒤로도 계속 늘어나지 않게
+      const until = running && owner?.session && closed.has(owner.session) ? Math.min(now, Math.max(d.openFrom!, closed.get(owner.session)!)) : now;
+      const spentMs = d.spent + (running ? Math.max(0, until - d.openFrom!) : 0);
       const own = [...new Set(d.doers.map(x => x.agent).filter((x): x is string => Boolean(x)))];
       const helped = [...d.helpers].filter(id => !owners.has(id));
       let who: Actor | undefined;
@@ -296,16 +305,20 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
     if (last?.who) view.who = last.who;
     // 계획과 달랐는지는 끝난 뒤에만 본다. 하는 중에는 서브에이전트가 아직 뜨지 않았을 수 있다
     if (n.run && last?.who && n.status === 'done' && n.run !== last.who.kind) view.offPlan = true;
+    if ((n.status === 'doing' || n.status === 'waiting' || n.status === 'blocked') && last?.who?.session && closed.has(last.who.session)) view.closed = true;
     if (mine.length) view.spawn = mine[mine.length - 1];
     return view;
   });
 
   const counts = { total: nodes.length, todo: 0, doing: 0, waiting: 0, blocked: 0, done: 0 };
   for (const n of nodes) counts[n.status] += 1;
+  // 작업의 상태는 살아 있는 세션이 하는 노드로 정한다. 닫힌 세션이 남긴 "나를 기다림"이 목록 맨 위에 붙어 있지 않게
+  const alive = (status: NodeStatus) => nodes.some(n => n.status === status && !n.closed);
   const state: WorkState =
-    counts.waiting ? 'waiting'
-    : counts.blocked ? 'blocked'
-    : counts.doing ? 'doing'
+    alive('waiting') ? 'waiting'
+    : alive('blocked') ? 'blocked'
+    : alive('doing') ? 'doing'
+    : nodes.some(n => n.closed) ? 'stalled'
     : counts.total > 0 && counts.done === counts.total ? 'done'
     : 'idle';
 
@@ -344,33 +357,44 @@ export function sessionsOf(dir: string, events: Event[]): Record<string, Session
     const key = e.session;
     if (!key || out[key]) continue;
     const s = readSession(dir, key);
-    out[key] = { label: sessionLabel(s, key), tool: s?.tool ?? 'unknown', ...(s?.terminal ? { terminal: s.terminal } : {}), ...(s?.herdrPane ? { herdrPane: s.herdrPane } : {}) };
+    out[key] = { label: sessionLabel(s, key), tool: s?.tool ?? 'unknown', ...(s?.terminal ? { terminal: s.terminal } : {}), ...(s?.herdrPane ? { herdrPane: s.herdrPane } : {}), ...(s?.seenAt ? { seenAt: s.seenAt } : {}) };
   }
   return out;
 }
 
-export function loadView(dir: string, work: string): WorkView | null {
+export function loadView(dir: string, work: string, env: NodeJS.ProcessEnv = process.env): WorkView | null {
   const plan = readPlan(dir, work);
   if (!plan) return null;
   const events = readEvents(dir, work);
-  return buildView(plan, events, sessionsOf(dir, events));
+  const sessions = sessionsOf(dir, events);
+  // 끝나지 않은 노드가 있을 때만 Herdr에 물어본다. 다 끝난 작업은 물어볼 것이 없다
+  const open = plan.nodes.some(n => n.status === 'doing' || n.status === 'waiting' || n.status === 'blocked');
+  const closed = open ? closedSessions(sessions, Object.keys(sessions), env) : new Map<string, number>();
+  return buildView(plan, events, sessions, clock.now().getTime(), closed);
 }
 
-const ORDER: Record<WorkState, number> = { waiting: 0, blocked: 1, doing: 2, idle: 3, done: 4 };
+const ORDER: Record<WorkState, number> = { waiting: 0, blocked: 1, doing: 2, stalled: 3, idle: 4, done: 5 };
+/** 이만큼 지나도록 바뀐 것이 없으면 "지난 작업"으로 접는다. 지우지는 않는다 */
+export const PAST_DAYS = 7;
 
 export type WorkSummary = Pick<WorkView, 'work' | 'title' | 'request' | 'state' | 'updatedAt' | 'counts'> & {
-  /** 지금 눈여겨볼 노드들: 사람을 기다리는 것, 막힌 것, 하는 중인 것 */
-  active: { id: string; title: string; status: NodeStatus; note?: string }[];
+  /** 지금 눈여겨볼 노드들: 사람을 기다리는 것, 막힌 것, 하는 중인 것. closed: 그 노드를 하던 세션이 닫혔다 */
+  active: { id: string; title: string; status: NodeStatus; note?: string; closed?: boolean }[];
+  /** 지난 작업: 끝났거나 멈춘 채로 오래됐다. 목록에서 접어 둔다 */
+  past: boolean;
 };
 
-/** 모든 작업을 급한 순서로: 나를 기다림 → 막힘 → 작업 중 → 노드 사이 → 끝. 같은 상태면 최근 것이 위 */
-export function loadBoard(dir: string): { works: WorkSummary[]; errors: { work: string; message: string }[] } {
+/** 모든 작업을 급한 순서로: 나를 기다림 → 막힘 → 작업 중 → 멈춤 → 노드 사이 → 끝. 같은 상태면 최근 것이 위 */
+export function loadBoard(dir: string, env: NodeJS.ProcessEnv = process.env): { works: WorkSummary[]; errors: { work: string; message: string }[] } {
   const works: WorkSummary[] = [];
   const errors: { work: string; message: string }[] = [];
+  const now = clock.now().getTime();
   for (const work of listWorks(dir)) {
     try {
-      const v = loadView(dir, work);
+      const v = loadView(dir, work, env);
       if (!v) continue;
+      // 살아 있는 세션이 하고 있는 작업은 오래돼도 접지 않는다
+      const quiet = v.state === 'done' || v.state === 'stalled' || v.state === 'idle';
       works.push({
         work: v.work,
         title: v.title,
@@ -380,7 +404,8 @@ export function loadBoard(dir: string): { works: WorkSummary[]; errors: { work: 
         counts: v.counts,
         active: v.nodes
           .filter(n => n.status === 'waiting' || n.status === 'blocked' || n.status === 'doing')
-          .map(n => ({ id: n.id, title: n.title, status: n.status, ...(n.note ? { note: n.note } : {}) })),
+          .map(n => ({ id: n.id, title: n.title, status: n.status, ...(n.note ? { note: n.note } : {}), ...(n.closed ? { closed: true } : {}) })),
+        past: quiet && now - Date.parse(v.updatedAt) > PAST_DAYS * 86_400_000,
       });
     } catch (e: any) {
       errors.push({ work, message: e?.message ?? String(e) });

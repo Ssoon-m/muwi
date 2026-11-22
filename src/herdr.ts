@@ -1,11 +1,16 @@
 // Herdr와 이야기하는 곳. 세션을 띄우고 기다리는 것은 hc가, 화면에 놓는 것은 herdr-app이 한다.
 // muwi는 그 둘을 부르기만 한다. 세션을 관리하는 기능을 다시 만들지 않는다.
 import { spawnSync } from 'node:child_process';
+import path from 'node:path';
 
 export type Ran = { ok: boolean; out: string; err: string };
 
 function call(bin: string, args: string[], env: NodeJS.ProcessEnv, timeout: number): Ran {
-  const r = spawnSync(bin, args, { encoding: 'utf8', env, timeout });
+  let r = spawnSync(bin, args, { encoding: 'utf8', env, timeout });
+  // Herdr 앱이 띄운 프로그램에는 셸의 PATH가 없다. 그래프 칸이 muwi를 부를 때가 그렇다. 설치되는 자리에서 한 번 더 찾는다
+  if ((r.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT' && !bin.includes('/') && env.HOME) {
+    r = spawnSync(path.join(env.HOME, '.local', 'bin', bin), args, { encoding: 'utf8', env, timeout });
+  }
   return { ok: !r.error && r.status === 0, out: r.stdout ?? '', err: (r.stderr ?? '') || (r.error ? String(r.error.message) : '') };
 }
 
@@ -16,6 +21,8 @@ export const herdrApp = (args: string[], env: NodeJS.ProcessEnv = process.env, t
 
 export const LABEL_WORK = 'muwi.work';
 export const LABEL_NODE = 'muwi.node';
+/** 그 터미널에서 지금 도는 세션. 세션이 시작될 때 붙인다. 같은 터미널에서 다른 대화가 시작되면 바뀐다 */
+export const LABEL_SESSION = 'muwi.session';
 
 /** 이 터미널이 muwi run으로 뜬 것이면 맡은 작업과 노드를 돌려준다. 띄울 때 터미널에 붙여 둔 라벨에서 읽는다 */
 export function spawnedFor(terminal: string, env: NodeJS.ProcessEnv = process.env): { work: string; node: string } | null {

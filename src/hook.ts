@@ -12,7 +12,7 @@ import path from 'node:path';
 import { appendEvent, nowIso, readConfig, readEvents, readPlan } from './store.ts';
 import type { PlanNode } from './store.ts';
 import { attach, isSettled, markSettled, readSession, recordSkill, sessionKey, touchSession, unsettle, whereNow } from './session.ts';
-import { spawnedFor } from './herdr.ts';
+import { LABEL_SESSION, hc, spawnedFor } from './herdr.ts';
 import { markNode } from './node.ts';
 import { instructionText } from './setup.ts';
 
@@ -208,6 +208,9 @@ export function handleHook(payload: any, dir: string, mode: 'record' | 'guard' |
 
   if (event === 'SessionStart') {
     const session = touchSession(dir, key, patch, env);
+    // 이 터미널에서 지금 도는 세션이 누구인지 붙여 둔다. 나중에 "그 세션이 아직 살아 있나"를 볼 때 쓴다.
+    // 같은 터미널에서 /clear 하거나 새로 띄우면 여기서 새 이름으로 바뀌고, 앞 세션은 닫힌 것으로 보인다
+    if (env.HC_TERMINAL_ID) hc(['label', env.HC_TERMINAL_ID, `${LABEL_SESSION}=${key}`], env, 3000);
     // 대화가 요약되면 앞에서 읽은 skill 내용이 흐려질 수 있다. 기록에 남겨 두면 나중에 원인을 볼 때 단서가 된다
     if (payload.source === 'compact' && session.work && readPlan(dir, session.work)) {
       appendEvent(dir, session.work, { type: 'session', what: 'compact' }, key);
