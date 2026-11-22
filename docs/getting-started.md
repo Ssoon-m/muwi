@@ -16,9 +16,9 @@ muwi를 설치하고, AI에게 일을 하나 맡겨서 그 진행을 그래프�
 | --- | --- |
 | Claude Code | 터미널에서 `claude --version` |
 | [Herdr 앱](https://herdr.dev) | 앱을 열고, 그 안의 터미널에서 진행합니다 |
-| Node 24 이상 | `node -v`, 그리고 `hc exec 'node -v'` |
+| Node 24 이상 | `node -v` |
 
-Node는 두 곳에서 모두 24 이상이어야 합니다. `hc exec 'node -v'`는 Herdr가 띄우는 프로그램에 잡히는 Node를 보여 줍니다. nvm처럼 셸 설정으로 Node를 고르면 이 값이 터미널과 다를 수 있습니다. 낮게 나오면 [문제 해결하기](guides/troubleshooting.md#node-24-이상이-필요하다고-나올-때)를 보세요.
+nvm으로 Node를 고른다면 nvm의 기본 버전(`nvm alias default`)이 24 이상이어야 합니다. Herdr가 띄우는 세션은 셸 설정을 읽지 않아서, muwi가 nvm의 기본 버전을 직접 찾아 씁니다. muwi가 Node를 찾는 순서는 [문제 해결하기](guides/troubleshooting.md#node-24-이상이-필요하다고-나올-때)에 있습니다.
 
 ## 1. 플러그인 설치하기
 
