@@ -10,7 +10,7 @@ muwi가 무엇을 어디에 설치하는지, 설정으로 무엇을 바꿀 수 �
 | Node | 24 이상. 빌드나 `npm install`은 필요 없습니다 |
 | [Herdr 앱](https://herdr.dev) | 그래프를 보거나 새 세션을 띄울 때 필요합니다 |
 
-Node는 터미널, Claude Code가 훅을 실행하는 환경, Herdr가 띄우는 세션에서 모두 24 이상이어야 합니다. 확인 방법은 [문제 해결하기](../guides/troubleshooting.md#node-24-이상이-필요하다고-나올-때)에 있습니다.
+PATH에 Node가 없는 곳(Herdr가 띄우는 세션, 그래프 칸)에서는 muwi가 nvm 같은 버전 관리 도구의 기본 버전을 직접 찾습니다. 찾는 순서와 확인 방법은 [문제 해결하기](../guides/troubleshooting.md#node-24-이상이-필요하다고-나올-때)에 있습니다.
 
 ## 플러그인이 설치하는 것
 

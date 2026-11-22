@@ -7,7 +7,7 @@ muwi가 기대대로 동작하지 않을 때 증상별로 원인과 해결 방�
 ```sh
 muwi --version                    # 터미널용 명령이 있는지
 claude plugin list | grep muwi    # 플러그인이 켜져 있는지
-node -v && hc exec 'node -v'      # 두 곳 모두 24 이상인지
+hc exec '$HOME/.local/bin/muwi --version'   # Herdr가 띄우는 세션에서도 실행되는지
 ```
 
 ## 그래프 칸에 "기록을 읽지 못했어요"가 나올 때
@@ -29,15 +29,27 @@ Claude Code 세션에서 `muwi setup`을 실행하세요. AI에게 "muwi setup �
 
 muwi는 Node 24 이상에서 실행됩니다. Node가 낮으면 명령이 "Node 24 이상이 필요해요"라고 알리고, 세션이 시작될 때 AI에게도 알립니다.
 
-`node`가 24 이상이어야 하는 곳은 세 군데입니다.
+muwi는 실행할 때마다 다음 순서로 Node 24 이상을 찾습니다.
 
-| 곳 | 확인하는 방법 |
-| --- | --- |
-| 터미널 | `node -v` |
-| Claude Code가 훅을 실행하는 환경 | Claude Code를 실행한 터미널의 `node -v` |
-| Herdr가 띄우는 세션 | `hc exec 'node -v'` |
+1. PATH의 `node`
+2. nvm의 기본 버전 (`nvm alias default`로 정한 버전)
+3. volta, fnm, mise, asdf의 기본 버전
+4. Homebrew와 시스템에 설치한 Node (`/opt/homebrew/bin`, `/usr/local/bin`)
+5. `muwi setup`을 실행한 Node (`~/.local/bin/muwi`로 실행할 때만)
 
-Herdr가 띄우는 세션은 셸 설정을 읽지 않습니다. nvm으로 Node를 고르면 터미널에서는 24여도 `hc exec 'node -v'`는 낮게 나올 수 있습니다. 셸 설정 없이도 잡히는 Node(예: volta의 기본 버전, 시스템에 설치한 Node)를 24 이상으로 올리세요.
+Herdr가 띄우는 세션과 그래프 칸은 셸 설정(`~/.zshrc` 같은)을 읽지 않아서 PATH에 nvm의 Node가 없습니다. 그래도 muwi는 2번에서 nvm의 기본 버전을 찾습니다. nvm의 기본 버전을 바꾸면 muwi도 따라갑니다.
+
+"Node 24 이상이 필요해요"가 나오면 위의 곳 중 하나에 Node 24 이상을 두세요. nvm을 쓴다면 기본 버전을 24 이상으로 정하세요.
+
+```sh
+nvm alias default 24
+```
+
+Herdr가 띄우는 세션에서 동작하는지는 이렇게 확인하세요.
+
+```sh
+hc exec '$HOME/.local/bin/muwi --version'
+```
 
 ## 읽은 skill을 볼 수 없었다고 나올 때
 
@@ -59,7 +71,7 @@ Herdr가 띄우는 세션은 셸 설정을 읽지 않습니다. nvm으로 Node�
 새 세션은 시작될 때 훅이 맡은 노드에 붙입니다. 훅이 실행되지 않으면 붙지 않습니다.
 
 1. 그 세션이 폴더 신뢰 확인에서 멈춰 있지 않은지 보세요.
-2. `hc exec 'node -v'`가 24 이상인지 확인하세요.
+2. `hc exec '$HOME/.local/bin/muwi --version'`이 버전을 출력하는지 확인하세요.
 3. 그 세션에서 직접 붙일 수도 있습니다: `muwi node <노드 id> start --work <작업>`
 
 ## "어느 작업인지 알 수 없어요"가 나올 때
