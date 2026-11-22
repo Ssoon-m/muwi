@@ -1,0 +1,4 @@
+interface:
+  display_name: "Muwi"
+  short_description: "AI가 짠 작업 계획과 진행을 muwi로 기록하고, 기록에서 문제 지점을 찾아 고치기"
+  default_prompt: "$muwi 방금 작업이 왜 그렇게 됐는지 기록을 보고 진단해줘."
