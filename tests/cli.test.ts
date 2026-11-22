@@ -220,3 +220,13 @@ test('hook.sh: 볼 것만 넘기고, 세션 시작에는 지침을 돌려준다'
   fs.writeFileSync(path.join(dir, '.sessions', 's1.ok'), '');
   assert.equal(hook(edit, 'nudge'), '');
 });
+
+test('출력을 받는 쪽이 먼저 닫아도 (muwi show | head) 오류를 쏟지 않는다', () => {
+  const { dir, cwd, muwi } = bench();
+  const nodes = Array.from({ length: 60 }, (_, i) => ({ id: `n${i}`, title: `노드 ${i}`, ...(i ? { after: [`n${i - 1}`] } : {}) }));
+  assert.equal(muwi(['plan', '--work', 'long-1', '--request', '긴 작업', JSON.stringify({ title: '긴 작업', nodes })]).code, 0);
+  const env = { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir, MUWI_SESSION: 'lead' };
+  const r = spawnSync('sh', ['-c', `"${process.execPath}" "${CLI}" show long-1 | head -1`], { env, cwd, encoding: 'utf8' });
+  assert.equal(r.stdout.trim().split('\n').length, 1);
+  assert.doesNotMatch(r.stderr, /EPIPE|Unhandled/);
+});

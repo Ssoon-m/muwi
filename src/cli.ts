@@ -59,6 +59,12 @@ class Fail extends Error {
 
 const out = (s: string) => process.stdout.write(s + '\n');
 
+// `muwi show | head`처럼 받는 쪽이 먼저 닫으면 조용히 끝낸다
+process.stdout.on('error', (e: NodeJS.ErrnoException) => {
+  if (e.code === 'EPIPE') process.exit(0);
+  throw e;
+});
+
 const VALUED = new Set(['work', 'request', 'title', 'why', 'by', 'file', 'after', 'before', 'result']);
 
 function parseArgs(argv: string[]) {
