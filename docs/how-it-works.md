@@ -94,5 +94,3 @@ skill을 읽고도 무시했는지, 읽지 않았지만 맞게 했는지는 기�
 노드 상태는 `todo`(아직), `doing`(작업 중), `waiting`(나를 기다림), `blocked`(막힘), `done`(끝)입니다. 다시 하는 일은 되돌아가는 선으로 그리지 않고, 같은 노드를 다시 시작해 회차로 남깁니다.
 
 세션마다 `~/.muwi/.sessions/<세션>.json`에 붙어 있는 작업, 읽은 skill, Herdr 터미널 주소를 적어 둡니다. `muwi` 명령은 환경 변수(`CLAUDE_CODE_SESSION_ID`)에서, 훅은 Claude Code가 넘겨주는 `session_id`에서 같은 세션 이름을 얻습니다. AI가 적은 "노드 시작"과 훅이 적은 "skill 읽음"을 이 이름으로 잇습니다.
-
-기록 폴더의 `.node`에는 muwi를 실행했던 Node의 경로를 적어 둡니다. 셸 설정을 읽지 않는 곳(Herdr가 띄운 세션의 훅)에서는 낮은 버전의 Node가 잡힐 수 있어서, `bin/muwi`가 이 경로를 먼저 씁니다.

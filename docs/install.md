@@ -1,6 +1,15 @@
 # 설치
 
-Node 22.18 이상이 필요합니다. 빌드나 `npm install`은 없습니다. muwi는 한 번 실행된 Node의 경로를 기억해서(`~/.muwi/.node`), 셸 설정을 읽지 않는 곳에서 낮은 버전의 Node가 잡혀도 그 Node로 실행됩니다.
+Node 24(LTS) 이상이 필요합니다. 빌드나 `npm install`은 없습니다.
+
+`node`가 24 이상으로 잡혀야 하는 곳은 세 군데입니다: Claude Code가 훅을 실행하는 환경, Claude Code의 Bash 도구, Herdr가 띄우는 세션. nvm처럼 셸 설정으로만 Node를 고르면 Herdr가 띄운 세션에는 다른 Node가 잡힐 수 있습니다. 확인은 이렇게 합니다.
+
+```sh
+node -v             # 지금 터미널
+hc exec 'node -v'   # Herdr가 띄우는 프로그램
+```
+
+Node가 낮으면 muwi는 실행되지 않습니다. 명령은 "Node 24 이상이 필요해요"라고 알리고, 세션이 시작될 때 훅이 그 세션에 한 번 알려 줍니다.
 
 ## Claude Code 플러그인
 

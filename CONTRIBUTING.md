@@ -2,7 +2,7 @@
 
 ## 준비
 
-Node 22.18 이상이 필요합니다. TypeScript를 Node로 바로 실행하므로 빌드 단계와 의존 패키지가 없습니다.
+Node 24 이상이 필요합니다. TypeScript를 Node로 바로 실행하므로 빌드 단계와 의존 패키지가 없습니다. 개발과 CI도 Node 24 기준입니다.
 
 ```sh
 git clone https://github.com/Ssoon-m/muwi.git

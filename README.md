@@ -23,7 +23,7 @@ muwi는 순서를 강제하지 않고, 결과 형식을 검사하지 않고, ski
 
 ## 설치
 
-Node 22.18 이상이 필요합니다.
+Node 24 이상이 필요합니다.
 
 ```sh
 claude plugin install muwi --marketplace Ssoon-m/muwi
