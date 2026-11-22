@@ -1,0 +1,6 @@
+#!/bin/sh
+# muwi 명령. TypeScript를 빌드 없이 Node로 바로 실행한다 (Node 22.18 이상).
+# Claude Code 플러그인으로 받으면 이 폴더가 Bash 도구의 PATH에 들어간다.
+# 터미널에서도 쓰려면 muwi setup을 한 번 실행한다.
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+exec node --disable-warning=ExperimentalWarning "$ROOT/src/cli.ts" "$@"
