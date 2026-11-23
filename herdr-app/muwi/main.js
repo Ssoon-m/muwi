@@ -110,6 +110,8 @@ function roundPath(b, pts, r) {
   return b.line_to(lx, ly);
 }
 
+/** 이어 하기 버튼을 누른 뒤 이만큼은 다시 누르지 못하게 한다 (반응이 없어 보여 여러 번 눌러 탭이 여럿 뜨지 않게) */
+const OPENING_MS = 3000;
 /** Claude 세션 id 모양. 이 모양이면 claude --resume <id>로 그 대화를 다시 열 수 있다 */
 const CLAUDE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SAMPLE_CLOSED = "0f0e0d0c-0b0a-4909-8807-060504030201";
@@ -152,6 +154,7 @@ const SAMPLE = (() => {
       gone: [{ at: "2026-01-01T00:00:00.000Z", id: "lint", title: "lint", status: "todo", why: "견본" }],
       changes: [{ at: "2026-01-01T00:00:00.000Z", by: "human", why: "견본", first: false, added: ["pr"], removed: [], changed: [] }],
       sessions: { s1: { label: "t1", tool: "claude", terminal: "t1" }, [SAMPLE_CLOSED]: { label: "t2", tool: "claude", terminal: "t2", cwd: "/tmp/sample repo" } },
+      resumable: [SAMPLE_CLOSED], exists: { "/tmp/sample repo": true },
       layout: {
         width: 840, height: 118,
         nodes: nodes.map((n, i) => ({ id: n.id, x: 28 + i * 280, y: 28, w: 224, h: 62 })),
@@ -234,8 +237,8 @@ export default class Muwi extends View {
       if (this.stale || Date.now() - this.lastLoad > 15000) {
         this.stale = false;
         this.load(cx);
-      } else if (this.ticking()) {
-        cx.notify(); // 진행 중인 노드의 작업 시간을 초마다 늘린다
+      } else if (this.ticking() || (this.opening && Date.now() - this.opening.at < OPENING_MS + 1000)) {
+        cx.notify(); // 진행 중인 노드의 작업 시간을 초마다 늘리고, "여는 중…"을 제때 푼다
       }
     });
     // 키보드가 다른 터미널로 옮겨 가면 곧바로 그 작업으로 바꾼다 (그리는 중에는 공유 상태를 바꾸지 않는다)
@@ -618,10 +621,14 @@ export default class Muwi extends View {
     const key = n.session ?? null;
     const s = key ? view.sessions?.[key] : null;
     const unstarted = !key && Boolean(n.spawn);
-    const folder = s?.cwd ?? (unstarted ? n.spawn.cwd : null) ?? view.cwd ?? null;
+    // 그 세션이 일하던 폴더. 없어졌으면(worktree를 지웠다) 작업 폴더에서 연다. 없는 폴더에서는 터미널이 뜨지 않는다
+    const want = s?.cwd ?? (unstarted ? n.spawn.cwd : null) ?? null;
+    const folder = [want, view.cwd].find((p) => this.folderOk(view, p)) ?? null;
+    const moved = want && !this.folderOk(view, want) ? want : null;
     const tool = s?.tool === "codex" ? "codex" : "claude";
     const buttons = [];
-    if (s?.tool === "claude" && CLAUDE_ID.test(key)) {
+    // 대화 파일이 남아 있고 그 폴더가 그대로일 때만 다시 열 수 있다 (아니면 claude가 "No conversation found"로 끝난다)
+    if (s?.tool === "claude" && CLAUDE_ID.test(key) && (view.resumable ?? []).includes(key) && !moved) {
       buttons.push(this.openRow(t, `resume-${n.id}`, "하던 대화 다시 열기", "전에 하던 대화 내용이 그대로 남아 있어요", ["claude", "--resume", key], folder, n.id));
     }
     if (n.status !== "done") {
@@ -633,24 +640,34 @@ export default class Muwi extends View {
     const rows = [
       ...(unstarted ? [note("맡긴 세션이 일을 시작하기 전에 닫혔어요")] : []),
       ...buttons,
-      ...(folder ? [note(`누르면 ${this.shortPath(folder)}에서 새 탭으로 열려요`)] : []),
+      ...(moved ? [note(`원래 폴더(${this.shortPath(moved)})가 없어져서 ${folder ? `${this.shortPath(folder)}에서` : "기본 폴더에서"} 새 탭으로 열려요`)]
+        : folder ? [note(`누르면 ${this.shortPath(folder)}에서 새 탭으로 열려요`)] : []),
     ];
     return { rows, choices: buttons.length };
   }
 
+  /** 그 폴더가 아직 있는가. muwi board가 알려 준 것을 쓰고, 모르면 있다고 본다 */
+  folderOk(view, p) {
+    return Boolean(p) && view.exists?.[p] !== false;
+  }
+
   /** 누르면 그 폴더에서 새 탭으로 여는 버튼과, 그 아래 무엇이 열리는지 한 줄 */
   openRow(t, id, text, about, argv, folder, name) {
+    const busy = this.opening?.id === id && Date.now() - this.opening.at < OPENING_MS;
     return v_flex().gap(3)
       .child(h_flex().child(h_flex().id(`open-${id}`).h(26).px(10).flex_none().items_center().rounded(6).bg(t.raised).border_1().border_color(t.border)
-        .text_size(11.5).text_color(t.foreground).cursor_pointer().hover((st) => st.bg(t.hover))
-        .on_click(() => this.openTerminal(argv, folder, name))
-        .child(text)))
+        .text_size(11.5).text_color(busy ? t.dim : t.foreground)
+        .when(!busy, (el) => el.cursor_pointer().hover((st) => st.bg(t.hover)))
+        .on_click((_e, cx) => { this.openTerminal(id, argv, folder, name); cx.notify(); })
+        .child(busy ? "여는 중…" : text)))
       .child(div().text_size(10.5).text_color(t.dim).child(about));
   }
 
-  /** 새 탭에서 명령을 연다 (그 세션이 일하던 폴더에서) */
-  openTerminal(argv, folder, name) {
+  /** 새 탭에서 명령을 연다 (그 세션이 일하던 폴더에서). 연달아 눌러도 한 번만 연다 */
+  openTerminal(id, argv, folder, name) {
     if (checking()) return;
+    if (this.opening?.id === id && Date.now() - this.opening.at < OPENING_MS) return;
+    this.opening = { id, at: Date.now() };
     run("terminal.open", { argv, ...(folder ? { folder } : {}), ...(name ? { name } : {}) });
   }
 
@@ -1290,8 +1307,10 @@ export default class Muwi extends View {
           .children(loose.map((f) => line(`⚑ ${f.text}`, t.blocked)))))
         .when(view.state === "stalled", (el) => el.child(v_flex().gap(8).child(label("이어서 하려면"))
           .child(div().text_size(10.5).text_color(t.dim).child("하던 세션이 모두 닫혔어요"))
-          .child(this.openRow(t, "continue-work", "새 대화로 이어 가기", "muwi 기록(계획·결과)을 읽고 멈춘 노드부터 이어 가요", ["claude", `${view.work} 작업 이어서 해줘`], view.cwd ?? null, view.work))
-          .when(Boolean(view.cwd), (el2) => el2.child(div().text_size(10.5).text_color(t.dim).child(`누르면 ${this.shortPath(view.cwd)}에서 새 탭으로 열려요`)))));
+          .child(this.openRow(t, "continue-work", "새 대화로 이어 가기", "muwi 기록(계획·결과)을 읽고 멈춘 노드부터 이어 가요", ["claude", `${view.work} 작업 이어서 해줘`],
+            this.folderOk(view, view.cwd) ? view.cwd : null, view.work))
+          .when(Boolean(view.cwd), (el2) => el2.child(div().text_size(10.5).text_color(t.dim).child(this.folderOk(view, view.cwd)
+            ? `누르면 ${this.shortPath(view.cwd)}에서 새 탭으로 열려요` : `작업 폴더(${this.shortPath(view.cwd)})가 없어져서 기본 폴더에서 새 탭으로 열려요`)))));
     }
 
     const color = n.closed ? t.muted : c[n.status];

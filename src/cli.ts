@@ -10,6 +10,7 @@ import { ROOT, handleHook } from './hook.ts';
 import { markNode } from './node.ts';
 import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
 import { attach, markSettled, readSession, recentSessions, sessionKey, sessionLabel, touchSession } from './session.ts';
+import { resumeFacts } from './resume.ts';
 import { checkMod, newestPlugin, olderThan, refreshSetup, removeSetup, runSetup } from './setup.ts';
 import { GRAPH_AT, ScreenError, applyLayout, removeLayout, screenState, type GraphAt, type Screen } from './screen.ts';
 import {
@@ -582,7 +583,8 @@ async function cmdBoard(a: Args, dir: string) {
   if (pick) {
     const v = loadView(dir, pick);
     // 그래프 칸이 세로로 길면 위→아래로 그린다 (--down)
-    if (v) selected = await withLayout(v, a.flags.down ? 'down' : 'right');
+    // 닫힌 세션을 이어 하는 버튼에 쓸 것(폴더가 있는가, Claude 대화를 다시 열 수 있는가)도 함께 넘긴다
+    if (v) selected = { ...(await withLayout(v, a.flags.down ? 'down' : 'right')), ...resumeFacts(v) };
   }
   // 그래프 칸이 Herdr 터미널과 작업을 잇는 데 쓴다 (지금 보는 탭의 작업 따라가기, 계획 없는 세션 가려내기)
   const sessions = recentSessions(dir, Date.now() - PAST_DAYS * 86_400_000);
