@@ -9,7 +9,7 @@ import { View, div, svg, image, PathBuilder } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import {
   exec, home, theme, watchFolder, checking, shared, setShared, agents, panes, terminals, focused, updates, run, notify,
-  layout as shownLayout, props as blockProps, window as appWindow,
+  layout as shownLayout, props as blockProps, window as appWindow, settings,
 } from "herdr";
 
 const SELECTED = "muwi.selected";
@@ -18,6 +18,25 @@ const PICKED = "muwi.picked";
 const PLACE_NAME = { bottom: "아래", top: "위", right: "오른쪽" };
 /** 오른쪽 기록 칸의 가장 좁은 너비 */
 const DETAIL_MIN = 220;
+
+/**
+ * Herdr 화면 배율(설정의 zoom). 칸 안에 놓는 길이(left·w 같은 것)는 이 배율이 곱해져 그려지는데,
+ * 크기 변화(on_size_change)와 마우스 위치는 화면에 보이는 픽셀로 온다. 보이는 픽셀을 이 배율로 나눠야 같은 단위가 된다.
+ * 나누지 않으면 배율이 0.9일 때 칸을 10% 좁게 알아서, 오른쪽·아래 끝에 걸친 노드를 칸 밖으로 보고 그리지 않는다
+ */
+function uiZoom() {
+  try {
+    const z = Number(settings()?.zoom);
+    return Number.isFinite(z) && z > 0 ? z : 1;
+  } catch {
+    return 1;
+  }
+}
+/** 보이는 픽셀로 잰 크기를 칸 안에 놓는 길이의 단위로 바꾼다 */
+const unzoom = (s) => {
+  const z = uiZoom();
+  return { width: s.width / z, height: s.height / z };
+};
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const STATE_NAME = { waiting: "응답 대기", blocked: "막힘", doing: "작업 중", stalled: "멈춤", done: "끝", idle: "노드 사이" };
 const STATUS_NAME = { todo: "아직", doing: "작업 중", waiting: "응답 대기", blocked: "막힘", done: "끝" };
@@ -185,7 +204,8 @@ export default class Muwi extends View {
     this.tab = "work";
     /** 좁은 칸(기록이 그래프 아래)에서 기록을 폈는가. 넓은 칸은 늘 펴 둔다 */
     this.drawer = false;
-    this.size = { width: 900, height: 400 };
+    /** 칸 전체 크기, 보이는 픽셀. 쓸 때는 배율을 뺀 size를 쓴다 */
+    this.sizePx = { width: 900, height: 400 };
     this.loading = false;
     this.again = false;
     this.watching = false;
@@ -193,7 +213,8 @@ export default class Muwi extends View {
     this.pan = { x: 0, y: 0 };
     this.zoom = 1;
     this.press = null;
-    this.canvasSize = null;
+    /** 그래프를 그리는 곳의 크기, 보이는 픽셀. 쓸 때는 배율을 뺀 canvasSize를 쓴다 */
+    this.canvasPx = null;
     this.focusKey = null;
     this.stale = false;
     this.showPast = false;
@@ -266,6 +287,16 @@ export default class Muwi extends View {
   variant() {
     const v = (blockProps() ?? {}).variant;
     return v === "list" || v === "graph" ? v : "full";
+  }
+
+  /** 칸 전체 크기. 칸 안에 놓는 길이와 같은 단위다 (Herdr 배율을 뺐다) */
+  get size() {
+    return unzoom(this.sizePx);
+  }
+
+  /** 그래프를 그리는 곳의 크기. 칸 안에 놓는 길이와 같은 단위다. 아직 모르면 null */
+  get canvasSize() {
+    return this.canvasPx ? unzoom(this.canvasPx) : null;
   }
 
   /** 그래프를 위→아래로 그릴까: 칸이 세로로 길 때. 크기를 모르면 그래프 칸이 터미널 오른쪽에 있는지로 짐작한다 */
@@ -501,8 +532,8 @@ export default class Muwi extends View {
     const view = this.planless ? null : loaded;
     const root = v_flex().id("root").size_full().min_h(0).text_color(t.foreground).text_size(12)
       .on_size_change((size, cx) => {
-        if (Math.abs(size.width - this.size.width) > 1 || Math.abs(size.height - this.size.height) > 1) {
-          this.size = { width: size.width, height: size.height };
+        if (Math.abs(size.width - this.sizePx.width) > 1 || Math.abs(size.height - this.sizePx.height) > 1) {
+          this.sizePx = { width: size.width, height: size.height };
           cx.notify();
         }
       })
@@ -510,7 +541,7 @@ export default class Muwi extends View {
       .on_mouse_move((e, cx) => {
         if (!this.resizing) return;
         const max = Math.max(DETAIL_MIN, Math.min(900, this.size.width - 360));
-        const w = Math.round(Math.max(DETAIL_MIN, Math.min(max, this.resizing.w + (this.resizing.x - e.position.x))));
+        const w = Math.round(Math.max(DETAIL_MIN, Math.min(max, this.resizing.w + (this.resizing.x - e.position.x) / uiZoom())));
         if (w !== this.detailW) {
           this.detailW = w;
           cx.notify();
@@ -1182,7 +1213,8 @@ export default class Muwi extends View {
 
     // 작업이 바뀌거나, 지금 일어나는 곳이 바뀌거나, 계획의 모양이 바뀌면 다시 맞춘다
     const live = view.nodes.filter((n) => n.status === "doing" || n.status === "waiting" || n.status === "blocked").map((n) => n.id).join(",");
-    const focus = `${view.work}|${live}|${L.width}x${L.height}|${L.nodes.length}`;
+    // Herdr 배율을 바꿔도 다시 맞춘다 (칸 크기를 재는 단위가 바뀐다)
+    const focus = `${view.work}|${live}|${L.width}x${L.height}|${L.nodes.length}|${uiZoom()}`;
     if (this.canvasSize && this.focusKey !== focus) {
       this.focusKey = focus;
       this.centerOn(view);
@@ -1277,15 +1309,15 @@ export default class Muwi extends View {
     const layer = paths.map((q) => window.paint_path(q.path, q.color).absolute().left(0).top(0).w(cw).h(ch));
     return div().id("canvas").relative().flex_1().min_h(0).overflow_hidden().bg(t.canvas)
       .on_size_change((size, cx) => {
-        const old = this.canvasSize;
+        const old = this.canvasPx;
         if (!old || Math.abs(old.width - size.width) > 1 || Math.abs(old.height - size.height) > 1) {
-          this.canvasSize = { width: size.width, height: size.height };
+          this.canvasPx = { width: size.width, height: size.height };
           this.focusKey = null; // 크기가 바뀌면 다시 맞춘다
           // 칸이 가로로 길다가 세로로 길어졌으면(또는 반대) 흐름 방향을 바꿔 다시 읽는다
           if (this.loadedDown !== null && this.wantsDown() !== this.loadedDown) this.stale = true;
           // 칸 크기를 모른 채 읽었거나 크기가 크게 바뀌었으면, 그 크기에 맞춰 다시 배치한다 (긴 그래프를 접는 줄 수가 달라진다)
-          const f = this.loadedFit;
-          if (this.data?.selected && (!f || Math.abs(size.width - f.w) > f.w * 0.15 || Math.abs(size.height - f.h) > f.h * 0.15)) this.stale = true;
+          const f = this.loadedFit, s = this.canvasSize;
+          if (this.data?.selected && (!f || Math.abs(s.width - f.w) > f.w * 0.15 || Math.abs(s.height - f.h) > f.h * 0.15)) this.stale = true;
           cx.notify();
         }
       })
@@ -1295,7 +1327,9 @@ export default class Muwi extends View {
       .on_mouse_move((e, cx) => {
         if (!this.press) return;
         if (Math.abs(e.position.x - this.press.x) + Math.abs(e.position.y - this.press.y) > 3) this.press.moved = true;
-        this.pan = { x: this.press.px + e.position.x - this.press.x, y: this.press.py + e.position.y - this.press.y };
+        // 마우스는 보이는 픽셀로 온다. 배율로 나눠야 그래프가 커서를 그대로 따라온다
+        const k = uiZoom();
+        this.pan = { x: this.press.px + (e.position.x - this.press.x) / k, y: this.press.py + (e.position.y - this.press.y) / k };
         this.clampPan(L);
         cx.notify();
       })
@@ -1311,11 +1345,13 @@ export default class Muwi extends View {
       .on_hover((hovered, cx) => { if (!hovered && this.press) { this.press = null; cx.notify(); } })
       .on_scroll_wheel((e, cx) => {
         if (e.modifiers.platform || e.modifiers.control) {
-          const local = e.local_position ?? { x: cw / 2, y: ch / 2 };
+          const k = uiZoom();
+          const local = e.local_position ? { x: e.local_position.x / k, y: e.local_position.y / k } : { x: cw / 2, y: ch / 2 };
           // 휠을 위로 굴리면 확대, 아래로 굴리면 축소 (브라우저·지도와 같은 방향)
           this.zoomBy(Math.exp(Math.max(-60, Math.min(60, e.delta.y)) * 0.004), local, L);
         } else {
-          this.pan = { x: this.pan.x + e.delta.x, y: this.pan.y + e.delta.y };
+          const k = uiZoom();
+          this.pan = { x: this.pan.x + e.delta.x / k, y: this.pan.y + e.delta.y / k };
           this.clampPan(L);
         }
         cx.notify();
