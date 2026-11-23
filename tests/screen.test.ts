@@ -68,6 +68,21 @@ test('레이아웃에 muwi 칸 넣기: Agents 자리에 작업 목록, 터미널
   assert.equal(hasMuwi(MAIN), false);
 });
 
+test('레이아웃에 muwi 칸 넣기: 그래프를 터미널 영역의 위나 오른쪽에 둘 수 있다', () => {
+  const top = placeMuwi(MAIN, 'top').tree;
+  const upper = find(top, 'muwi-split')!;
+  assert.equal(upper.type, 'column');
+  assert.deepEqual(upper.children!.map(c => c.id), ['muwi-graph', 'work-body']);
+  const right = placeMuwi(MAIN, 'right').tree;
+  const side = find(right, 'muwi-split')!;
+  assert.equal(side.type, 'row');
+  assert.equal(side.resizable, true);
+  assert.deepEqual(side.children!.map(c => c.id), ['work-body', 'muwi-graph']);
+  assert.deepEqual(find(right, 'muwi-graph')!.size, { px: 480 });
+  // 어디에 두든 작업 영역의 탭 줄·상태 줄 사이에 들어간다
+  assert.deepEqual(find(right, 'work')!.children!.map(c => c.id), ['tabs', 'muwi-split', 'status']);
+});
+
 test('레이아웃에 muwi 칸 넣기: Agents 칸이 없으면 목록까지 있는 그래프를, 세로 묶음이 없으면 감싸서 넣는다', () => {
   const plain: LayoutNode = {
     id: 'root', type: 'row',
@@ -121,6 +136,13 @@ if (first === 'do' && cmd === 'layout.clone') {
   fs.writeFileSync(to, JSON.stringify(tree, null, 2));
   st.layout = a.as; save(); console.log('{"ok":true}'); process.exit(0);
 }
+if (first === 'do' && cmd === 'layout.set') {
+  // 보이는 레이아웃의 나무를 바꾼다. 앱처럼 키 순서를 바꿔 다시 쓴다
+  const sort = (v) => Array.isArray(v) ? v.map(sort) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().reverse().map(k => [k, sort(v[k])])) : v;
+  fs.writeFileSync(path.join(layouts, st.layout + '.json'), JSON.stringify(sort(a.layout), null, 2));
+  st.sets = (st.sets || 0) + 1; save(); console.log('{"ok":true}'); process.exit(0);
+}
+if (first === 'do' && cmd === 'layout.resize') { st.resized = a; save(); console.log('{"ok":true}'); process.exit(0); }
 if (first === 'do' && cmd === 'layout.switch') {
   if (!fs.existsSync(path.join(layouts, a.name + '.json'))) { console.error('no layout'); process.exit(1); }
   st.layout = a.name; save(); console.log('{"ok":true}'); process.exit(0);
@@ -144,7 +166,7 @@ test('muwi layout: 지금 레이아웃을 복제해 muwi 칸을 넣고 바꾼다
     { app: true, shown: 'main', muwi: false, canList: true, canGraph: true },
   );
   const applied = applyLayout(h.records, h.env);
-  assert.deepEqual(applied, { name: 'muwi', base: 'main', list: true, graph: true });
+  assert.deepEqual(applied, { name: 'muwi', base: 'main', list: true, graph: true, graphAt: 'bottom' });
   assert.equal(h.state().layout, 'muwi');
   const clone = h.layout('muwi')!;
   assert.ok(hasMuwi(clone));
@@ -206,6 +228,43 @@ test('muwi layout: muwi의 배치가 바뀌면 옛 판으로 만든 복제본을
   assert.equal(screenState(h.records, h.env).outdated, false);
 });
 
+test('muwi layout --graph: 그래프 자리를 바꾸면 다시 만들고, 고른 자리를 기억한다', () => {
+  const h = fakeApp();
+  assert.equal(applyLayout(h.records, h.env, { graphAt: 'right' }).graphAt, 'right');
+  assert.equal(find(h.layout('muwi')!, 'muwi-split')!.type, 'row');
+  // 자리만 바꿀 때는 레이아웃을 바꾸지 않고 그 자리에서 옮긴다 (layout.set). 화면이 번쩍이지 않는다
+  const switches = () => h.state().layout;
+  const moved = applyLayout(h.records, h.env, { graphAt: 'top' });
+  assert.deepEqual([moved.moved, moved.graphAt, moved.refreshed], [true, 'top', undefined]);
+  assert.equal(switches(), 'muwi');
+  assert.equal(h.state().sets, 1);
+  assert.deepEqual(find(h.layout('muwi')!, 'muwi-split')!.children!.map(c => c.id), ['muwi-graph', 'work-body']);
+  assert.equal(find(h.layout('muwi')!, 'muwi-split')!.type, 'column');
+  // 가로에서 세로로 바뀌었으니 그 방향의 기본 크기로 맞춘다
+  assert.deepEqual(h.state().resized, { id: 'muwi-graph', px: 300 });
+  // 사이드바 목록은 그대로, 그래프는 그래프만 그리는 모양 그대로
+  assert.deepEqual(find(h.layout('muwi')!, 'agents')!.content, { mod: 'muwi', props: { variant: 'list' } });
+  assert.deepEqual(find(h.layout('muwi')!, 'muwi-graph')!.content, { mod: 'muwi', props: { variant: 'graph' } });
+  assert.equal(readLayoutRecord(h.records)!.graphAt, 'top');
+  // 앱이 파일을 다시 쓰며 키 순서가 바뀌어도 손으로 고친 것으로 보지 않는다
+  assert.equal(screenState(h.records, h.env).edited, false);
+  // 자리를 말하지 않으면 그대로 둔다
+  assert.deepEqual([applyLayout(h.records, h.env).already, applyLayout(h.records, h.env).graphAt], [true, 'top']);
+  // 원래 레이아웃으로 돌아갔다가 다시 넣어도 고른 자리를 쓴다
+  removeLayout(h.records, h.env);
+  h.set({ layout: 'main' });
+  fs.writeFileSync(path.join(h.records, 'layout.json'), JSON.stringify({ name: 'gone', base: 'main', hash: 'x', list: true, graph: true, graphAt: 'right', at: '' }));
+  assert.equal(applyLayout(h.records, h.env).graphAt, 'right');
+});
+
+test('muwi layout --graph: muwi layout이 만들지 않은 레이아웃은 자리를 바꾸지 않는다', () => {
+  const mine = placeMuwi(MAIN).tree;
+  const h = fakeApp({ main: MAIN, mine });
+  h.set({ layout: 'mine' });
+  assert.throws(() => applyLayout(h.records, h.env, { graphAt: 'right' }), /muwi layout이 만든 것이 아니라/);
+  assert.equal(applyLayout(h.records, h.env).already, true);
+});
+
 test('muwi layout: 앱이 닫혀 있거나 넣을 자리가 없으면 아무것도 바꾸지 않고 이유를 알린다', () => {
   const h = fakeApp({ main: MAIN, win98: { id: 'root', type: 'column', children: [{ id: 'desk', type: 'block', content: { mod: 'win98' } }] } });
   h.set({ layout: 'win98' });
@@ -228,7 +287,9 @@ test('muwi layout 명령: 상태 보기, 바꾸기, 되돌리기를 사람이 �
   assert.equal(applied.code, 0, applied.err);
   assert.match(applied.out, /muwi 레이아웃으로 바꿨어요 \(main 레이아웃을 복제했어요\)/);
   assert.match(applied.out, /되돌리려면 muwi layout --remove/);
-  assert.match(muwi('layout').out, /이미 muwi 칸이 있는 레이아웃이에요: muwi/);
+  assert.match(muwi('layout').out, /이미 muwi 칸이 있는 레이아웃이에요: muwi \(그래프: 터미널 아래\)/);
+  assert.match(muwi('layout', '--graph', 'right').out, /그래프를 터미널 오른쪽에 뒀어요/);
+  assert.match(muwi('layout', '--graph', 'left').err, /--graph는 bottom, top, right 중 하나예요/);
   assert.equal(JSON.parse(muwi('layout', '--status', '--json').out).muwi, true);
   const removed = muwi('layout', '--remove');
   assert.match(removed.out, /main 레이아웃으로 되돌렸어요[\s\S]*복제본을 지웠어요/);

@@ -8,11 +8,14 @@
 import { View, div, svg, image, PathBuilder } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import {
-  exec, home, theme, watchFolder, checking, shared, setShared, agents, panes, terminals, focused, updates, run,
+  exec, home, theme, watchFolder, checking, shared, setShared, agents, panes, terminals, focused, updates, run, notify,
   layout as shownLayout, props as blockProps,
 } from "herdr";
 
 const SELECTED = "muwi.selected";
+const PLACE_NAME = { bottom: "아래", top: "위", right: "오른쪽" };
+/** 오른쪽 기록 칸의 가장 좁은 너비 */
+const DETAIL_MIN = 220;
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const STATE_NAME = { waiting: "나를 기다림", blocked: "막힘", doing: "작업 중", stalled: "멈춤", done: "끝", idle: "노드 사이" };
 const STATUS_NAME = { todo: "아직", doing: "작업 중", waiting: "나를 기다림", blocked: "막힘", done: "끝" };
@@ -32,6 +35,17 @@ const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}\p{Ps}\p{Pi}]+/u, "").repla
 function programIcon(p, size, color) {
   if (!p?.icon) return null;
   return p.tint ? svg(p.icon).size(size).flex_none().text_color(color) : image(p.icon).w(size).h(size).flex_none();
+}
+
+/** 레이아웃 나무에서 id로 칸을 찾는다 */
+function findNode(node, id) {
+  if (!node || typeof node !== "object") return null;
+  if (node.id === id) return node;
+  for (const child of node.children ?? []) {
+    const found = findNode(child, id);
+    if (found) return found;
+  }
+  return null;
 }
 
 /** 레이아웃 나무에 조건에 맞는 칸이 있는가 */
@@ -170,6 +184,20 @@ export default class Muwi extends View {
     this.applying = false;
     this.bannerNote = null;
     this.bannerClosed = false;
+    /** 그래프 칸의 자리를 바꾸는 중 */
+    this.moving = false;
+    /** 그래프를 위→아래로 그렸는가 (마지막으로 읽은 것) */
+    this.loadedDown = null;
+    /** 오른쪽 기록 칸의 너비. 경계를 끌어서 바꾸고, 바꾼 너비를 기억한다 */
+    this.detailW = (() => {
+      try {
+        const w = Number(localStorage.getItem("detailW"));
+        return w >= DETAIL_MIN && w <= 900 ? w : 300;
+      } catch {
+        return 300;
+      }
+    })();
+    this.resizing = null;
     if (checking()) {
       this.data = SAMPLE;
       this.node = "impl";
@@ -197,6 +225,14 @@ export default class Muwi extends View {
   variant() {
     const v = (blockProps() ?? {}).variant;
     return v === "list" || v === "graph" ? v : "full";
+  }
+
+  /** 그래프를 위→아래로 그릴까: 칸이 세로로 길 때. 크기를 모르면 그래프 칸이 터미널 오른쪽에 있는지로 짐작한다 */
+  wantsDown() {
+    const s = this.canvasSize;
+    if (s) return s.height > s.width * 1.15;
+    if (checking() || this.variant() === "list") return false;
+    return findNode(shownLayout(), "muwi-split")?.type === "row";
   }
 
   pinned() {
@@ -237,6 +273,9 @@ export default class Muwi extends View {
       try {
         const want = this.wanted();
         const args = want ? ["board", "--work", String(want)] : ["board"];
+        // 세로로 긴 칸이면 위→아래로 그린다
+        const down = this.wantsDown();
+        if (down) args.push("--down");
         const r = await exec(`${home()}/.local/bin/muwi`, args, { timeout: 20000 });
         if (r.code !== 0) throw new Error(r.stderr.trim() || `muwi가 ${r.code}로 끝났어요`);
         const data = JSON.parse(r.stdout);
@@ -248,6 +287,7 @@ export default class Muwi extends View {
         }
         this.data = data;
         this.error = null;
+        this.loadedDown = down;
         if (this.node && !data.selected?.nodes.some((n) => n.id === this.node)) this.node = null;
       } catch (e) {
         this.error = String(e?.message ?? e);
@@ -335,7 +375,19 @@ export default class Muwi extends View {
           this.size = { width: size.width, height: size.height };
           cx.notify();
         }
-      });
+      })
+      // 오른쪽 기록 칸의 경계를 끄는 중이면 너비를 바꾼다. 그래프 칸이 너무 좁아지지 않게 막는다
+      .on_mouse_move((e, cx) => {
+        if (!this.resizing) return;
+        const max = Math.max(DETAIL_MIN, Math.min(900, this.size.width - 360));
+        const w = Math.round(Math.max(DETAIL_MIN, Math.min(max, this.resizing.w + (this.resizing.x - e.position.x))));
+        if (w !== this.detailW) {
+          this.detailW = w;
+          cx.notify();
+        }
+      })
+      .on_mouse_up("left", () => this.endResize())
+      .on_hover((hovered) => { if (!hovered) this.endResize(); });
 
     // 그래프만 그리는 칸은 목록이 필요 없다
     const groups = this.data && variant !== "graph" ? this.groups(t, works, links) : [];
@@ -363,8 +415,17 @@ export default class Muwi extends View {
         .child(view ? this.canvas(t, view, now) : div().flex_1())
         .when(Boolean(view) && !wide && Boolean(this.node), (el) => el.child(
           div().flex_none().h(150).border_t(1).border_color(t.border).bg(t.surface).child(this.detail(t, view, now)))))
-      .when(Boolean(view) && wide, (el) => el.child(
-        div().w(300).flex_none().h_full().min_h(0).border_l(1).border_color(t.border).bg(t.surface).child(this.detail(t, view, now))));
+      .when(Boolean(view) && wide, (el) => el
+        // 경계: 끌어서 오른쪽 기록 칸의 너비를 바꾼다
+        .child(div().id("detail-edge").w(6).ml(-3).mr(-3).flex_none().h_full().cursor_col_resize()
+          .when(Boolean(this.resizing), (el2) => el2.bg(t.accent))
+          .when(!this.resizing, (el2) => el2.hover((s) => s.bg(t.border)))
+          .on_mouse_down("left", (e, cx) => {
+            cx.stop_propagation();
+            this.resizing = { x: e.position.x, w: this.detailW };
+            cx.notify();
+          }))
+        .child(div().w(this.detailW).flex_none().h_full().min_h(0).border_l(1).border_color(t.border).bg(t.surface).child(this.detail(t, view, now))));
 
     const banner = this.banner(t, variant);
     return root.bg(t.canvas)
@@ -383,10 +444,11 @@ export default class Muwi extends View {
 
   head(t, view, works, now) {
     const c = this.colors(t);
+    const place = this.placeControl(t);
     const legend = (text, color) => h_flex().gap(5).items_center()
       .child(div().size(8).rounded_full().bg(color))
       .child(div().text_size(10.5).text_color(t.dim).child(text));
-    return h_flex().flex_none().h(44).px(16).gap(10).items_center().border_b(1).border_color(t.border).bg(t.chrome)
+    return h_flex().id("head").flex_none().h(44).px(16).gap(10).items_center().border_b(1).border_color(t.border).bg(t.chrome)
       .child(v_flex().flex_1().min_w(0).gap(1)
         .child(h_flex().gap(8).items_center()
           .child(div().min_w(0).truncate().text_size(13).font_semibold().child(view ? (view.title ?? view.work) : "작업 그래프"))
@@ -398,7 +460,65 @@ export default class Muwi extends View {
               view.helpers?.sessions ? `새 세션 ${view.helpers.sessions}` : null,
               view.helpers?.subagents ? `서브에이전트 ${view.helpers.subagents}` : null].filter(Boolean).join(" · ") : `${works.length}개 작업`)))
       .when(this.size.width >= 860, (el) => el.child(h_flex().flex_none().gap(12)
-        .child(legend("작업 중", c.doing)).child(legend("나를 기다림", c.waiting)).child(legend("막힘", c.blocked)).child(legend("끝", c.done))));
+        .child(legend("작업 중", c.doing)).child(legend("나를 기다림", c.waiting)).child(legend("막힘", c.blocked)).child(legend("끝", c.done))))
+      .when(Boolean(place), (el) => el.child(place));
+  }
+
+  /** 지금 그래프 칸의 자리. muwi layout이 만든 화면의 그래프 칸이 아니면 null (옮길 수 없다) */
+  graphAtNow() {
+    if (checking() || this.variant() !== "graph") return null;
+    const split = findNode(shownLayout(), "muwi-split");
+    if (!split) return null;
+    return split.type === "row" ? "right" : split.children?.[0]?.id === "muwi-graph" ? "top" : "bottom";
+  }
+
+  /**
+   * 그래프 칸의 자리 고르기: 위 · 아래 · 오른쪽. muwi layout이 만든 화면의 그래프 칸에만 둔다.
+   * 누르면 지금 레이아웃에서 그래프 칸만 그 자리로 옮긴다 (muwi layout --graph, 레이아웃은 그대로라 번쩍이지 않는다)
+   */
+  placeControl(t) {
+    const now = this.graphAtNow();
+    if (!now) return null;
+    const opt = (where) => {
+      const on = now === where;
+      return div().id(`at-${where}`).h(20).px(7).flex().items_center().rounded(5).text_size(10.5)
+        .bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.dim)
+        .when(!on && !this.moving, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground))
+          .on_click((_e, cx) => this.moveGraph(where, cx)))
+        .child(PLACE_NAME[where]);
+    };
+    return h_flex().id("place").flex_none().gap(2).p(2).items_center().rounded(7).border_1().border_color(t.border).bg(t.chrome)
+      .when(this.moving, (el) => el.child(div().px(5).text_size(10.5).text_color(t.dim).child("옮기는 중…")))
+      .child(opt("top")).child(opt("bottom")).child(opt("right"));
+  }
+
+  /** 경계 끌기를 끝내고 너비를 기억한다 */
+  endResize() {
+    if (!this.resizing) return;
+    this.resizing = null;
+    try {
+      localStorage.setItem("detailW", String(this.detailW));
+    } catch {
+      // 기억하지 못해도 이번에는 그 너비로 그린다
+    }
+  }
+
+  /** 그래프 칸을 다른 자리로 옮긴다. 레이아웃을 다시 만들면 이 칸은 새로 뜬다 */
+  moveGraph(where, cx) {
+    if (this.moving) return;
+    this.moving = true;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      try {
+        const r = await exec(`${home()}/.local/bin/muwi`, ["layout", "--graph", where], { timeout: 60000 });
+        if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim() || `muwi layout이 ${r.code}로 끝났어요`);
+      } catch (e) {
+        notify({ title: "그래프 자리를 바꾸지 못했어요", body: String(e?.message ?? e), level: "error" });
+      } finally {
+        this.moving = false;
+        cx.notify();
+      }
+    });
   }
 
   listHead(t, works, sidebar) {
@@ -737,6 +857,8 @@ export default class Muwi extends View {
       return [n.who?.kind === "subagent" ? "서브에이전트" : null, times, quiet].filter(Boolean).join(" · ") || "작업 중";
     }
     if (n.status === "done") return [times, n.note].filter(Boolean).join(" · ");
+    // 시작했다가 앞에 먼저 할 노드가 끼어들어 잠시 멈췄다
+    if (n.paused) return ["잠시 멈춤", times].filter(Boolean).join(" · ");
     if (n.spawn) {
       // 폴더 신뢰 확인이나 권한 확인에서 멈춰 있으면 그렇게 보여 준다. 사람이 그 칸에서 답해야 한다
       const agent = this.agentOf(view, n);
@@ -888,7 +1010,9 @@ export default class Muwi extends View {
             // 다시 한 노드는 눈에 띄게: 여기서 뭔가 걸렸다는 신호다
             .when(n.attempts > 1, (el) => el.child(chip(`${n.attempts}회차`, t.accent, false)))
             .when(Boolean(tag), (el) => el.child(chip(tag.text, t.muted, tag.planned)))
-            .when(Boolean(n.offPlan), (el) => el.child(chip("≠계획", t.blocked, false))))
+            .when(Boolean(n.offPlan), (el) => el.child(chip("≠계획", t.blocked, false)))
+            // 앞 노드가 끝나기 전에 시작했다: 그래프 흐름과 다르게 진행 중이라는 표시
+            .when(Boolean(n.early), (el) => el.child(chip("순서 앞당김", t.muted, false))))
           .child(h_flex().gap(6 * z).items_center().text_size(10.5 * z)
             .child(div().flex_1().min_w(0).truncate().text_color(active ? color : t.dim).child(meta || " "))
             .when(n.flags.length > 0, (el) => el.child(div().flex_none().text_color(t.blocked).child("⚑")))
@@ -915,6 +1039,8 @@ export default class Muwi extends View {
         if (!old || Math.abs(old.width - size.width) > 1 || Math.abs(old.height - size.height) > 1) {
           this.canvasSize = { width: size.width, height: size.height };
           this.focusKey = null; // 크기가 바뀌면 다시 맞춘다
+          // 칸이 가로로 길다가 세로로 길어졌으면(또는 반대) 흐름 방향을 바꿔 다시 읽는다
+          if (this.loadedDown !== null && this.wantsDown() !== this.loadedDown) this.stale = true;
           cx.notify();
         }
       })
@@ -1006,16 +1132,16 @@ export default class Muwi extends View {
       if (x.seen === false) rows.push(line("읽은 skill을 볼 수 없었어요 (이 세션에서 훅이 돌지 않았어요)", t.blocked));
       else if (read.length === 0) rows.push(line(x.instant ? "시작과 끝을 한꺼번에 적어서 하는 동안의 기록이 없어요" : "하는 동안 읽은 skill이 없어요", t.dim));
       for (const s of read) {
-        rows.push(h_flex().gap(6).items_center()
-          .child(div().size(6).flex_none().rounded_full().bg(t.done))
-          .child(line(`${s.skill}${s.count > 1 ? ` ×${s.count}` : ""}${s.via === "file" ? " (파일을 직접 읽음)" : ""}${s.agent ? " · 서브에이전트가 읽음" : ""}${s.guess ? " · 확실하지 않음" : ""}`, t.foreground)));
+        rows.push(h_flex().gap(6).items_start()
+          .child(div().size(6).mt(5).flex_none().rounded_full().bg(t.done))
+          .child(line(`${s.skill}${s.count > 1 ? ` ×${s.count}` : ""}${s.via === "file" ? " (파일을 직접 읽음)" : ""}${s.agent ? " · 서브에이전트가 읽음" : ""}${s.guess ? " · 확실하지 않음" : ""}`, t.foreground).flex_1().min_w(0)));
       }
       if (loaded.length > 0) {
         rows.push(div().pt(2).text_size(10).text_color(t.dim).child("이미 읽은 상태 (같은 세션이 앞에서 읽음)"));
         for (const s of loaded) {
-          rows.push(h_flex().gap(6).items_center()
-            .child(div().size(6).flex_none().rounded_full().border(1).border_color(t.muted))
-            .child(line(s.skill)));
+          rows.push(h_flex().gap(6).items_start()
+            .child(div().size(6).mt(5).flex_none().rounded_full().border(1).border_color(t.muted))
+            .child(line(s.skill).flex_1().min_w(0)));
         }
       }
       return rows;
@@ -1031,7 +1157,7 @@ export default class Muwi extends View {
         .child(div().text_size(13).font_semibold().child(n.title))
         .child(h_flex().gap(6).items_center()
           .child(this.pill(t, n.closed ? `멈춤 · ${STATUS_NAME[n.status]}이던 중` : STATUS_NAME[n.status], n.status === "todo" ? t.muted : color))
-          .child(div().text_size(10.5).text_color(t.dim).child(n.id))))
+          .child(div().min_w(0).truncate().text_size(10.5).text_color(t.dim).child(n.id))))
       .when(Boolean(n.closed), (el) => el.child(v_flex().gap(3).child(label("세션이 닫힘"))
         .child(line("이 노드를 하던 세션이 닫혔어요. 일이 끝났는지는 알 수 없어요. 이어서 하려면 새 대화에서 이 작업을 이어 달라고 하면 돼요."))))
       .when(Boolean(n.note), (el) => el.child(v_flex().gap(3)
@@ -1039,14 +1165,14 @@ export default class Muwi extends View {
         .child(line(n.note, n.status === "done" ? t.foreground : color))))
       .when(Boolean(times), (el) => el.child(v_flex().gap(3).child(label("시간")).child(line(times))))
       .when(Boolean(whoText || plannedText), (el) => el.child(v_flex().gap(4).child(label("누가"))
-        .when(Boolean(whoText), (el) => el.child(h_flex().gap(8).items_center()
-          .child(line(`${whoText}${agent ? ` · ${AGENT_NAME[agent.status] ?? agent.status}` : ""}`, t.foreground))
-          .when(Boolean(terminal), (el) => el.child(
-            h_flex().id(`go-${n.id}`).h(20).px(7).flex_none().items_center().rounded(5).bg(t.raised).border_1().border_color(t.border)
-              .text_size(10.5).text_color(t.muted).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground))
-              // pane이 있으면 그 pane으로 가고, pane 없이 떠 있는 세션이면 그 자리에서 들여다본다
-              .on_click(() => run(panes().some((p) => p.terminal === terminal) ? "pane.focus" : "terminal.peek", { terminal }))
-              .child("터미널로 가기")))))
+        // 글이 길면 줄을 바꾸고, 버튼은 그 아래에 둔다 (칸이 좁아도 잘리지 않게)
+        .when(Boolean(whoText), (el) => el.child(line(`${whoText}${agent ? ` · ${AGENT_NAME[agent.status] ?? agent.status}` : ""}`, t.foreground)))
+        .when(Boolean(whoText && terminal), (el) => el.child(h_flex().child(
+          h_flex().id(`go-${n.id}`).h(20).px(7).flex_none().items_center().rounded(5).bg(t.raised).border_1().border_color(t.border)
+            .text_size(10.5).text_color(t.muted).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground))
+            // pane이 있으면 그 pane으로 가고, pane 없이 떠 있는 세션이면 그 자리에서 들여다본다
+            .on_click(() => run(panes().some((p) => p.terminal === terminal) ? "pane.focus" : "terminal.peek", { terminal }))
+            .child("터미널로 가기"))))
         .when(Boolean(plannedText), (el) => el.child(line(
           n.offPlan ? `${plannedText} · 계획과 다르게 했어요`
             : n.runUnknown ? `${plannedText} · 이 세션에서 훅이 돌지 않아 계획대로 했는지 확인하지 못했어요` : plannedText,
