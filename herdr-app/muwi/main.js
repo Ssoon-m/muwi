@@ -969,14 +969,19 @@ export default class Muwi extends View {
 
   /**
    * 그래프가 칸 밖으로 밀려나지 않게, 옮길 수 있는 범위를 그래프 크기로 막는다.
-   * 그래프가 칸보다 작은 쪽은 옮기지 않고 가운데에 둔다. 큰 쪽은 그래프 끝이 칸 끝에 닿을 때까지만 옮긴다
+   * 그래프가 칸보다 작은 쪽은 칸 안에서 옮기고 가장자리에 닿으면 멈춘다(끌면 움직인다).
+   * 큰 쪽은 그래프 끝이 칸 끝에 닿을 때까지만 옮긴다. 처음 보여 줄 때 가운데에 두는 것은 centerOn이 한다
    */
   clampPan(L) {
     const s = this.canvasSize;
     if (!s || !L?.width) return;
     const z = this.zoom;
     const edge = 12;
-    const axis = (v, size, full) => (full + edge * 2 <= size ? (size - full) / 2 : Math.min(edge, Math.max(size - full - edge, v)));
+    // a: 그래프 왼쪽(위쪽) 끝이 칸 가장자리에 닿는 곳, b: 오른쪽(아래쪽) 끝이 닿는 곳. 작은 그래프는 a < b, 큰 그래프는 b < a
+    const axis = (v, size, full) => {
+      const a = edge, b = size - full - edge;
+      return Math.min(Math.max(a, b), Math.max(Math.min(a, b), v));
+    };
     this.pan = { x: axis(this.pan.x, s.width, L.width * z), y: axis(this.pan.y, s.height, L.height * z) };
   }
 
