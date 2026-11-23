@@ -14,6 +14,10 @@ import { attach, readSession, touchSession } from '../src/session.ts';
 import { appendEvent, clock, readEvents, readPlan, writePlan, type NodeStatus, type Plan, type RunBy } from '../src/store.ts';
 import { PAST_DAYS, loadBoard, loadView } from '../src/view.ts';
 
+/** sh 스크립트(hook.sh, find-node.sh, bin/muwi)를 직접 시험하는 테스트. Windows에서는 CI가 Git Bash로 따로 확인한다 */
+const SH = process.platform === 'win32' ? { skip: 'sh 스크립트를 시험한다 (Windows는 CI의 Git Bash 단계에서 본다)' } : {};
+
+
 const CLI = path.resolve(import.meta.dirname, '../src/cli.ts');
 const ENV = {} as NodeJS.ProcessEnv;
 const T0 = Date.parse('2026-11-22T05:00:00.000Z');
@@ -258,17 +262,29 @@ function fakeHerdr(labels: Record<string, string> | null, focus = 'pUSER') {
   const at = path.join(bin, 'focus');
   fs.writeFileSync(at, focus);
   const get = labels ? JSON.stringify({ address: 't7', labels }) : '';
-  fs.writeFileSync(path.join(bin, 'hc'), `#!/bin/sh\nprintf 'hc' >> "${log}"; for a in "$@"; do printf ' [%s]' "$a" >> "${log}"; done; echo >> "${log}"\ncase "$1" in\n  run) echo '{"address":"t7","first_message":{"sent":true}}' ;;\n  get) ${get ? `echo '${get}'` : 'exit 1'} ;;\n  ls) echo '{"terminals":[{"address":"t2","state":"live","status":"working"},{"address":"t7","state":"live","status":"working"}]}' ;;\n  *) echo '{}' ;;\nesac\n`, { mode: 0o755 });
-  fs.writeFileSync(path.join(bin, 'herdr-app'), `#!/bin/sh
-if [ "$1" = status ]; then printf '{"focused_pane":"%s"}' "$(cat "${at}")"; exit 0; fi
-printf 'app' >> "${log}"; for a in "$@"; do printf ' [%s]' "$a" >> "${log}"; done; echo >> "${log}"
-case "$2" in
-  terminal.keep | pane.split) [ -n "$(cat "${at}")" ] && printf pNEW > "${at}"; echo '{"pending":true,"pane":"pNEW"}' ;;
-  pane.focus) p=$(printf '%s' "$3" | sed -n 's/.*"pane":"\\([^"]*\\)".*/\\1/p'); [ -n "$p" ] && printf '%s' "$p" > "${at}"; echo '{}' ;;
-  *) echo '{}' ;;
-esac
-`, { mode: 0o755 });
-  return { hc: path.join(bin, 'hc'), app: path.join(bin, 'herdr-app'), calls: () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : ''), focus: () => fs.readFileSync(at, 'utf8') };
+  // Node 스크립트로 쓴다. muwi는 .cjs 도구를 Node로 실행하므로 Windows에서도 돈다
+  const record = `const fs = require('fs');\nconst args = process.argv.slice(2);\nconst note = (who) => fs.appendFileSync(${JSON.stringify(log)}, who + args.map(a => ' [' + a + ']').join('') + '\\n');\n`;
+  fs.writeFileSync(path.join(bin, 'hc.cjs'), `${record}note('hc');
+switch (args[0]) {
+  case 'run': console.log('{"address":"t7","first_message":{"sent":true}}'); break;
+  case 'get': ${get ? `console.log(${JSON.stringify(get)})` : 'process.exit(1)'}; break;
+  case 'ls': console.log('{"terminals":[{"address":"t2","state":"live","status":"working"},{"address":"t7","state":"live","status":"working"}]}'); break;
+  default: console.log('{}');
+}
+`);
+  fs.writeFileSync(path.join(bin, 'herdr-app.cjs'), `${record}const at = ${JSON.stringify(at)};
+if (args[0] === 'status') { process.stdout.write(JSON.stringify({ focused_pane: fs.readFileSync(at, 'utf8') })); process.exit(0); }
+note('app');
+if (args[1] === 'terminal.keep' || args[1] === 'pane.split') {
+  if (fs.readFileSync(at, 'utf8')) fs.writeFileSync(at, 'pNEW');
+  console.log('{"pending":true,"pane":"pNEW"}');
+} else if (args[1] === 'pane.focus') {
+  const pane = JSON.parse(args[2] || '{}').pane;
+  if (pane) fs.writeFileSync(at, pane);
+  console.log('{}');
+} else console.log('{}');
+`);
+  return { hc: path.join(bin, 'hc.cjs'), app: path.join(bin, 'herdr-app.cjs'), calls: () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : ''), focus: () => fs.readFileSync(at, 'utf8') };
 }
 
 test('muwi run으로 뜬 세션은 시작할 때 맡은 작업에 붙고 노드를 시작한 것으로 적힌다', () => {
@@ -392,7 +408,7 @@ test('muwi tidy: 끝난 노드를 맡았던 세션만, 라벨이 맞을 때만 �
   assert.match(fake.calls(), /hc \[kill\] \[t7\]\nhc \[rm\] \[t7\]/);
 });
 
-test('hook.sh: 서브에이전트의 시작·끝, 서브에이전트가 실행한 muwi 명령, 사람이 새로 건 말을 넘긴다', () => {
+test('hook.sh: 서브에이전트의 시작·끝, 서브에이전트가 실행한 muwi 명령, 사람이 새로 건 말을 넘긴다', SH, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-hooksh-'));
   const sh = path.resolve(import.meta.dirname, '../hooks/hook.sh');
   const run = (payload: object, mode: string[] = []) =>
@@ -425,7 +441,7 @@ test('hook.sh: 서브에이전트의 시작·끝, 서브에이전트가 실행�
   assert.ok(!fs.existsSync(ok));
 });
 
-test('Node가 낮으면 무엇이 필요한지 알린다 (조용히 실패하지 않는다)', () => {
+test('Node가 낮으면 무엇이 필요한지 알린다 (조용히 실패하지 않는다)', SH, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-node-'));
   const old = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-oldnode-'));
   // 22.14인 척하는 node: TypeScript 파일을 실행하지 못한다
@@ -455,7 +471,7 @@ test('Node가 낮으면 무엇이 필요한지 알린다 (조용히 실패하지
   assert.match(JSON.parse(fine.stdout).hookSpecificOutput.additionalContext, /작업 진행 방식 \(muwi\)/);
 });
 
-test('셸 설정 없이 실행되면 로그인 셸의 PATH에서 Node를 찾고 캐시해 둔다 (Herdr가 띄운 세션, 그래프 칸)', () => {
+test('셸 설정 없이 실행되면 로그인 셸의 PATH에서 Node를 찾고 캐시해 둔다 (Herdr가 띄운 세션, 그래프 칸)', SH, () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-shell-'));
   const cache = path.join(home, 'cache');
   const cached = path.join(cache, 'muwi', 'node');
@@ -592,9 +608,14 @@ test('muwi show: 다시 한 노드는 회차별로, 훅이 보지 못한 세션�
 function fakeHc(terminals: { address: string; status?: string | null }[], owners: Record<string, string> = {}) {
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-live-'));
   const list = JSON.stringify({ terminals: terminals.map(x => ({ address: x.address, state: 'live', status: x.status === undefined ? 'working' : x.status })) });
-  const cases = Object.entries(owners).map(([addr, key]) => `    ${addr}) echo '${JSON.stringify({ address: addr, labels: { 'muwi.session': key } })}' ;;`).join('\n');
-  fs.writeFileSync(path.join(bin, 'hc'), `#!/bin/sh\ncase "$1" in\n  ls) echo '${list}' ;;\n  get)\n    case "$2" in\n${cases}\n    *) echo '{"labels":{}}' ;;\n    esac ;;\n  *) echo '{}' ;;\nesac\n`, { mode: 0o755 });
-  return { MUWI_HC: path.join(bin, 'hc'), PATH: process.env.PATH } as NodeJS.ProcessEnv;
+  const got = Object.fromEntries(Object.entries(owners).map(([addr, key]) => [addr, { address: addr, labels: { 'muwi.session': key } }]));
+  fs.writeFileSync(path.join(bin, 'hc.cjs'), `const [cmd, addr] = process.argv.slice(2);
+const got = ${JSON.stringify(got)};
+if (cmd === 'ls') console.log(${JSON.stringify(list)});
+else if (cmd === 'get') console.log(JSON.stringify(got[addr] ?? { labels: {} }));
+else console.log('{}');
+`);
+  return { MUWI_HC: path.join(bin, 'hc.cjs'), PATH: process.env.PATH } as NodeJS.ProcessEnv;
 }
 
 test('세션이 닫혔는지는 Herdr에 물어본다: 터미널이 없거나, 에이전트가 돌지 않거나, 다른 대화가 그 터미널을 쓰고 있으면 닫힌 것', () => {

@@ -6,10 +6,16 @@ import path from 'node:path';
 export type Ran = { ok: boolean; out: string; err: string };
 
 function call(bin: string, args: string[], env: NodeJS.ProcessEnv, timeout: number): Ran {
+  // 대신 쓸 도구를 Node 스크립트로 줄 수 있다 (MUWI_HC, MUWI_HERDR_APP). Windows는 #! 줄로 스크립트를 실행하지 못한다
+  if (/\.(c|m)?js$/.test(bin)) {
+    const r = spawnSync(process.execPath, [bin, ...args], { encoding: 'utf8', env, timeout });
+    return { ok: !r.error && r.status === 0, out: r.stdout ?? '', err: (r.stderr ?? '') || (r.error ? String(r.error.message) : '') };
+  }
   let r = spawnSync(bin, args, { encoding: 'utf8', env, timeout });
   // Herdr 앱이 띄운 프로그램에는 셸의 PATH가 없다. 그래프 칸이 muwi를 부를 때가 그렇다. 설치되는 자리에서 한 번 더 찾는다
-  if ((r.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT' && !bin.includes('/') && env.HOME) {
-    r = spawnSync(path.join(env.HOME, '.local', 'bin', bin), args, { encoding: 'utf8', env, timeout });
+  const home = env.HOME || env.USERPROFILE;
+  if ((r.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT' && !/[\\/]/.test(bin) && home) {
+    r = spawnSync(path.join(home, '.local', 'bin', bin), args, { encoding: 'utf8', env, timeout });
   }
   return { ok: !r.error && r.status === 0, out: r.stdout ?? '', err: (r.stderr ?? '') || (r.error ? String(r.error.message) : '') };
 }

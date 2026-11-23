@@ -9,6 +9,6 @@
   "engines": { "node": ">=24" },
   "repository": { "type": "git", "url": "git+https://github.com/Ssoon-m/muwi.git" },
   "scripts": {
-    "test": "node --test 'tests/*.test.ts'"
+    "test": "node --test \"tests/*.test.ts\""
   }
 }

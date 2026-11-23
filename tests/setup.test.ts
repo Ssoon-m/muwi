@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,9 +10,11 @@ import {
 } from '../src/setup.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
+/** sh 래퍼는 Windows에서도 슬래시 경로로 적는다 (Git Bash가 읽기 쉽게) */
+const posix = (p: string) => (process.platform === 'win32' ? p.replace(/\\/g, '/') : p);
 const HOOK = hookCommandFor('/Users/me/tools/muwi');
 const theirs = { matcher: 'Bash', hooks: [{ type: 'command', command: '/opt/other/guard.sh' }] };
-const ours = (extra = '') => ({ type: 'command', command: `${HOOK}${extra}` });
+const ours = (extra = '') => ({ type: 'command', command: `${HOOK}${extra}`, onFailure: 'continue' });
 
 test('훅 넣기: 남의 훅은 그대로 두고 우리 것만 한 벌 넣는다', () => {
   const start = { model: 'opus', hooks: { PreToolUse: [theirs], Stop: [{ hooks: [{ type: 'command', command: 'say done' }] }] } };
@@ -96,8 +99,9 @@ test('muwi setup: 있는 도구에만 넣고, 무엇을 넣었는지 적어 둔�
   // 터미널용 명령은 항상. 설치 위치의 bin/muwi를 부르고, setup을 실행한 node는 못 찾을 때만 쓰도록 넘긴다
   const bin = path.join(h.dir, '.local', 'bin', 'muwi');
   assert.equal(install.bin, bin);
-  assert.match(fs.readFileSync(bin, 'utf8'), new RegExp(`MUWI_SETUP_NODE="${process.execPath}" exec "${ROOT}/bin/muwi"`));
-  assert.ok(fs.statSync(bin).mode & 0o100);
+  assert.ok(fs.readFileSync(bin, 'utf8').includes(`MUWI_SETUP_NODE="${posix(process.execPath)}" exec "${posix(path.join(ROOT, 'bin', 'muwi'))}"`));
+  // Windows는 실행 권한 비트가 없다 (Git Bash는 #! 줄을 보고 실행한다)
+  if (process.platform !== 'win32') assert.ok(fs.statSync(bin).mode & 0o100);
   // Herdr 앱도 Codex도 없으면 건너뛴다. Claude Code 설정은 플러그인 몫이라 건드리지 않는다
   assert.equal(install.herdr, undefined);
   assert.equal(install.codex, undefined);
@@ -167,13 +171,69 @@ test('업데이트로 설치 위치나 버전이 바뀌면, setup을 한 적이 
   const next = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-next-'));
   for (const d of ['hooks', 'skills', 'herdr-app']) fs.cpSync(path.join(ROOT, d), path.join(next, d), { recursive: true });
   assert.equal(refreshSetup({ root: next, version: '0.2.0', dir: h.records, env: h.env }), true);
-  assert.match(fs.readFileSync(path.join(h.dir, '.local', 'bin', 'muwi'), 'utf8'), new RegExp(`"${next}/bin/muwi"`));
+  assert.ok(fs.readFileSync(path.join(h.dir, '.local', 'bin', 'muwi'), 'utf8').includes(`"${posix(path.join(next, 'bin', 'muwi'))}"`));
   assert.equal(readInstall(h.records)!.version, '0.2.0');
   // 업데이트 전부터 열려 있던 세션(옛 버전)이 새로 시작해도 새 설치를 되돌리지 않는다
   assert.equal(refreshSetup({ root: ROOT, version: '0.1.0', dir: h.records, env: h.env }), false);
   assert.equal(readInstall(h.records)!.version, '0.2.0');
-  assert.match(fs.readFileSync(path.join(h.dir, '.local', 'bin', 'muwi'), 'utf8'), new RegExp(`"${next}/bin/muwi"`));
+  assert.ok(fs.readFileSync(path.join(h.dir, '.local', 'bin', 'muwi'), 'utf8').includes(`"${posix(path.join(next, 'bin', 'muwi'))}"`));
   assert.equal(olderThan('0.9.0', '0.10.0'), true);
   assert.equal(olderThan('0.10.0', '0.9.0'), false);
   assert.equal(olderThan('0.5.0', '0.5.0'), false);
+});
+
+test('muwi setup (Windows): PowerShell·cmd에서 쓸 muwi.cmd를 넣고, 뺄 때 같이 뺀다', () => {
+  const h = home();
+  const install = runSetup({ root: ROOT, version: '0.1.0', dir: h.records, env: h.env, platform: 'win32' });
+  const cmd = path.join(h.dir, '.local', 'bin', 'muwi.cmd');
+  assert.equal(install.cmd, cmd);
+  const text = fs.readFileSync(cmd, 'utf8');
+  // cmd.exe가 읽는 파일: 줄바꿈은 CRLF, 설치한 Node로 cli.ts를 바로 실행하고 그 Node가 없으면 PATH의 node
+  assert.match(text, /^@echo off\r\n/);
+  assert.equal(/[^\r]\n/.test(text), false);
+  assert.ok(text.includes(`set "MUWI_NODE=${process.execPath}"`));
+  assert.ok(text.includes('if not exist "%MUWI_NODE%" set "MUWI_NODE=node"'));
+  assert.ok(text.includes(`"%MUWI_NODE%" "${path.join(ROOT, 'src', 'cli.ts')}" %*`));
+  // Git Bash에서 쓸 sh 래퍼도 넣는다. 경로는 슬래시로 적는다
+  assert.ok(fs.readFileSync(path.join(h.dir, '.local', 'bin', 'muwi'), 'utf8').includes(`exec "${posix(path.join(ROOT, 'bin', 'muwi'))}"`));
+  if (process.platform === 'win32') {
+    const r = spawnSync('cmd.exe', ['/d', '/c', cmd, '--version'], { encoding: 'utf8' });
+    assert.match(r.stdout, /^\d+\.\d+\.\d+/, r.stderr);
+  }
+  removeSetup(h.records);
+  assert.equal(fs.existsSync(cmd), false);
+});
+
+test('플러그인의 bin/muwi.cmd: CRLF로 cli.ts를 실행한다 (Windows의 PowerShell·cmd)', () => {
+  const file = path.join(ROOT, 'bin', 'muwi.cmd');
+  const text = fs.readFileSync(file, 'utf8');
+  assert.equal(/[^\r]\n/.test(text), false);
+  assert.ok(text.includes('node "%~dp0..\\src\\cli.ts" %*'));
+  if (process.platform === 'win32') {
+    const r = spawnSync('cmd.exe', ['/d', '/c', file, '--version'], { encoding: 'utf8' });
+    assert.match(r.stdout, /^\d+\.\d+\.\d+/, r.stderr);
+  }
+});
+
+test('설치 기록은 setup.json에 적는다: install.json만 보는 옛 훅(0.4.0·0.5.0)이 새 설치를 되돌리지 못한다', () => {
+  const h = home('herdr');
+  const legacy = path.join(h.records, 'install.json');
+  // 0.5.4 이하가 남긴 기록에서 올라온다: 읽을 수 있고, 새로 적을 때 지운다
+  fs.mkdirSync(h.records, { recursive: true });
+  fs.writeFileSync(legacy, JSON.stringify({ root: '/old/muwi/0.5.4', version: '0.5.4', at: '2026-11-23T00:00:00.000Z' }));
+  assert.equal(readInstall(h.records)!.version, '0.5.4');
+  assert.equal(refreshSetup({ root: ROOT, version: '0.5.5', dir: h.records, env: h.env }), true);
+  assert.equal(fs.existsSync(legacy), false);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(h.records, 'setup.json'), 'utf8')).version, '0.5.5');
+  // 0.4.0·0.5.0의 규칙: install.json의 버전이 자기와 다르면 자기 버전으로 setup을 다시 한다. 기록이 없으면 아무것도 하지 않는다
+  const oldRule = (version: string) => {
+    if (!fs.existsSync(legacy)) return false;
+    return JSON.parse(fs.readFileSync(legacy, 'utf8')).version !== version;
+  };
+  assert.equal(oldRule('0.4.0'), false);
+  // 제거하면 두 기록 모두 없어진다
+  fs.writeFileSync(legacy, '{"root":"/old","version":"0.5.4","at":"x"}');
+  removeSetup(h.records);
+  assert.equal(fs.existsSync(legacy), false);
+  assert.equal(readInstall(h.records), null);
 });

@@ -5,6 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 
+/** sh 스크립트(hook.sh, find-node.sh, bin/muwi)를 직접 시험하는 테스트. Windows에서는 CI가 Git Bash로 따로 확인한다 */
+const SH = process.platform === 'win32' ? { skip: 'sh 스크립트를 시험한다 (Windows는 CI의 Git Bash 단계에서 본다)' } : {};
+
+
 const CLI = path.resolve(import.meta.dirname, '../src/cli.ts');
 
 /** 깨끗한 환경에서 muwi를 실행한다 (바깥 세션의 환경 변수가 섞이지 않게) */
@@ -227,15 +231,18 @@ test('muwi config·version·setup', () => {
   // 빈 홈 폴더에 setup: 터미널용 명령만 생긴다
   const setup = muwi(['setup']);
   assert.equal(setup.code, 0, setup.err);
-  assert.match(setup.out, /muwi 명령: .*\.local\/bin\/muwi/);
+  assert.match(setup.out, /muwi 명령: .*\.local[\\/]bin[\\/]muwi/);
   const wrapper = path.join(dir, '.local', 'bin', 'muwi');
-  const viaWrapper = spawnSync(wrapper, ['--version'], { encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir } });
+  // Windows는 PowerShell·cmd용 muwi.cmd로, 그 밖에는 sh 래퍼로 실행해 본다
+  const viaWrapper = process.platform === 'win32'
+    ? spawnSync('cmd.exe', ['/d', '/c', `${wrapper}.cmd`, '--version'], { encoding: 'utf8', env: { ...process.env, HOME: dir, MUWI_DIR: dir } })
+    : spawnSync(wrapper, ['--version'], { encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir } });
   assert.match(viaWrapper.stdout, /^\d+\.\d+\.\d+\n$/);
   assert.match(muwi(['setup', '--remove']).out, /뺐어요/);
   assert.equal(fs.existsSync(wrapper), false);
 });
 
-test('hook.sh: 볼 것만 넘기고, 세션 시작에는 지침을 돌려준다', () => {
+test('hook.sh: 볼 것만 넘기고, 세션 시작에는 지침을 돌려준다', SH, () => {
   const { dir } = bench();
   const script = path.resolve(import.meta.dirname, '../hooks/hook.sh');
   const hook = (payload: object, ...args: string[]) =>
@@ -253,7 +260,7 @@ test('hook.sh: 볼 것만 넘기고, 세션 시작에는 지침을 돌려준다'
   assert.equal(hook(edit, 'nudge'), '');
 });
 
-test('출력을 받는 쪽이 먼저 닫아도 (muwi show | head) 오류를 쏟지 않는다', () => {
+test('출력을 받는 쪽이 먼저 닫아도 (muwi show | head) 오류를 쏟지 않는다', SH, () => {
   const { dir, cwd, muwi } = bench();
   const nodes = Array.from({ length: 60 }, (_, i) => ({ id: `n${i}`, title: `노드 ${i}`, ...(i ? { after: [`n${i - 1}`] } : {}) }));
   assert.equal(muwi(['plan', '--work', 'long-1', '--request', '긴 작업', JSON.stringify({ title: '긴 작업', nodes })]).code, 0);
@@ -268,8 +275,9 @@ test('업데이트: 열려 있는 세션의 훅은 설치된 더 새 muwi에 넘
   const claude = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-claude-'));
   const plugin = (version: string, answer: string) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-plugin-'));
-    fs.mkdirSync(path.join(root, 'bin'));
-    fs.writeFileSync(path.join(root, 'bin', 'muwi'), `#!/bin/sh\ncat >/dev/null\necho '${answer}'\n`, { mode: 0o755 });
+    fs.mkdirSync(path.join(root, 'src'));
+    // 넘겨받은 버전은 그 cli.ts를 Node로 실행한다. 입력을 다 읽고 정해 둔 답을 한다
+    fs.writeFileSync(path.join(root, 'src', 'cli.ts'), `process.stdin.resume();\nprocess.stdin.on('end', () => console.log(${JSON.stringify(answer)}));\n`);
     fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version }));
     return root;
   };
@@ -291,7 +299,7 @@ test('업데이트: 열려 있는 세션의 훅은 설치된 더 새 muwi에 넘
   assert.match(hook(), /작업 진행 방식 \(muwi\)/);
   // 새 버전이 실패하면 이 버전이 처리한다
   const broken = plugin('9.9.9', '');
-  fs.writeFileSync(path.join(broken, 'bin', 'muwi'), '#!/bin/sh\nexit 3\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(broken, 'src', 'cli.ts'), 'process.exit(3);\n');
   install([broken]);
   assert.match(hook(), /작업 진행 방식 \(muwi\)/);
   assert.ok(fs.existsSync(path.join(dir, '.sessions')));
