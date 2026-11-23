@@ -55,3 +55,16 @@ test('검사기: 겹친 카드와 카드를 지나는 선을 잡는다', () => {
   assert.match(problems, /카드 겹침: a ↔ b/);
   assert.match(problems, /선이 카드를 지남: a\|c → b/);
 });
+
+test('세로로 긴 칸에서는 위에서 아래로 흐른다. 선은 아래 변에서 나가 위 변으로 들어간다', async () => {
+  const g: Graph = {
+    nodes: [{ id: 'read' }, { id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'merge' }],
+    edges: [{ from: 'read', to: 'a' }, { from: 'read', to: 'b' }, { from: 'read', to: 'c' }, { from: 'a', to: 'merge' }, { from: 'b', to: 'merge' }, { from: 'c', to: 'merge' }],
+  };
+  const l = await layoutGraph(g, SIZE, 'down');
+  assert.deepEqual(layoutProblems(l, 'down'), []);
+  const y = (id: string) => l.nodes.find(n => n.id === id)!.y;
+  assert.ok(y('read') < y('a') && y('a') < y('merge'));
+  // 위→아래로 그리면 세 갈래가 옆으로 놓여 폭이 높이보다 크지 않게 줄지어진다
+  assert.ok(l.height > SIZE.cardH * 3);
+});

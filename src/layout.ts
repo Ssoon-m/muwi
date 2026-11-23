@@ -1,5 +1,6 @@
 // 그래프 배치. 카드와 연결선이 겹치지 않는 좌표를 계산한다.
 // 계산은 ELK(Eclipse Layout Kernel, elkjs)의 layered 알고리즘이 한다. 왼쪽에서 오른쪽으로 흐르고 선은 직각으로 꺾인다.
+// 세로로 긴 칸(터미널 오른쪽에 둔 그래프)에서는 위에서 아래로 흐르게 할 수 있다 (down).
 // 계획이 바뀌면 전체를 다시 계산한다. 그리는 쪽(Herdr 앱 칸)은 받은 좌표를 그대로 그린다.
 import { createRequire } from 'node:module';
 
@@ -11,6 +12,8 @@ export type LayoutNode = Box & { id: string };
 export type LayoutEdge = { key: string; from: string; to: string; points: Point[] };
 export type Layout = { width: number; height: number; nodes: LayoutNode[]; edges: LayoutEdge[] };
 export type Graph = { nodes: { id: string }[]; edges: { from: string; to: string }[] };
+/** 흐름의 방향: 왼쪽→오른쪽(right) 또는 위→아래(down) */
+export type Flow = 'right' | 'down';
 
 /** 카드 크기 (px, 확대 1 기준). 그리는 쪽과 같아야 한다 */
 export const SIZE = { cardW: 224, cardH: 62 };
@@ -35,14 +38,14 @@ const OPTIONS = {
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
-export async function layoutGraph(g: Graph, size = SIZE): Promise<Layout> {
+export async function layoutGraph(g: Graph, size = SIZE, flow: Flow = 'right'): Promise<Layout> {
   if (!g.nodes.length) return { width: 0, height: 0, nodes: [], edges: [] };
   const ELK = require('./vendor/elk.bundled.cjs');
   const ids = new Set(g.nodes.map(n => n.id));
   const lines = g.edges.filter(e => ids.has(e.from) && ids.has(e.to)).map(e => ({ key: `${e.from}|${e.to}`, from: e.from, to: e.to }));
   const out = await new ELK().layout({
     id: 'plan',
-    layoutOptions: OPTIONS,
+    layoutOptions: flow === 'down' ? { ...OPTIONS, 'elk.direction': 'DOWN', 'elk.layered.spacing.nodeNodeBetweenLayers': '40' } : OPTIONS,
     children: g.nodes.map(n => ({ id: n.id, width: size.cardW, height: size.cardH })),
     edges: lines.map(l => ({ id: l.key, sources: [l.from], targets: [l.to] })),
   });
@@ -58,7 +61,7 @@ export async function layoutGraph(g: Graph, size = SIZE): Promise<Layout> {
 
 // ── 겹침 검사 ──────────────────────────────────────────────────────────
 // 배치가 지켜야 할 것: 카드끼리 겹치지 않는다, 선은 직각으로 꺾인다,
-// 선은 출발 카드 오른쪽 변에서 나가 도착 카드 왼쪽 변으로 들어간다, 선이 카드를 지나지 않는다,
+// 선은 출발 카드 오른쪽 변에서 나가 도착 카드 왼쪽 변으로 들어간다 (위→아래면 아래 변에서 나가 위 변으로), 선이 카드를 지나지 않는다,
 // 두 선이 같은 줄 위에 포개지지 않는다.
 
 type Seg = { a: Point; b: Point; edge: string };
@@ -74,7 +77,7 @@ function segCrosses(s: Seg, b: Box): boolean {
 }
 
 /** 배치의 문제 목록. 비어 있으면 겹침 없이 그릴 수 있다 */
-export function layoutProblems(l: Layout): string[] {
+export function layoutProblems(l: Layout, flow: Flow = 'right'): string[] {
   const out: string[] = [];
   const at = new Map(l.nodes.map(n => [n.id, n]));
   const segs = l.edges.flatMap(segsOf);
@@ -91,8 +94,13 @@ export function layoutProblems(l: Layout): string[] {
       continue;
     }
     const [p0, pn] = [e.points[0], e.points[e.points.length - 1]];
-    if (Math.abs(p0[0] - (src.x + src.w)) > 0.6 || p0[1] < src.y || p0[1] > src.y + src.h) out.push(`선이 출발 카드 오른쪽 변에서 나가지 않음: ${e.key}`);
-    if (Math.abs(pn[0] - dst.x) > 0.6 || pn[1] < dst.y || pn[1] > dst.y + dst.h) out.push(`선이 도착 카드 왼쪽 변으로 들어가지 않음: ${e.key}`);
+    if (flow === 'down') {
+      if (Math.abs(p0[1] - (src.y + src.h)) > 0.6 || p0[0] < src.x || p0[0] > src.x + src.w) out.push(`선이 출발 카드 아래 변에서 나가지 않음: ${e.key}`);
+      if (Math.abs(pn[1] - dst.y) > 0.6 || pn[0] < dst.x || pn[0] > dst.x + dst.w) out.push(`선이 도착 카드 위 변으로 들어가지 않음: ${e.key}`);
+    } else {
+      if (Math.abs(p0[0] - (src.x + src.w)) > 0.6 || p0[1] < src.y || p0[1] > src.y + src.h) out.push(`선이 출발 카드 오른쪽 변에서 나가지 않음: ${e.key}`);
+      if (Math.abs(pn[0] - dst.x) > 0.6 || pn[1] < dst.y || pn[1] > dst.y + dst.h) out.push(`선이 도착 카드 왼쪽 변으로 들어가지 않음: ${e.key}`);
+    }
     for (const s of segsOf(e)) {
       if (Math.abs(s.a[0] - s.b[0]) > 0.6 && Math.abs(s.a[1] - s.b[1]) > 0.6) out.push(`비스듬한 선: ${e.key}`);
     }

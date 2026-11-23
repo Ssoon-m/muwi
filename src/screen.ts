@@ -21,6 +21,11 @@ export const SPLIT_ID = 'muwi-split';
  */
 export const PLACE_VERSION = 2;
 const GRAPH_PX = 300;
+const GRAPH_SIDE_PX = 480;
+
+/** 그래프 칸의 자리: 터미널 영역의 아래, 위, 오른쪽 */
+export type GraphAt = 'bottom' | 'top' | 'right';
+export const GRAPH_AT: GraphAt[] = ['bottom', 'top', 'right'];
 /** Herdr가 직접 내는 레이아웃. 업데이트되면 그 모양을 따라 다시 복제할 수 있다 */
 const SHIPPED = new Set(['main', 'terminals', 'win98']);
 
@@ -42,12 +47,16 @@ export type LayoutRecord = {
   base: string;
   /** 복제할 때의 Herdr 버전 */
   version?: string;
-  /** 우리가 쓴 복제본 파일의 해시. 다르면 사람이 고친 것이다 */
+  /** 우리가 쓴 복제본의 해시. 다르면 사람이 고친 것이다 */
   hash: string;
+  /** tree: 나무 내용의 해시 (키 순서와 상관없다). 없으면 파일 글자의 해시 (0.5.3 이하) */
+  hashKind?: 'tree';
   /** 어느 판의 배치로 넣었나 (PLACE_VERSION). 없으면 1 */
   shape?: number;
   list: boolean;
   graph: boolean;
+  /** 그래프 칸을 둔 자리. 없으면 아래 */
+  graphAt?: GraphAt;
   at: string;
 };
 
@@ -55,6 +64,19 @@ const recordFile = (dir: string) => path.join(dir, 'layout.json');
 export const readLayoutRecord = (dir: string) => readJson<LayoutRecord>(recordFile(dir));
 
 const hashOf = (text: string) => crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
+
+/** 키 순서와 상관없이 같은 나무면 같은 글이 되게 (Herdr가 layout.set으로 파일을 다시 쓰면 키 순서가 바뀐다) */
+function stable(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(stable);
+  if (v && typeof v === 'object') return Object.fromEntries(Object.keys(v as object).sort().map(k => [k, stable((v as Record<string, unknown>)[k])]));
+  return v;
+}
+const treeHash = (tree: LayoutNode) => hashOf(JSON.stringify(stable(tree)));
+
+/** 복제본이 우리가 마지막으로 쓴 그대로인가. 예전 기록(hashKind 없음)은 파일 글자로 비교한다 */
+function untouched(record: LayoutRecord, file: { tree: LayoutNode; text: string }): boolean {
+  return record.hashKind === 'tree' ? treeHash(file.tree) === record.hash : hashOf(file.text) === record.hash;
+}
 /** Herdr 앱의 설정 폴더 (setup.ts의 places와 같은 규칙) */
 const herdrHome = (env: NodeJS.ProcessEnv) => env.HERDR_APP_HOME || path.join(env.HOME || os.homedir(), '.config', 'herdr-app');
 const layoutsDir = (env: NodeJS.ProcessEnv) => path.join(herdrHome(env), 'layouts');
@@ -91,7 +113,7 @@ export function hasMuwi(tree: LayoutNode): boolean {
  *   graph: 터미널 영역(content.tab "active")을 담은 칸 아래에 그래프 칸을 넣었다. 둘을 새 세로 묶음으로 감싸서
  *          그 사이 경계를 끌어 높이를 바꿀 수 있게 한다 (Herdr의 기본 레이아웃은 작업 영역의 경계를 끌 수 없게 해 둔다)
  */
-export function placeMuwi(tree: LayoutNode): { tree: LayoutNode; list: boolean; graph: boolean } {
+export function placeMuwi(tree: LayoutNode, where: GraphAt = 'bottom'): { tree: LayoutNode; list: boolean; graph: boolean } {
   const root = structuredClone(tree);
   let list = false;
   walk(root, n => {
@@ -104,12 +126,13 @@ export function placeMuwi(tree: LayoutNode): { tree: LayoutNode; list: boolean; 
   const trail = trailTo(root, n => n.type === 'block' && n.content?.tab === 'active');
   let graph = false;
   if (trail && trail.length > 1) {
+    const side = where === 'right';
     const block: LayoutNode = {
       id: GRAPH_ID,
       type: 'block',
-      size: { px: GRAPH_PX },
-      min: 140,
-      max: 900,
+      size: { px: side ? GRAPH_SIDE_PX : GRAPH_PX },
+      min: side ? 280 : 140,
+      max: side ? 1400 : 900,
       content: { mod: 'muwi', props: { variant: list ? 'graph' : 'full' } },
     };
     // 터미널 영역을 담은 가장 가까운 세로 묶음에서 터미널 영역 쪽 칸을 고른다 (오른쪽 패널이 있으면 그것까지).
@@ -122,18 +145,20 @@ export function placeMuwi(tree: LayoutNode): { tree: LayoutNode; list: boolean; 
       target = trail[i + 1];
       break;
     }
-    // 고른 칸과 그래프를 끌 수 있는 경계로 나눈 세로 묶음으로 감싼다. 묶음은 고른 칸의 자리와 크기를 물려받는다
+    // 고른 칸과 그래프를 끌 수 있는 경계로 나눈 묶음으로 감싼다 (아래·위는 세로, 오른쪽은 가로).
+    // 묶음은 고른 칸의 자리와 크기를 물려받는다
     const at = parent.children!.indexOf(target);
     const { size, min, max, ...rest } = target;
+    const main = { ...rest, size: { weight: 1 }, min: side ? 320 : 120 };
     parent.children![at] = {
       id: SPLIT_ID,
-      type: 'column',
+      type: side ? 'row' : 'column',
       resizable: true,
       divider: { width: 1, color: 'border' },
       ...(size !== undefined ? { size } : {}),
       ...(min !== undefined ? { min } : {}),
       ...(max !== undefined ? { max } : {}),
-      children: [{ ...rest, size: { weight: 1 }, min: 120 }, block],
+      children: where === 'top' ? [block, main] : [main, block],
     };
     graph = true;
   }
@@ -192,7 +217,7 @@ export function screenState(dir: string, env: NodeJS.ProcessEnv = process.env): 
   const base: Screen = { app: Boolean(shown), muwi: false, canList: false, canGraph: false, record, outdated: false, edited: false };
   if (record) {
     const file = readTree(env, record.name);
-    base.edited = Boolean(file && hashOf(file.text) !== record.hash);
+    base.edited = Boolean(file && !untouched(record, file));
   }
   if (!shown) return base;
   const version = appVersion(env);
@@ -245,7 +270,7 @@ function freeName(env: NodeJS.ProcessEnv, record: LayoutRecord | null): string {
   const ours = (name: string) => {
     if (record?.name !== name) return false;
     const file = readTree(env, name);
-    return !file || hashOf(file.text) === record.hash;
+    return !file || untouched(record, file);
   };
   for (let i = 1; i < 50; i++) {
     const name = i === 1 ? LAYOUT_NAME : `${LAYOUT_NAME}-${i}`;
@@ -254,32 +279,44 @@ function freeName(env: NodeJS.ProcessEnv, record: LayoutRecord | null): string {
   throw new ScreenError('muwi 레이아웃 이름을 정하지 못했어요. layouts 폴더의 muwi-* 파일을 정리해 주세요.');
 }
 
-export type Applied = { name: string; base: string; list: boolean; graph: boolean; already?: boolean; refreshed?: boolean };
+export type Applied = { name: string; base: string; list: boolean; graph: boolean; graphAt: GraphAt; already?: boolean; refreshed?: boolean; moved?: boolean };
 
 /**
  * 지금 레이아웃을 복제해 muwi 칸을 넣고 그 레이아웃으로 바꾼다.
- * 이미 muwi 칸이 있으면 그대로 둔다. 우리 복제본이 옛 Herdr 버전의 것이면 새 모양으로 다시 복제한다.
+ * 이미 muwi 칸이 있으면 그대로 둔다. 우리 복제본이 옛 모양이거나(Herdr 업데이트, muwi 배치 변경)
+ * 그래프 자리를 바꾸라고 하면(graphAt) 원래 레이아웃에서 다시 복제한다.
  */
-export function applyLayout(dir: string, env: NodeJS.ProcessEnv = process.env): Applied {
+export function applyLayout(dir: string, env: NodeJS.ProcessEnv = process.env, o: { graphAt?: GraphAt } = {}): Applied {
   const state = screenState(dir, env);
   if (!state.app || !state.shown) throw new ScreenError('Herdr 앱이 열려 있지 않거나 herdr-app 명령이 없어요. Herdr 앱을 켠 뒤에 다시 실행해요.');
+  const ours = Boolean(state.record && state.record.name === state.shown);
+  const was = state.record?.graphAt ?? 'bottom';
+  // 자리를 말하지 않으면 전에 고른 자리를 쓴다
+  const where = o.graphAt ?? state.record?.graphAt ?? 'bottom';
   let base = state.shown;
   let refreshed = false;
+  let moved = false;
+  // 그래프 자리만 바꾸는 것이면 지금 레이아웃에서 그 칸만 옮긴다. 레이아웃을 바꾸지 않으니 화면이 번쩍이지 않는다
+  if (state.muwi && ours && where !== was && !state.outdated && !state.edited) return moveGraph(dir, env, state.record!, where);
   if (state.muwi) {
-    if (!state.outdated) return { name: state.shown, base: state.record?.base ?? state.shown, list: true, graph: true, already: true };
+    moved = ours && where !== was;
+    if (!state.outdated && !moved) {
+      if (o.graphAt && !ours) throw new ScreenError(`${state.shown} 레이아웃은 muwi layout이 만든 것이 아니라 그래프 자리를 바꾸지 못해요. 레이아웃 파일에서 muwi 칸을 옮기거나, muwi 칸이 없는 레이아웃에서 muwi layout --graph ${where}을 실행해요.`);
+      return { name: state.shown, base: state.record?.base ?? state.shown, list: true, graph: true, graphAt: was, already: true };
+    }
     // Herdr가 업데이트됐거나 muwi의 배치가 바뀌었다. 우리 복제본을 다시 만든다 (사람이 손으로 고쳤으면 그대로 둔다)
     if (state.edited) {
-      const why = state.outdatedBy === 'herdr' ? 'Herdr가 업데이트됐지만' : 'muwi 화면 배치가 바뀌었지만';
+      const why = moved ? '그래프 자리를 바꾸려고 했지만' : state.outdatedBy === 'herdr' ? 'Herdr가 업데이트됐지만' : 'muwi 화면 배치가 바뀌었지만';
       throw new ScreenError(`${why} ${state.shown} 레이아웃을 손으로 고친 것 같아 다시 만들지 않았어요. 고친 복제본은 남겨 두고 새로 만들려면 muwi layout --remove 뒤에 muwi layout을 실행해요.`);
     }
     base = state.record!.base;
     switchTo(env, base);
     fs.rmSync(layoutPath(env, state.shown), { force: true });
-    refreshed = true;
+    refreshed = !moved;
   }
   const from = readTree(env, base);
   if (!from) throw new ScreenError(`${base} 레이아웃 파일을 읽지 못했어요.`);
-  const check = placeMuwi(from.tree);
+  const check = placeMuwi(from.tree, where);
   if (!check.list && !check.graph) {
     throw new ScreenError(`${base} 레이아웃에는 Agents 칸도 터미널 영역도 없어서 muwi 칸을 넣을 자리를 못 찾았어요. 그래프는 muwi open으로 터미널 옆에 열어요.`);
   }
@@ -292,7 +329,7 @@ export function applyLayout(dir: string, env: NodeJS.ProcessEnv = process.env): 
   const copy = waitForTree(env, name);
   if (!copy) throw new ScreenError(`복제한 레이아웃을 읽지 못했어요: ${file}`);
 
-  const placed = placeMuwi(copy.tree);
+  const placed = placeMuwi(copy.tree, where);
   const text = JSON.stringify(placed.tree, null, 2) + '\n';
   const since = Date.now();
   const tmp = `${file}.muwi-tmp`;
@@ -313,14 +350,57 @@ export function applyLayout(dir: string, env: NodeJS.ProcessEnv = process.env): 
     name,
     base,
     ...(copy.tree.cloned_from?.version ? { version: copy.tree.cloned_from.version } : state.version ? { version: state.version } : {}),
-    hash: hashOf(text),
+    hash: treeHash(placed.tree),
+    hashKind: 'tree',
     shape: PLACE_VERSION,
     list: placed.list,
     graph: placed.graph,
+    graphAt: where,
     at: new Date().toISOString(),
   };
   writeJson(recordFile(dir), record);
-  return { name, base, list: placed.list, graph: placed.graph, ...(refreshed ? { refreshed } : {}) };
+  return { name, base, list: placed.list, graph: placed.graph, graphAt: where, ...(refreshed ? { refreshed } : {}), ...(moved ? { moved } : {}) };
+}
+
+/** 레이아웃 나무에서 muwi가 넣은 묶음(터미널 영역 + 그래프)을 풀어 터미널 영역만 그 자리에 돌려놓는다 */
+export function unplaceGraph(tree: LayoutNode): LayoutNode {
+  const root = structuredClone(tree);
+  const trail = trailTo(root, n => n.id === SPLIT_ID);
+  if (!trail || trail.length < 2) return root;
+  const split = trail[trail.length - 1];
+  const parent = trail[trail.length - 2];
+  const main = (split.children ?? []).find(c => c.id !== GRAPH_ID);
+  if (!main) return root;
+  // 감쌀 때 터미널 영역에 붙인 크기는 떼고, 묶음이 물려받았던 원래 크기를 돌려준다
+  const { size: _size, min: _min, max: _max, ...rest } = main;
+  const back: LayoutNode = { ...rest };
+  if (split.size !== undefined) back.size = split.size;
+  if (split.min !== undefined) back.min = split.min;
+  if (split.max !== undefined) back.max = split.max;
+  parent.children![parent.children!.indexOf(split)] = back;
+  return root;
+}
+
+/**
+ * 지금 보이는 muwi 레이아웃에서 그래프 칸만 다른 자리로 옮긴다 (layout.set). 레이아웃을 바꾸지 않아 바로 그 자리에 붙는다.
+ * 가로·세로가 바뀌면 그 방향의 기본 크기로 맞춘다
+ */
+function moveGraph(dir: string, env: NodeJS.ProcessEnv, record: LayoutRecord, where: GraphAt): Applied {
+  const file = readTree(env, record.name);
+  if (!file) throw new ScreenError(`${record.name} 레이아웃 파일을 읽지 못했어요.`);
+  const content = trailTo(file.tree, n => n.id === GRAPH_ID)?.at(-1)?.content;
+  const placed = placeMuwi(unplaceGraph(file.tree), where);
+  const graph = trailTo(placed.tree, n => n.id === GRAPH_ID)?.at(-1);
+  if (!graph) throw new ScreenError('그래프 칸을 옮길 자리를 찾지 못했어요.');
+  if (content) graph.content = content; // 사이드바 목록이 있으니 그래프만 그리는 모양 그대로
+  const set = herdrApp(['do', 'layout.set', JSON.stringify({ layout: placed.tree })], env);
+  if (!set.ok) throw new ScreenError(`그래프 칸을 옮기지 못했어요: ${(set.err || set.out).trim()}`);
+  const was = record.graphAt ?? 'bottom';
+  if ((was === 'right') !== (where === 'right')) {
+    herdrApp(['do', 'layout.resize', JSON.stringify({ id: GRAPH_ID, px: where === 'right' ? GRAPH_SIDE_PX : GRAPH_PX })], env);
+  }
+  writeJson(recordFile(dir), { ...record, graphAt: where, hash: treeHash(placed.tree), hashKind: 'tree', at: new Date().toISOString() });
+  return { name: record.name, base: record.base, list: record.list, graph: true, graphAt: where, moved: true };
 }
 
 function switchTo(env: NodeJS.ProcessEnv, name: string) {
@@ -345,7 +425,7 @@ export function removeLayout(dir: string, env: NodeJS.ProcessEnv = process.env):
   }
   // 앱이 닫혀 있고 그 레이아웃이 마지막으로 보던 것이면 지우지 않는다 (다음에 켤 때 보여 줄 것이 없어진다)
   const stillShown = !shown && sharedLayout(env) === record.name;
-  if (current && hashOf(current.text) !== record.hash) result.kept = file;
+  if (current && !untouched(record, current)) result.kept = file;
   else if (current && !stillShown) {
     fs.rmSync(file, { force: true });
     result.deleted = true;
