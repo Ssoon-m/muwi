@@ -388,10 +388,13 @@ export default class Muwi extends View {
     if (!term) return; // 그래프 칸 같은 mod 칸에 키보드가 있다
     const work = links.get(term);
     const known = Boolean(work) && (this.data.works ?? []).some((w) => w.work === work);
-    const key = `${term}|${known ? work : ""}`;
+    // 에이전트가 떴는지도 함께 본다. 새 탭은 셸로 시작해서 그 뒤에 claude가 뜨므로, 뜨는 순간 다시 따져야
+    // "그래프 없음"으로 바뀐다 (터미널이 바뀔 때만 따지면 전에 보던 작업이 그대로 남는다)
+    const agent = agents().some((a) => a.address === term);
+    const key = `${term}|${known ? work : ""}|${agent ? "agent" : ""}`;
     if (key === this.followKey) return;
     this.followKey = key;
-    this.planless = !known && agents().some((a) => a.address === term);
+    this.planless = !known && agent;
     this.planlessSince = shared(PICKED) ?? 0;
     if (known && work !== this.wanted()) this.followTo = work;
   }
@@ -797,7 +800,7 @@ export default class Muwi extends View {
       this.select(w.work, cx);
       const target = this.targetOf(item);
       // 옮겨 간 터미널이 이 작업을 하고 있으니 따라가기가 다시 바꿀 것이 없다
-      if (target) this.followKey = `${target}|${w.work}`;
+      if (target) this.followKey = `${target}|${w.work}|agent`;
       this.go(target);
     };
     if (compact) {
