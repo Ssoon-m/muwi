@@ -136,3 +136,22 @@ muwi node <노드 id> done "<결과 한 줄>" --work <작업>
 ## 플러그인 업데이트 뒤 그래프 칸이 예전 모양일 때
 
 플러그인이 업데이트되면 다음 세션이 시작될 때 터미널용 명령과 그래프 칸을 새 버전에 맞춥니다. Claude Code 세션을 한 번 새로 여세요.
+
+새 모양이었다가 갑자기 예전 모양(`위 · 아래 · 오른쪽` 버튼이나 기록 칸 너비 조절이 없는 모양)으로 돌아갔다면, 0.4.0이나 0.5.0 때 연 세션이 아직 남아 있는 것입니다. 그 세션은 시작될 때(대화 압축, `/clear` 포함) 설치를 자기 버전으로 되돌렸습니다. `muwi setup`을 다시 실행하세요. 0.5.5부터는 설치 기록을 새 파일(`~/.muwi/setup.json`)에 적어서 옛 세션이 되돌리지 못합니다.
+
+## Windows에서 진행이 기록되지 않을 때
+
+Claude Code는 Windows에서 훅을 Git Bash로 실행합니다. Git for Windows가 없거나 Claude Code가 찾지 못하면 훅이 돌지 않습니다. 작업은 막히지 않지만 계획 알림이 없고, 노드의 기록에 "읽은 skill을 볼 수 없었어요"가 나옵니다.
+
+1. [Git for Windows](https://git-scm.com/download/win)를 설치하세요.
+2. 기본 위치가 아닌 곳에 설치했으면 환경 변수 `CLAUDE_CODE_GIT_BASH_PATH`에 `bash.exe`의 경로를 넣으세요.
+3. Claude Code 세션을 새로 여세요.
+
+## Windows의 PowerShell에서 muwi를 찾지 못할 때
+
+`muwi setup`이 넣은 `muwi.cmd`는 `%USERPROFILE%\.local\bin`에 있습니다. 이 폴더를 사용자 PATH에 넣고 터미널을 다시 여세요.
+
+```powershell
+$p = [Environment]::GetEnvironmentVariable("Path", "User")
+[Environment]::SetEnvironmentVariable("Path", "$p;$env:USERPROFILE\.local\bin", "User")
+```

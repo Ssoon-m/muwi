@@ -446,8 +446,9 @@ test('Node가 낮으면 무엇이 필요한지 알린다 (조용히 실패하지
   const old = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-oldnode-'));
   // 22.14인 척하는 node: TypeScript 파일을 실행하지 못한다
   fs.writeFileSync(path.join(old, 'node'), '#!/bin/sh\nif [ "$1" = "-v" ]; then echo v22.14.0; exit 0; fi\necho "ERR_UNKNOWN_FILE_EXTENSION" >&2\nexit 1\n', { mode: 0o755 });
-  // SHELL을 주지 않아 로그인 셸에 묻지 않는다. 캐시는 기록 폴더 밖에 둔다
-  const env = (p: string) => ({ PATH: p, HOME: dir, MUWI_DIR: dir, XDG_CACHE_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-cache-')) });
+  // 로그인 셸에 묻지 않게 없는 셸을 준다. SHELL을 빼면 macOS의 /bin/sh(bash)가 사용자의 로그인 셸로 채워서,
+  // 그 셸이 찾은 Node(CI 러너의 Homebrew Node 같은)로 성공해 버린다. 캐시는 기록 폴더 밖에 둔다
+  const env = (p: string) => ({ PATH: p, HOME: dir, MUWI_DIR: dir, SHELL: '/nonexistent/sh', XDG_CACHE_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-cache-')) });
   const bin = path.resolve(import.meta.dirname, '../bin/muwi');
   const stale = spawnSync('/bin/sh', [bin, '--version'], { encoding: 'utf8', env: env(`${old}:/usr/bin:/bin`) });
   assert.equal(stale.status, 1);

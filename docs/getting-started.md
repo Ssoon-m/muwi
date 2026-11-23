@@ -18,6 +18,8 @@ muwi를 설치하고, AI에게 일을 하나 맡겨서 그 진행을 그래프�
 | [Herdr 앱](https://herdr.dev) | 앱을 열고, 그 안의 터미널에서 진행합니다 |
 | Node 24 이상 | `node -v` |
 
+Windows에서는 Git for Windows도 필요합니다. Claude Code가 훅을 Git Bash로 실행합니다. 다른 점은 [Windows에서 쓰기](reference/setup.md#windows에서-쓰기)에 있습니다.
+
 nvm이나 mise로 Node를 골라도 됩니다. Herdr가 띄우는 세션은 셸 설정을 읽지 않지만, muwi가 로그인 셸에 물어 터미널과 같은 Node를 찾습니다. 찾는 방법은 [문제 해결하기](guides/troubleshooting.md#node-24-이상이-필요하다고-나올-때)에 있습니다.
 
 ## 1. 플러그인 설치하기
@@ -44,7 +46,7 @@ claude
 muwi setup 실행해줘
 ```
 
-플러그인의 `muwi` 명령은 Claude Code 안에서만 보입니다. `muwi setup`은 터미널에서도 쓸 수 있는 `muwi` 명령(`~/.local/bin/muwi`)과 Herdr 앱의 그래프 칸을 설치합니다.
+플러그인의 `muwi` 명령은 Claude Code 안에서만 보입니다. `muwi setup`은 터미널에서도 쓸 수 있는 `muwi` 명령(`~/.local/bin/muwi`, Windows는 `muwi.cmd`도)과 Herdr 앱의 그래프 칸을 설치합니다.
 
 ## 3. 화면에 muwi 넣기
 
