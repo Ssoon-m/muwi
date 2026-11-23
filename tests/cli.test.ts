@@ -134,6 +134,19 @@ test('끝난 작업에 붙어 있던 세션이 새 계획을 내면 새 작업 �
   assert.match(r.err, /새 작업이면 --work <이름>/);
 });
 
+test('새 결과: 끝났는데 안 본 작업은 status에 새 결과로 보이고, muwi viewed로 본 것으로 적으면 끝으로 간다', () => {
+  const { muwi } = bench();
+  muwi(['plan', '--work', 'nr', '--request', '작업해줘', '{"nodes":[{"id":"a","title":"a"}]}']);
+  muwi(['node', 'a', 'start']);
+  muwi(['node', 'a', 'done', '결과']);
+  assert.match(muwi(['status']).out, /새 결과\s+nr\s+1\/1/);
+  assert.match(muwi(['show']).out, /nr · 끝 · 아직 안 봄 \(1\/1 끝\)/);
+  assert.match(muwi(['viewed', '--work', 'nr']).out, /nr: 본 것으로 적었어요/);
+  assert.match(muwi(['status']).out, /끝\s+nr\s+1\/1/);
+  // 이미 봤으면 다시 적지 않는다
+  assert.match(muwi(['viewed', '--work', 'nr']).out, /새 결과가 아니에요 \(이미 봤어요\)/);
+});
+
 test('muwi show·status·board: 사람이 읽는 글과 화면이 읽는 JSON', () => {
   const { muwi } = bench();
   muwi(['plan', '--work', 'w', '--request', '작업해줘', PLAN]);
@@ -143,11 +156,11 @@ test('muwi show·status·board: 사람이 읽는 글과 화면이 읽는 JSON', 
   muwi(['node', 'impl', 'wait', 'A안과 B안 중 어느 쪽?']);
   muwi(['flag', 'read', '미정 항목을 놓침']);
   const show = muwi(['show']).out;
-  assert.match(show, /w · 연수원명 클릭 시 상세 이동 · 나를 기다림 \(1\/3 끝\)/);
+  assert.match(show, /w · 연수원명 클릭 시 상세 이동 · 응답 대기 \(1\/3 끝\)/);
   assert.match(show, /읽은 skill: spec-reader/);
   assert.match(show, /기다리는 것: A안과 B안 중 어느 쪽\?/);
   assert.match(show, /⚑ 문제 표시 .*미정 항목을 놓침/);
-  assert.match(muwi(['status']).out, /나를 기다림\s+w\s+1\/3/);
+  assert.match(muwi(['status']).out, /응답 대기\s+w\s+1\/3/);
 
   const board = JSON.parse(muwi(['board']).out);
   assert.equal(board.works[0].work, 'w');

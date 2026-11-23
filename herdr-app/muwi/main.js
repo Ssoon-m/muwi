@@ -1,9 +1,9 @@
 // muwi 그래프 칸 (Herdr 앱 mod).
 // AI가 적은 작업 계획과 진행 기록을 `muwi board`로 읽어 그린다. 기록도 세션도 바꾸지 않는다.
-//   작업 목록: 급한 순서로 묶는다 (나를 기다림이 위). 계획 없이 일하는 세션도 같이 보여서 Herdr의 Agents 칸을 대신한다
+//   작업 목록: 급한 순서로 묶는다 (응답 대기가 위, 끝났는데 아직 안 본 작업은 "새 결과"). 계획 없이 일하는 세션도 같이 보여서 Herdr의 Agents 칸을 대신한다
 //   그래프: 고른 작업의 계획. 카드와 선의 좌표는 `muwi board`가 ELK로 계산해서 준다. 기록이 바뀌면 전체를 다시 그린다
 //   기록: 고른 노드의 기록 (맡은 세션, 걸린 시간, 읽은 skill, 문제 표시) 또는 작업의 기록 (계획이 바뀐 이유)
-// 끌어서 옮기고, cmd/ctrl+스크롤로 확대한다. 지금 일어나는 곳(작업 중, 나를 기다림)이 보이게 따라간다.
+// 끌어서 옮기고, cmd/ctrl+스크롤로 확대한다. 지금 일어나는 곳(작업 중, 응답 대기)이 보이게 따라간다.
 // 키보드가 있는 터미널이 바뀌면 그 터미널의 세션이 하는 작업으로 바꿔 보여 준다.
 import { View, div, svg, image, PathBuilder } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -19,8 +19,8 @@ const PLACE_NAME = { bottom: "아래", top: "위", right: "오른쪽" };
 /** 오른쪽 기록 칸의 가장 좁은 너비 */
 const DETAIL_MIN = 220;
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const STATE_NAME = { waiting: "나를 기다림", blocked: "막힘", doing: "작업 중", stalled: "멈춤", done: "끝", idle: "노드 사이" };
-const STATUS_NAME = { todo: "아직", doing: "작업 중", waiting: "나를 기다림", blocked: "막힘", done: "끝" };
+const STATE_NAME = { waiting: "응답 대기", blocked: "막힘", doing: "작업 중", stalled: "멈춤", done: "끝", idle: "노드 사이" };
+const STATUS_NAME = { todo: "아직", doing: "작업 중", waiting: "응답 대기", blocked: "막힘", done: "끝" };
 const AGENT_NAME = { working: "세션 작업 중", blocked: "세션이 입력을 기다림", done: "세션이 멈춤", idle: "세션이 멈춤" };
 const RUN_NAME = { me: "직접", subagent: "서브에이전트", session: "새 세션" };
 /** 세션 상태의 급한 정도 (Herdr의 Agents 칸과 같은 순서) */
@@ -144,6 +144,7 @@ const SAMPLE = (() => {
     works: [
       { ...work, past: false, active: [{ id: "pr", title: "PR 올리기", status: "waiting", note: "PR 올릴까요?" }] },
       { ...work, work: "stalled", title: "멈춘 작업", state: "stalled", past: false, active: [{ id: "x", title: "하던 일", status: "doing", closed: true }] },
+      { ...work, work: "fresh", title: "새 결과 작업", state: "done", unread: true, past: false, active: [] },
       { ...work, work: "old", title: "지난 작업", state: "done", past: true, active: [] },
     ],
     errors: [],
@@ -196,7 +197,7 @@ export default class Muwi extends View {
     this.focusKey = null;
     this.stale = false;
     this.showPast = false;
-    /** 접어 둔 묶음 (작업 목록의 "나를 기다림" 같은 것) */
+    /** 접어 둔 묶음 (작업 목록의 "응답 대기" 같은 것) */
     this.folded = new Set();
     /** 키보드가 있는 터미널과 그 작업. 바뀔 때만 따라간다 (사람이 고른 것을 덮어쓰지 않게) */
     this.followKey = null;
@@ -217,6 +218,8 @@ export default class Muwi extends View {
     this.loadedFit = null;
     /** 읽어 둔 작업의 그래프 (작업 → 마지막으로 읽은 것). 탭을 옮기면 이것을 바로 보여 주고 새로 읽는 것은 뒤에서 한다 */
     this.views = new Map();
+    /** 본 것으로 적고 있는 작업 (새 결과). 못 적었으면 이 칸이 다시 켜질 때까지 다시 하지 않는다 */
+    this.viewing = new Set();
     /** 오른쪽 기록 칸의 너비. 경계를 끌어서 바꾸고, 바꾼 너비를 기억한다 */
     this.detailW = (() => {
       try {
@@ -341,6 +344,10 @@ export default class Muwi extends View {
         // 칸 크기를 알기 전에 읽었으면(그래프 칸이 막 켜졌을 때) 크기를 안 지금 한 번 더 읽는다.
         // 그러지 않으면 새 기록이 생길 때까지 칸 크기를 모르고 한 배치(긴 그래프를 접지 않은 한 줄)로 남는다
         if (!fit && this.canvasSize && this.variant() !== "list") this.stale = true;
+        // 끝났는데 아직 안 본 작업을 사람이 골라 보고 있으면(목록에서 눌렀거나, 그 작업의 터미널로 와서 따라왔으면) 본 것으로 적는다.
+        // 아무도 고르지 않아 맨 위 작업을 보여 줄 때는 적지 않는다 (새 결과는 목록 위쪽에 오므로, 보지 않았는데 지워질 수 있다)
+        const sel = data.selected;
+        if (sel?.unread && want && sel.work === want && this.variant() !== "list" && !checking()) this.markViewed(sel.work, cx);
         if (this.node && !data.selected?.nodes.some((n) => n.id === this.node)) {
           this.node = null;
           this.tab = "work";
@@ -464,7 +471,7 @@ export default class Muwi extends View {
   }
 
   colors(t) {
-    // 나를 기다림은 Herdr가 "사람이 필요함"에 쓰는 색, 막힘은 그와 구별되는 색
+    // 응답 대기는 Herdr가 "사람이 필요함"에 쓰는 색, 막힘은 그와 구별되는 색
     return { todo: t.input, doing: t.working, waiting: t.blocked, blocked: t.ansi5 ?? t.blocked, done: t.done, idle: t.muted, stalled: t.muted };
   }
 
@@ -588,7 +595,7 @@ export default class Muwi extends View {
               view.helpers?.sessions ? `새 세션 ${view.helpers.sessions}` : null,
               view.helpers?.subagents ? `서브에이전트 ${view.helpers.subagents}` : null].filter(Boolean).join(" · ") : `${works.length}개 작업`)))
       .when(Boolean(view) && this.size.width >= 860, (el) => el.child(h_flex().flex_none().gap(12)
-        .child(legend("작업 중", c.doing)).child(legend("나를 기다림", c.waiting)).child(legend("막힘", c.blocked)).child(legend("끝", c.done))))
+        .child(legend("작업 중", c.doing)).child(legend("응답 대기", c.waiting)).child(legend("막힘", c.blocked)).child(legend("끝", c.done))))
       .when(Boolean(place), (el) => el.child(place));
   }
 
@@ -753,14 +760,17 @@ export default class Muwi extends View {
     // 그 작업을 하는 세션이 입력을 기다린다 (권한 확인 같은 것). 사람이 가 봐야 한다
     if (ask) return div().w(14).flex_none().text_color(c.waiting).font_semibold().child("!");
     if (w.state === "doing") return div().w(14).flex_none().text_color(c.doing).frames(SPIN, 90);
+    // 새 결과: 끝났는데 아직 안 봤다 (읽지 않은 메시지처럼 점으로)
+    if (w.unread) return div().w(14).flex_none().text_color(t.accent).child("●");
     const mark = { waiting: "⏸", blocked: "✗", stalled: "◌", done: "✓", idle: "○" }[w.state] ?? "•";
     return div().w(14).flex_none().text_color(c[w.state] ?? t.muted).child(mark);
   }
 
   /**
-   * 작업 목록의 묶음. 급한 순서: 나를 기다림 → 막힘 → 작업 중 → 멈춤 → 노드 사이 → 계획 없는 세션 → 끝.
+   * 작업 목록의 묶음. 급한 순서: 응답 대기 → 막힘 → 새 결과 → 작업 중 → 멈춤 → 노드 사이 → 계획 없는 세션 → 끝.
+   * 새 결과: 모두 끝났는데 사람이 아직 보지 않은 작업. 그 작업을 골라 그래프로 보면 "끝"으로 내려간다.
    * 계획 없이 일하는 세션(작업에 붙지 않은 에이전트)도 넣는다. 그래서 Herdr의 Agents 칸이 없어도 모든 세션이 보인다.
-   * 세션이 입력을 기다리면(권한 확인 같은 것) 그 작업이나 세션을 "나를 기다림"으로 올린다
+   * 세션이 입력을 기다리면(권한 확인 같은 것) 그 작업이나 세션을 "응답 대기"로 올린다
    */
   groups(t, works, links) {
     const c = this.colors(t);
@@ -773,11 +783,12 @@ export default class Muwi extends View {
       if (work && open.has(work)) byWork.set(work, [...(byWork.get(work) ?? []), a]);
       else free.push(a);
     }
-    const bucket = { need: [], blocked: [], doing: [], stalled: [], idle: [], free: [], done: [] };
+    const bucket = { need: [], blocked: [], fresh: [], doing: [], stalled: [], idle: [], free: [], done: [] };
     for (const w of current) {
       const mine = byWork.get(w.work) ?? [];
       const item = { kind: "work", w, agents: mine, ask: mine.some((a) => a.status === "blocked") };
       if (w.state === "waiting" || item.ask) bucket.need.push(item);
+      else if (w.unread) bucket.fresh.push(item);
       else (bucket[w.state] ?? bucket.idle).push(item);
     }
     const rank = (a) => AGENT_RANK[a.status] ?? 0;
@@ -787,6 +798,7 @@ export default class Muwi extends View {
     return [
       { id: "need", label: STATE_NAME.waiting, color: c.waiting, items: bucket.need },
       { id: "blocked", label: STATE_NAME.blocked, color: c.blocked, items: bucket.blocked },
+      { id: "fresh", label: "새 결과", color: t.accent, items: bucket.fresh },
       { id: "doing", label: STATE_NAME.doing, color: c.doing, items: bucket.doing },
       { id: "stalled", label: STATE_NAME.stalled, color: t.muted, items: bucket.stalled },
       { id: "idle", label: STATE_NAME.idle, color: t.dim, items: bucket.idle },
@@ -866,7 +878,7 @@ export default class Muwi extends View {
       .on_click(click)
       .child(this.workMark(t, w, c, item.ask))
       .child(v_flex().flex_1().min_w(0).gap(1)
-        .child(div().truncate().text_size(12).text_color(on ? t.foreground : t.muted).when(on, (el) => el.font_medium()).child(w.title ?? w.work))
+        .child(div().truncate().text_size(12).text_color(on || w.unread ? t.foreground : t.muted).when(on || w.unread, (el) => el.font_medium()).child(w.title ?? w.work))
         .child(h_flex().gap(6).text_size(10.5)
           .child(div().flex_1().min_w(0).truncate().text_color(item.ask ? c.waiting : c[w.state] ?? t.dim).child(line))
           .child(div().flex_none().text_color(t.dim).child(ago(w.updatedAt, now)))));
@@ -1069,6 +1081,19 @@ export default class Muwi extends View {
       return agent?.status === "blocked" ? AGENT_NAME.blocked : "새 세션이 뜨는 중";
     }
     return "";
+  }
+
+  /** 새 결과를 본 것으로 적는다. 적고 나면 다시 읽어 목록에서 "끝"으로 내린다 */
+  markViewed(work, cx) {
+    if (this.viewing.has(work)) return;
+    this.viewing.add(work);
+    cx.spawn(async (cx) => {
+      const r = await runMuwi(["viewed", "--work", work], { timeout: 10000 }).catch(() => null);
+      if (r?.code !== 0) return; // 못 적었으면(옛 muwi 명령 등) 다시 시도하지 않는다
+      this.viewing.delete(work);
+      this.stale = true;
+      cx.notify();
+    });
   }
 
   centerOn(view) {

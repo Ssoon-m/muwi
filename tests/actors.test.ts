@@ -657,7 +657,7 @@ test('하던 세션이 닫힌 노드는 "세션이 닫힘"으로 보이고, 시�
   // 터미널을 닫았다: 상태는 그대로 두고(끝났는지 모른다) 닫혔다고만 표시한다. 시간은 마지막으로 본 때까지
   v = loadView(s.dir, s.work, dead)!;
   assert.deepEqual([v.state, v.nodes[0].status, v.nodes[0].closed, v.nodes[0].spentMs / 60_000], ['stalled', 'doing', true, 3]);
-  // 닫힌 세션이 남긴 "나를 기다림"은 작업을 맨 위로 올리지 않는다
+  // 닫힌 세션이 남긴 "응답 대기"는 작업을 맨 위로 올리지 않는다
   at(61); s.node('impl', 'waiting', 'worker', 'PR 올릴까요?');
   assert.equal(loadView(s.dir, s.work, alive)!.state, 'waiting');
   assert.equal(loadView(s.dir, s.work, dead)!.state, 'stalled');
@@ -682,7 +682,8 @@ test('지난 작업: 끝났거나 멈춘 채로 오래된 작업은 접는다. �
     writePlan(dir, plan);
     touchSession(dir, session, {}, herdr(terminal));
     markNode(dir, work, 'n', 'doing', undefined, session, ENV);
-    if (done) markNode(dir, work, 'n', 'done', undefined, session, ENV);
+    // 끝난 작업은 사람이 본 것으로 둔다 (안 본 결과는 "새 결과"라 접지 않는다. 그건 record.test.ts에서 본다)
+    if (done) markNode(dir, work, 'n', 'done', undefined, session, ENV), appendEvent(dir, work, { type: 'viewed' }, null);
   };
   at(0);
   make('old-done', 's1', 't1', true);
