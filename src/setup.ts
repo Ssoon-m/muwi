@@ -309,6 +309,26 @@ export function refreshSetup(o: SetupOptions): boolean {
   return true;
 }
 
+/**
+ * Claude Code 플러그인으로 설치된 muwi 중 가장 새 것. 없으면 null.
+ * 플러그인을 업데이트해도 이미 열려 있는 세션은 시작할 때의 버전을 쓴다. 그 세션의 훅이 새 버전을 찾아 넘기는 데 쓴다
+ */
+export function newestPlugin(env: NodeJS.ProcessEnv = process.env): { root: string; version: string } | null {
+  const claude = env.CLAUDE_CONFIG_DIR || path.join(env.HOME || os.homedir(), '.claude');
+  const data = readJson<{ plugins?: Record<string, unknown> }>(path.join(claude, 'plugins', 'installed_plugins.json'));
+  let best: { root: string; version: string } | null = null;
+  for (const [name, entries] of Object.entries(data?.plugins ?? {})) {
+    if (name.split('@')[0] !== 'muwi' || !Array.isArray(entries)) continue;
+    for (const e of entries as { installPath?: unknown }[]) {
+      const root = typeof e?.installPath === 'string' ? e.installPath : null;
+      if (!root || !fs.existsSync(path.join(root, 'bin', 'muwi'))) continue;
+      const v = readJson<{ version?: string }>(path.join(root, 'package.json'))?.version;
+      if (v && (!best || olderThan(best.version, v))) best = { root, version: v };
+    }
+  }
+  return best;
+}
+
 /** a가 b보다 낮은 버전인가 (1.2.10 > 1.2.9) */
 export function olderThan(a: string, b: string): boolean {
   const pa = a.split('.').map(n => parseInt(n, 10) || 0);

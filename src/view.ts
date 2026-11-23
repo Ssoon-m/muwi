@@ -76,6 +76,10 @@ export type NodeView = PlanNode & {
   instant: boolean;
   /** 끝나지 않았는데 이 노드를 하던 세션이 닫혔다. 하다가 멈춘 것이다 (끝났는지는 알 수 없다) */
   closed?: boolean;
+  /** 시작했다가 잠시 멈췄다 (앞에 먼저 할 노드가 끼어드는 등). 다시 시작하면 같은 회차로 이어진다 */
+  paused?: boolean;
+  /** 앞 노드가 끝나기 전에 시작했다 (그래프 흐름보다 순서를 앞당겼다) */
+  early?: boolean;
   /** 이 노드를 맡기려고 띄운 새 세션들 (muwi run). spawn은 가장 최근 것 */
   spawn?: Spawn;
   spawns: Spawn[];
@@ -315,6 +319,8 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
       else view.runUnknown = true;
     }
     if ((n.status === 'doing' || n.status === 'waiting' || n.status === 'blocked') && last?.who?.session && closed.has(last.who.session)) view.closed = true;
+    if (n.status === 'todo' && (n.attempt ?? 0) > 0) view.paused = true;
+    if ((n.status === 'doing' || n.status === 'waiting') && (n.after ?? []).some(p => plan.nodes.find(x => x.id === p)?.status !== 'done')) view.early = true;
     if (mine.length) view.spawn = mine[mine.length - 1];
     return view;
   });
