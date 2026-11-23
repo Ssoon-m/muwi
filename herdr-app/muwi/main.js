@@ -1116,7 +1116,8 @@ export default class Muwi extends View {
       .on_scroll_wheel((e, cx) => {
         if (e.modifiers.platform || e.modifiers.control) {
           const local = e.local_position ?? { x: cw / 2, y: ch / 2 };
-          this.zoomBy(Math.exp(Math.max(-60, Math.min(60, -e.delta.y)) * 0.004), local, L);
+          // 휠을 위로 굴리면 확대, 아래로 굴리면 축소 (브라우저·지도와 같은 방향)
+          this.zoomBy(Math.exp(Math.max(-60, Math.min(60, e.delta.y)) * 0.004), local, L);
         } else {
           this.pan = { x: this.pan.x + e.delta.x, y: this.pan.y + e.delta.y };
           this.clampPan(L);
