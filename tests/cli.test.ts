@@ -334,7 +334,8 @@ test('그래프 흐름: 하던 노드 앞에 먼저 할 노드가 끼어들면 �
   const plan = JSON.parse(fs.readFileSync(path.join(dir, 'w', 'plan.json'), 'utf8'));
   assert.equal(plan.nodes.find((n: any) => n.id === 'check').status, 'todo');
   const board = JSON.parse(muwi(['board']).out);
-  assert.equal(board.works[0].state, 'idle'); // 지금 하는 노드가 없다 (노드 사이)
+  // 지금 하는 노드가 없다. 세션이 무얼 하는지 모르면(Herdr 밖) 작업 중으로 본다
+  assert.deepEqual([board.works[0].state, board.works[0].between], ['doing', 'unknown']);
   const view = JSON.parse(muwi(['show', 'w', '--json']).out);
   const check = view.nodes.find((n: any) => n.id === 'check');
   assert.deepEqual([check.status, check.paused, check.attempts], ['todo', true, 1]);

@@ -17,7 +17,7 @@ import {
   SCHEMA, SHOW_IN, appendEvent, checkWorkName, clock, listWorks, nowIso, readConfig, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
   type Config, type NodeStatus, type Plan, type RunBy, type ShowIn,
 } from './store.ts';
-import { PAST_DAYS, loadBoard, loadView, type Actor, type NodeView, type Try, type WorkView } from './view.ts';
+import { PAST_DAYS, loadBoard, loadView, type Actor, type Between, type NodeView, type Try, type WorkView } from './view.ts';
 
 const HELP = `사용법: muwi <명령>
 
@@ -192,7 +192,9 @@ function readPlanText(a: Args): string {
 }
 
 const MARK: Record<NodeStatus, string> = { todo: '○', doing: '●', waiting: '⏸', blocked: '✗', done: '✓' };
-const STATE_NAME: Record<WorkView['state'], string> = { waiting: '응답 대기', blocked: '막힘', doing: '작업 중', stalled: '멈춤', done: '끝', idle: '노드 사이' };
+const STATE_NAME: Record<WorkView['state'], string> = { waiting: '응답 대기', blocked: '막힘', doing: '작업 중', stalled: '멈춤', done: '끝' };
+/** 하는 노드가 없을 때 그 작업의 세션이 하는 일 (세션이 무얼 하는지 모르면 적지 않는다) */
+const BETWEEN_NAME: Partial<Record<Between, string>> = { working: '다음 노드 준비 중', asking: '세션이 입력을 기다림', stopped: '세션이 멈춤', gone: '맡은 세션이 없음' };
 
 const RUN_NAME: Record<RunBy, string> = { me: '직접', subagent: '서브에이전트', session: '새 세션' };
 const runTag = (n: { run?: RunBy; show?: ShowIn }) => (n.run ? `${RUN_NAME[n.run]}${n.show ? `, ${n.show}` : ''}` : '');
@@ -488,7 +490,8 @@ function skillsLine(t: Pick<Try, 'skills' | 'seen' | 'instant'>, started: boolea
 }
 
 function printShow(v: WorkView) {
-  out(`${v.work}${v.title ? ` · ${v.title}` : ''} · ${STATE_NAME[v.state]}${v.unread ? ' · 아직 안 봄' : ''} (${v.counts.done}/${v.counts.total} 끝)`);
+  const between = v.between ? BETWEEN_NAME[v.between] : undefined;
+  out(`${v.work}${v.title ? ` · ${v.title}` : ''} · ${STATE_NAME[v.state]}${between ? ` · ${between}` : ''}${v.unread ? ' · 아직 안 봄' : ''} (${v.counts.done}/${v.counts.total} 끝)`);
   if (v.request) out(`요청: ${v.request}`);
   if (v.helpers.sessions || v.helpers.subagents) {
     const lead = v.lead ? v.sessions[v.lead]?.label ?? sessionLabel(null, v.lead) : '';
@@ -581,6 +584,9 @@ function cmdStatus(a: Args, dir: string) {
     // 끝났는데 사람이 아직 안 본 작업은 "새 결과"로 보여 준다
     out(`${(w.unread ? '새 결과' : STATE_NAME[w.state]).padEnd(7)} ${w.work}  ${w.counts.done}/${w.counts.total}${w.title ? `  ${w.title}` : ''}`);
     for (const n of w.active) out(`          ${MARK[n.status]} ${n.id}  ${n.title}${n.closed ? ' (세션이 닫힘)' : ''}${n.note ? ` : ${n.note}` : ''}`);
+    // 하는 노드가 없으면 그 작업의 세션이 무얼 하는지
+    const between = w.between ? BETWEEN_NAME[w.between] : undefined;
+    if (between) out(`          · ${between}`);
   }
   if (past.length && !a.flags.all) out(`지난 작업 ${past.length}개는 접어 뒀어요 (${PAST_DAYS}일 넘게 바뀐 것이 없는 작업). muwi status --all로 봐요.`);
   for (const e of board.errors) out(`⚠ ${e.work}: ${e.message}`);

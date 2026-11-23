@@ -667,6 +667,35 @@ test('하던 세션이 닫힌 노드는 "세션이 닫힘"으로 보이고, 시�
   assert.deepEqual([v.state, v.nodes[0].closed, v.nodes[0].attempts, v.nodes[0].who!.session], ['doing', undefined, 1, 'tomorrow']);
 });
 
+test('하는 노드가 없는 작업은 그 세션이 하는 일로 보인다: 일하는 중이면 작업 중, 멈췄으면 응답 대기, 맡은 세션이 없으면 멈춤', () => {
+  const s = setup([{ id: 'read' }, { id: 'impl', after: ['read'] }]);
+  at(1); touchSession(s.dir, 'lead', {}, { HC_TERMINAL_ID: 't3' } as NodeJS.ProcessEnv); s.node('read', 'doing', 'lead');
+  at(2); s.node('read', 'done', 'lead'); // 앞 노드를 끝냈고, 다음 노드는 아직 시작하지 않았다
+  const shown = (env: NodeJS.ProcessEnv) => {
+    const v = loadView(s.dir, s.work, env)!;
+    return [v.state, v.between];
+  };
+  const herdr = (status: string) => fakeHc([{ address: 't3', status }], { t3: 'lead' });
+  // 다음 노드를 준비하고 있다
+  assert.deepEqual(shown(herdr('working')), ['doing', 'working']);
+  // 노드를 남긴 채 멈췄다: 사람이 말해야 움직인다
+  assert.deepEqual(shown(herdr('done')), ['waiting', 'stopped']);
+  assert.deepEqual(shown(herdr('idle')), ['waiting', 'stopped']);
+  // 입력을 기다린다 (권한 확인 같은 것)
+  assert.deepEqual(shown(herdr('blocked')), ['waiting', 'asking']);
+  // 세션을 닫았다
+  assert.deepEqual(shown(fakeHc([])), ['stalled', 'gone']);
+  // Herdr 밖이라 세션이 무얼 하는지 모른다: 작업 중으로 본다
+  assert.deepEqual(shown({ MUWI_HC: '/no/such/hc' } as NodeJS.ProcessEnv), ['doing', 'unknown']);
+  // 세션이 다른 작업으로 갔다: 이 작업을 맡은 세션이 없다
+  attach(s.dir, 'lead', 'other', ENV);
+  assert.deepEqual(shown(herdr('working')), ['stalled', 'gone']);
+  // 노드를 하는 중이면 세션 상태와 상관없이 노드로 정한다
+  at(3); s.node('impl', 'doing', 'lead');
+  const v = loadView(s.dir, s.work, herdr('done'))!;
+  assert.deepEqual([v.state, v.between], ['doing', undefined]);
+});
+
 test('세션이 시작될 때 터미널에 그 세션의 이름을 붙인다', () => {
   const s = setup([{ id: 'impl' }]);
   const fake = fakeHerdr(null);
