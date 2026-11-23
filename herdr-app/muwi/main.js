@@ -213,6 +213,8 @@ export default class Muwi extends View {
     this.moving = false;
     /** 그래프를 위→아래로 그렸는가 (마지막으로 읽은 것) */
     this.loadedDown = null;
+    /** 읽어 둔 작업의 그래프 (작업 → 마지막으로 읽은 것). 탭을 옮기면 이것을 바로 보여 주고 새로 읽는 것은 뒤에서 한다 */
+    this.views = new Map();
     /** 오른쪽 기록 칸의 너비. 경계를 끌어서 바꾸고, 바꾼 너비를 기억한다 */
     this.detailW = (() => {
       try {
@@ -241,12 +243,18 @@ export default class Muwi extends View {
         cx.notify(); // 진행 중인 노드의 작업 시간을 초마다 늘리고, "여는 중…"을 제때 푼다
       }
     });
-    // 키보드가 다른 터미널로 옮겨 가면 곧바로 그 작업으로 바꾼다 (그리는 중에는 공유 상태를 바꾸지 않는다)
-    cx.timer.every(150, (cx) => {
-      if (!this.followTo) return;
-      const work = this.followTo;
-      this.followTo = null;
-      if (work !== this.wanted()) this.select(work, cx);
+    // 키보드가 다른 터미널로 옮겨 가면 곧바로 그 작업으로 바꾼다 (그리는 중에는 공유 상태를 바꾸지 않는다).
+    // 사이드바 목록과 그래프 칸은 따로 돈다. 다른 칸이 먼저 골랐어도 이 칸은 이 칸대로 바로 읽는다
+    cx.timer.every(50, (cx) => {
+      if (this.followTo) {
+        const work = this.followTo;
+        this.followTo = null;
+        if (work !== this.wanted()) this.select(work, cx);
+        else this.load(cx);
+      } else if (this.stale && !this.loading) {
+        this.stale = false;
+        this.load(cx);
+      }
     });
   }
 
@@ -297,6 +305,7 @@ export default class Muwi extends View {
       return;
     }
     this.loading = true;
+    this.stale = false; // 지금 고른 작업을 읽으므로 따로 다시 읽을 것이 없다
     cx.spawn(async (cx) => {
       try {
         const want = this.wanted();
@@ -314,6 +323,11 @@ export default class Muwi extends View {
           this.again = true;
         }
         this.data = data;
+        if (data.selected) {
+          this.views.delete(data.selected.work); // 최근 것을 뒤로 (오래된 것부터 버린다)
+          this.views.set(data.selected.work, data.selected);
+          if (this.views.size > 40) this.views.delete(this.views.keys().next().value);
+        }
         this.error = null;
         this.loadedDown = down;
         if (this.node && !data.selected?.nodes.some((n) => n.id === this.node)) {
@@ -396,7 +410,17 @@ export default class Muwi extends View {
     this.followKey = key;
     this.planless = !known && agent;
     this.planlessSince = shared(PICKED) ?? 0;
-    if (known && work !== this.wanted()) this.followTo = work;
+    if (known) {
+      // 전에 본 작업이면 기억해 둔 그래프를 바로 보여 준다. 새로 읽는 것은 타이머가 곧바로 한다
+      this.showCached(work);
+      this.followTo = work;
+    }
+  }
+
+  /** 기억해 둔 그 작업의 그래프를 바로 보여 준다 (그리는 중에 불러도 된다: 이 칸의 상태만 바꾼다) */
+  showCached(work) {
+    const cached = this.views.get(work);
+    if (cached && this.data && this.data.selected?.work !== work) this.data = { ...this.data, selected: cached };
   }
 
   /** 그 터미널로 간다. pane에 있으면 그 pane으로, pane 없이 떠 있으면 그 자리에서 들여다본다 */
@@ -436,13 +460,20 @@ export default class Muwi extends View {
     this.follow(links);
     // 다른 칸에서 작업을 바꿨으면 따라간다
     const want = this.wanted();
-    const loaded = this.data?.selected ?? null;
+    let loaded = this.data?.selected ?? null;
+    // 다른 칸에서 작업을 바꿨다: 기억해 둔 그 작업의 그래프를 바로 보여 주고, 새로 읽는 것은 타이머가 곧바로 한다.
+    // 키보드를 따라 다른 작업으로 가는 중이면(followTo) 그 작업이 맞다. 공유 선택은 타이머가 곧 바꾼다
+    const target = this.followTo ?? want;
+    if (!checking() && target && loaded && loaded.work !== target && !this.loading) {
+      this.stale = true;
+      this.showCached(target);
+      loaded = this.data?.selected ?? null;
+    }
     // 다른 칸(사이드바 목록)에서 작업을 골랐으면 빈 화면을 풀고 그 작업을 보여 준다
     if (this.planless && (shared(PICKED) ?? 0) !== this.planlessSince) this.planless = false;
     // 키보드가 있는 세션이 계획 없이 일한다: 다른 작업의 그래프를 띄우면 그 세션이 그 일을 하는 것처럼 보이므로 비워서 보여 준다.
     // 목록에서 작업을 고르면 다시 그 작업을 보여 준다
     const view = this.planless ? null : loaded;
-    if (!checking() && want && loaded && loaded.work !== want && !this.loading) this.stale = true;
     const root = v_flex().id("root").size_full().min_h(0).text_color(t.foreground).text_size(12)
       .on_size_change((size, cx) => {
         if (Math.abs(size.width - this.size.width) > 1 || Math.abs(size.height - this.size.height) > 1) {
