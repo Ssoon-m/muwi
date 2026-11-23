@@ -1,6 +1,7 @@
 // 그래프 배치. 카드와 연결선이 겹치지 않는 좌표를 계산한다.
 // 계산은 ELK(Eclipse Layout Kernel, elkjs)의 layered 알고리즘이 한다. 왼쪽에서 오른쪽으로 흐르고 선은 직각으로 꺾인다.
 // 세로로 긴 칸(터미널 오른쪽에 둔 그래프)에서는 위에서 아래로 흐르게 할 수 있다 (down).
+// 칸 크기를 알면 두 방향을 다 ELK로 계산해 보고, 칸에 훨씬 크게 들어가는 방향을 쓴다 (layoutFor). 배치 자체는 ELK가 계산한 그대로다.
 // 계획이 바뀌면 전체를 다시 계산한다. 그리는 쪽(Herdr 앱 칸)은 받은 좌표를 그대로 그린다.
 import { createRequire } from 'node:module';
 
@@ -41,9 +42,10 @@ const OPTIONS = {
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
 /**
- * 한 줄로 그리면 칸에 이 배율보다 작게 들어갈 때만 여러 줄로 접는다. 그보다 크면 글자가 읽히므로 한 줄 그대로 둔다
+ * 한 줄로 그리면 칸에 이 배율보다 작게 들어갈 때만 여러 줄로 접는다. 그보다 크면 글자가 읽히므로 한 줄 그대로 둔다.
+ * 그래프 칸이 글자가 읽히는 크기로 보는 배율(터미널 아래 칸에서 0.7배까지 줄여 담는다)과 같다
  */
-const WRAP_BELOW = 0.85;
+const WRAP_BELOW = 0.7;
 
 /**
  * 계획을 그래프로 배치한다. fit(그릴 칸의 크기)을 주면, 한 줄로는 칸에 너무 작게 들어가는 긴 그래프를
@@ -52,10 +54,11 @@ const WRAP_BELOW = 0.85;
 export async function layoutGraph(g: Graph, size = SIZE, flow: Flow = 'right', fit?: Fit): Promise<Layout> {
   const flat = await place(g, size, flow);
   if (!fit || fit.w <= 0 || fit.h <= 0 || !flat.nodes.length) return flat;
-  const zoom = (l: Layout) => Math.min(1, fit.w / l.width, fit.h / l.height);
+  const zoom = (l: Layout) => fitZoom(l, fit);
   if (zoom(flat) >= WRAP_BELOW) return flat;
-  // 여러 갈래가 있어도 접을 수 있게 MULTI_EDGE로 자른다 (SINGLE_EDGE는 선이 하나뿐인 곳에서만 자른다)
-  const wrapped = await place(g, size, flow, { 'elk.layered.wrapping.strategy': 'MULTI_EDGE', 'elk.aspectRatio': String(fit.w / fit.h) });
+  // 선이 한 가닥만 지나는 곳에서만 자른다 (SINGLE_EDGE). 갈래 한가운데를 자르지 않아서 줄과 줄 사이로는 선이 늘 한 가닥만 지나간다.
+  // 그런 곳이 없는 계획은 ELK가 접지 못하므로 한 줄 그대로 둔다 (MULTI_EDGE는 갈래 한가운데도 잘라 선 여러 가닥이 줄 사이를 길게 돌아갔다)
+  const wrapped = await place(g, size, flow, { 'elk.layered.wrapping.strategy': 'SINGLE_EDGE', 'elk.aspectRatio': String(fit.w / fit.h) });
   return zoom(wrapped) > zoom(flat) + 0.05 ? { ...wrapped, wrapped: true } : flat;
 }
 
@@ -78,6 +81,27 @@ async function place(g: Graph, size: { cardW: number; cardH: number }, flow: Flo
     return { ...lines[i], points };
   });
   return { width: Math.ceil(out.width), height: Math.ceil(out.height), nodes, edges };
+}
+
+/** 그래프가 칸에 다 들어가는 배율. 칸보다 작은 그래프를 키우지는 않는다 (1까지) */
+export const fitZoom = (l: Layout, fit: Fit): number => (l.width && l.height ? Math.min(1, fit.w / l.width, fit.h / l.height) : 1);
+
+/** 반대 방향이 칸에 이만큼 넘게 크게 들어가야 칸 모양으로 정한 방향을 버린다 (비슷하면 칸 모양을 따른다) */
+const SWITCH = 1.25;
+
+/**
+ * 칸에 맞는 흐름 방향으로 배치한다. 칸 모양으로 정한 방향(prefer)을 쓰되, 반대 방향이 칸에 훨씬 크게 들어가면 반대 방향을 쓴다.
+ * 두 방향 모두 ELK가 계산한 배치(필요하면 여러 줄로 접은 것)를 그대로 쓰고, 어느 쪽을 쓸지만 고른다.
+ * 예: 나란히 하는 일이 여덟인 계획을 좁고 긴 칸에서 위→아래로 그리면 여덟 카드가 옆으로 늘어서 칸보다 몇 배 넓어진다.
+ * 왼쪽→오른쪽으로 그리면 여덟 카드가 세로로 쌓여 칸에 들어간다
+ */
+export async function layoutFor(g: Graph, prefer: Flow, fit?: Fit, size = SIZE): Promise<{ layout: Layout; flow: Flow }> {
+  const layout = await layoutGraph(g, size, prefer, fit);
+  // 칸에 거의 다 들어가면 반대 방향이 더 나을 수 없다 (1배보다 키우지 않는다)
+  if (!fit || fit.w <= 0 || fit.h <= 0 || !layout.nodes.length || fitZoom(layout, fit) * SWITCH >= 1) return { layout, flow: prefer };
+  const other: Flow = prefer === 'down' ? 'right' : 'down';
+  const alt = await layoutGraph(g, size, other, fit);
+  return fitZoom(alt, fit) > fitZoom(layout, fit) * SWITCH ? { layout: alt, flow: other } : { layout, flow: prefer };
 }
 
 // ── 겹침 검사 ──────────────────────────────────────────────────────────

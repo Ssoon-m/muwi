@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { SIZE, layoutGraph, layoutProblems, type Graph, type Layout } from '../src/layout.ts';
+import { SIZE, fitZoom, layoutFor, layoutGraph, layoutProblems, type Graph, type Layout } from '../src/layout.ts';
 
 const graph = (edges: [string, string][], extra: string[] = []): Graph => {
   const ids = [...new Set([...edges.flat(), ...extra])];
@@ -94,4 +94,42 @@ test('긴 그래프는 칸 비율에 맞춰 여러 줄로 접는다. 칸에 잘 
   assert.deepEqual(layoutProblems(branchy), []);
   // 칸에 잘 들어가는 그래프는 접지 않는다
   assert.equal((await layoutGraph(GRAPHS['한 줄'], SIZE, 'right', fit)).wrapped, undefined);
+});
+
+test('칸 모양으로 정한 방향보다 반대 방향이 칸에 훨씬 크게 들어가면 반대 방향으로 그린다. 배치는 ELK가 계산한 그대로다', async () => {
+  // 나란히 하는 일이 여덟인 계획: 위→아래로 그리면 여덟 카드가 옆으로 늘어서 좁고 긴 칸보다 몇 배 넓다
+  const fan = graph([
+    ...Array.from({ length: 8 }, (_, i) => ['start', `c${i}`] as [string, string]),
+    ...Array.from({ length: 8 }, (_, i) => [`c${i}`, 'end'] as [string, string]),
+  ]);
+  const narrow = { w: 454, h: 723 };
+  const down = await layoutGraph(fan, SIZE, 'down', narrow);
+  const picked = await layoutFor(fan, 'down', narrow);
+  assert.equal(picked.flow, 'right');
+  assert.ok(fitZoom(picked.layout, narrow) > fitZoom(down, narrow) * 1.25, `${fitZoom(down, narrow)} → ${fitZoom(picked.layout, narrow)}`);
+  // 고른 배치는 그 방향으로 ELK가 계산한 것과 같다 (손대지 않는다)
+  assert.deepEqual(picked.layout, await layoutGraph(fan, SIZE, 'right', narrow));
+  assert.deepEqual(layoutProblems(picked.layout, picked.flow), []);
+  // 넓은 칸에서는 칸 모양대로 왼쪽→오른쪽
+  assert.equal((await layoutFor(fan, 'right', { w: 980, h: 945 })).flow, 'right');
+  // 한 줄로 길게 이어진 계획은 좁고 긴 칸에서 칸 모양대로 위→아래
+  const chain = graph(Array.from({ length: 12 }, (_, i) => [`n${i}`, `n${i + 1}`] as [string, string]));
+  assert.equal((await layoutFor(chain, 'down', narrow)).flow, 'down');
+  // 칸 크기를 모르면 정한 방향 그대로
+  assert.equal((await layoutFor(fan, 'down')).flow, 'down');
+});
+
+test('여러 줄로 접을 때 선이 한 가닥만 지나는 곳에서만 자른다. 한 줄로도 읽히는 그래프는 접지 않는다', async () => {
+  // 갈래가 갈라졌다 모이는 계획: 갈래 한가운데(c → d1·d2, d1·d2 → e)는 자르지 않는다
+  const forked = graph([['a', 'b'], ['b', 'c'], ['c', 'd1'], ['c', 'd2'], ['d1', 'e'], ['d2', 'e'], ['e', 'f'], ['f', 'g']]);
+  const fit = { w: 1230, h: 310 };
+  const l = await layoutGraph(forked, SIZE, 'right', fit);
+  assert.equal(l.wrapped, true);
+  // 줄을 넘는 선: ELK가 다음 줄 처음으로 돌려 그린 선 (흐름을 거슬러 왼쪽으로 가는 부분이 있다)
+  // 두 줄로 접히고, 줄 사이로는 갈래가 모인 뒤의 선(e → f) 한 가닥만 지나간다
+  const back = l.edges.filter(e => e.points.some((p, i) => i > 0 && p[0] < e.points[i - 1][0] - 0.5));
+  assert.deepEqual(back.map(e => e.key), ['e|f']);
+  assert.deepEqual(layoutProblems(l), []);
+  // 한 줄로 그려도 0.7배 넘게 보이면 접지 않는다 (노드 5개: 한 줄 1400px을 1100px 칸에 0.79배)
+  assert.equal((await layoutGraph(GRAPHS['한 줄'], SIZE, 'right', { w: 1100, h: 400 })).wrapped, undefined);
 });

@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { LABEL_NODE, LABEL_WORK, hc, herdrApp, terminalName, type Ran } from './herdr.ts';
-import { layoutGraph, layoutProblems, type Fit, type Flow } from './layout.ts';
+import { layoutFor, layoutProblems, type Fit, type Flow } from './layout.ts';
 import { ROOT, handleHook } from './hook.ts';
 import { markNode } from './node.ts';
 import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
@@ -545,8 +545,9 @@ function printShow(v: WorkView) {
   }
 }
 
-async function withLayout(v: WorkView, flow: Flow = 'right', fit?: Fit) {
-  const layout = await layoutGraph({ nodes: v.nodes, edges: v.edges }, undefined, flow, fit);
+/** prefer: 칸 모양으로 정한 흐름 방향. fit(칸 크기)을 알면 칸에 훨씬 크게 들어가는 쪽으로 바꿀 수 있다. 실제로 쓴 방향을 flow로 돌려준다 */
+async function withLayout(v: WorkView, prefer: Flow = 'right', fit?: Fit) {
+  const { layout, flow } = await layoutFor({ nodes: v.nodes, edges: v.edges }, prefer, fit);
   return { ...v, layout, flow, layoutProblems: layoutProblems(layout, flow) };
 }
 
@@ -584,7 +585,7 @@ async function cmdBoard(a: Args, dir: string) {
     const v = loadView(dir, pick);
     // 그래프 칸이 세로로 길면 위→아래로 그린다 (--down)
     // 닫힌 세션을 이어 하는 버튼에 쓸 것(폴더가 있는가, Claude 대화를 다시 열 수 있는가)도 함께 넘긴다
-    // --fit WxH: 그래프 칸의 크기. 한 줄로는 너무 작아지는 긴 그래프를 칸 비율에 맞춰 여러 줄로 접는다
+    // --fit WxH: 그래프 칸의 크기. --down(칸 모양으로 정한 방향)의 반대 방향이 칸에 훨씬 크게 들어가면 그 방향으로 그린다
     const m = /^(\d+)x(\d+)$/.exec(str(a, 'fit') ?? '');
     const fit = m ? { w: Number(m[1]), h: Number(m[2]) } : undefined;
     if (v) selected = { ...(await withLayout(v, a.flags.down ? 'down' : 'right', fit)), ...resumeFacts(v) };
