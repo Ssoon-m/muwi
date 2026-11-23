@@ -16,16 +16,30 @@ export type SessionWhere = { terminal?: string; seenAt?: string };
  *   - 그 터미널에서 다른 대화가 돌고 있다 (/clear, 새로 띄움). 세션이 시작될 때 터미널에 세션 이름을 라벨로 붙여 둔다
  */
 export function closedSessions(sessions: Record<string, SessionWhere>, keys: Iterable<string>, env: NodeJS.ProcessEnv = process.env): Map<string, number> {
+  return sessionStates(sessions, keys, env).closed;
+}
+
+export type SessionStates = {
+  /** 닫힌 세션과, 그 세션을 마지막으로 본 시각(ms) */
+  closed: Map<string, number>;
+  /** 살아 있는 세션의 Herdr 상태: working(일하는 중), blocked(입력을 기다림), done·idle(멈춰서 다음 말을 기다림) */
+  status: Map<string, string>;
+};
+
+/** 세션마다 닫혔는지, 살아 있으면 지금 무얼 하는지 (closedSessions와 같은 기준) */
+export function sessionStates(sessions: Record<string, SessionWhere>, keys: Iterable<string>, env: NodeJS.ProcessEnv = process.env): SessionStates {
   const closed = new Map<string, number>();
+  const status = new Map<string, string>();
+  const none = { closed, status };
   const wanted = [...new Set(keys)].filter(k => sessions[k]?.terminal);
-  if (!wanted.length) return closed;
+  if (!wanted.length) return none;
   const ls = hc(['ls', '--json'], env, 3000);
-  if (!ls.ok) return closed;
+  if (!ls.ok) return none;
   let terminals: any[];
   try {
     terminals = JSON.parse(ls.out)?.terminals ?? [];
   } catch {
-    return closed;
+    return none;
   }
   const live = new Map<string, any>(terminals.map(t => [String(t.address), t]));
   const owner = new Map<string, string | null>();
@@ -51,6 +65,7 @@ export function closedSessions(sessions: Record<string, SessionWhere>, keys: Ite
     const running = Boolean(t && t.state === 'live' && t.status != null);
     const mine = running ? ownerOf(terminal) : null;
     if (!running || (mine !== null && mine !== key)) closed.set(key, Date.parse(sessions[key].seenAt ?? '') || 0);
+    else status.set(key, String(t.status));
   }
-  return closed;
+  return { closed, status };
 }
