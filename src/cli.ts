@@ -3,14 +3,15 @@
 // 이 명령은 적어 두기만 한다. 순서를 막거나 다음에 할 일을 정하지 않는다.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import path from 'node:path';
 import { LABEL_NODE, LABEL_WORK, hc, herdrApp, terminalName, type Ran } from './herdr.ts';
-import { layoutGraph, layoutProblems } from './layout.ts';
+import { layoutGraph, layoutProblems, type Flow } from './layout.ts';
 import { ROOT, handleHook } from './hook.ts';
 import { markNode } from './node.ts';
 import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
 import { attach, markSettled, readSession, recentSessions, sessionKey, sessionLabel, touchSession } from './session.ts';
-import { checkMod, refreshSetup, removeSetup, runSetup } from './setup.ts';
-import { ScreenError, applyLayout, removeLayout, screenState, type Screen } from './screen.ts';
+import { checkMod, newestPlugin, olderThan, refreshSetup, removeSetup, runSetup } from './setup.ts';
+import { GRAPH_AT, ScreenError, applyLayout, removeLayout, screenState, type GraphAt, type Screen } from './screen.ts';
 import {
   SCHEMA, SHOW_IN, appendEvent, checkWorkName, listWorks, nowIso, readConfig, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
   type Config, type NodeStatus, type Plan, type RunBy, type ShowIn,
@@ -41,6 +42,7 @@ const HELP = `사용법: muwi <명령>
   muwi node <id> done ["<결과 한 줄>"]   노드를 끝낸다
   muwi node <id> wait "<물어볼 것>"     사람의 결정을 기다린다
   muwi node <id> block "<이유>"         막혔다
+  muwi node <id> pause                 하던 노드를 잠시 멈춘다 (다른 노드를 먼저 할 때). 다시 start하면 같은 회차로 이어진다
   muwi flag [<id>] "<메모>"             문제 지점을 표시한다
   muwi skip "<이유>"                   이 세션은 계획 없이 진행한다 (한 곳만 고치는 일, 기록할 작업이 아닐 때)
 
@@ -53,6 +55,7 @@ const HELP = `사용법: muwi <명령>
   Herdr 앱 화면
   muwi layout                          지금 레이아웃을 복제해 사이드바 Agents 자리에 작업 목록을, 터미널 아래에
                                        그래프를 넣고 그 레이아웃으로 바꾼다. 원래 레이아웃은 그대로 남는다
+  muwi layout --graph bottom|top|right 그래프 칸을 터미널 아래·위·오른쪽에 둔다 (전에 고른 자리를 기억한다)
   muwi layout --status [--json]        지금 화면에 muwi 칸이 있는지, 넣을 자리가 있는지 본다
   muwi layout --remove                 원래 레이아웃으로 돌아가고 muwi가 만든 복제본을 지운다
 
@@ -87,7 +90,7 @@ process.stdout.on('error', (e: NodeJS.ErrnoException) => {
   throw e;
 });
 
-const VALUED = new Set(['work', 'request', 'title', 'why', 'by', 'file', 'after', 'before', 'result', 'run', 'show', 'name', 'agent', 'cwd']);
+const VALUED = new Set(['work', 'request', 'title', 'why', 'by', 'file', 'after', 'before', 'result', 'run', 'show', 'name', 'agent', 'cwd', 'graph']);
 
 function parseArgs(argv: string[]) {
   const pos: string[] = [];
@@ -195,16 +198,21 @@ const runTag = (n: { run?: RunBy; show?: ShowIn }) => (n.run ? `${RUN_NAME[n.run
 function printPlan(plan: Plan) {
   const width = Math.max(...plan.nodes.map(n => n.id.length));
   for (const n of plan.nodes) {
-    out(`  ${MARK[n.status]} ${n.id.padEnd(width)}  ${n.title}${n.after.length ? `  ← ${n.after.join(', ')}` : ''}${n.run ? `  [${runTag(n)}]` : ''}`);
+    // 시작한 적이 있는데 아직으로 돌아간 노드는 잠시 멈춘 것이다
+    const mark = n.status === 'todo' && (n.attempt ?? 0) > 0 ? '⏸' : MARK[n.status];
+    out(`  ${mark} ${n.id.padEnd(width)}  ${n.title}${n.after.length ? `  ← ${n.after.join(', ')}` : ''}${n.run ? `  [${runTag(n)}]` : ''}`);
   }
 }
+
+/** 진행 중이었는데 앞에 끝나지 않은 노드가 새로 생겨 잠시 멈춰야 하는 노드 */
+type Paused = { id: string; by: string[] };
 
 /**
  * 계획을 적는다. 처음이면 새 작업을 만들고, 있으면 바꾼 것을 사건 기록에 남긴다.
  * make는 잠금을 잡은 뒤에 지금 계획을 받아 새 계획을 만든다 (그 사이에 다른 세션이 바꾼 것을 덮어쓰지 않게).
  * whole: 계획을 통째로 다시 낸 것. 이미 시작했거나 끝난 노드가 빠져 있으면 받지 않는다
  */
-function savePlan(dir: string, work: string, make: (old: Plan | null) => PlanInput, a: Args, whole = false): { plan: Plan; created: boolean; changed: boolean } {
+function savePlan(dir: string, work: string, make: (old: Plan | null) => PlanInput, a: Args, whole = false): { plan: Plan; created: boolean; changed: boolean; paused: Paused[] } {
   const key = sessionKey();
   const by = a.flags.human || str(a, 'by') === 'human' ? 'human' : 'ai';
   const why = str(a, 'why')?.trim() || undefined;
@@ -225,13 +233,13 @@ function savePlan(dir: string, work: string, make: (old: Plan | null) => PlanInp
       };
       writePlan(dir, plan);
       appendEvent(dir, work, { type: 'plan', by, ...(why ? { why } : {}), first: true, added: plan.nodes.map(n => n.id), removed: [], changed: [] }, key, at);
-      return { plan, created: true, changed: true };
+      return { plan, created: true, changed: true, paused: [] };
     }
     const diff = diffPlan(old.nodes, input.nodes);
     const title = str(a, 'title') ?? input.title ?? old.title;
     const request = str(a, 'request') ?? old.request;
     const sameOrder = old.nodes.map(n => n.id).join('\n') === input.nodes.map(n => n.id).join('\n');
-    if (isEmptyDiff(diff) && sameOrder && title === old.title && request === old.request) return { plan: old, created: false, changed: false };
+    if (isEmptyDiff(diff) && sameOrder && title === old.title && request === old.request) return { plan: old, created: false, changed: false, paused: [] };
     const gone = old.nodes.filter(n => diff.removed.includes(n.id));
     // 통째로 낸 계획은 "여기 없는 노드는 뺀다"는 뜻이 된다. 다른 세션이 넣고 하는 중인 노드를 모른 채 내면 그 노드가 사라진다
     const lost = whole ? gone.filter(n => n.status !== 'todo') : [];
@@ -253,8 +261,24 @@ function savePlan(dir: string, work: string, make: (old: Plan | null) => PlanInp
         ...(gone.length ? { gone: gone.map(n => ({ id: n.id, title: n.title, status: n.status })) } : {}),
       }, key, at);
     }
-    return { plan, created: false, changed: true };
+    // 하던 노드(작업 중, 나를 기다림) 앞에 끝나지 않은 노드가 새로 생겼으면 그 노드는 아직 할 차례가 아니다.
+    // 그래프가 흐름대로 보이게 잠시 멈춘 것으로 적는다 (잠금 밖에서, pausePlanned)
+    const before = new Map(old.nodes.map(n => [n.id, new Set(n.after ?? [])]));
+    const done = new Set(plan.nodes.filter(n => n.status === 'done').map(n => n.id));
+    const paused: Paused[] = plan.nodes
+      .filter(n => n.status === 'doing' || n.status === 'waiting')
+      .map(n => ({ id: n.id, by: (n.after ?? []).filter(p => !before.get(n.id)?.has(p) && !done.has(p)) }))
+      .filter(p => p.by.length > 0);
+    return { plan, created: false, changed: true, paused };
   });
+}
+
+/** 앞에 끝나지 않은 노드가 생긴 하던 노드를 잠시 멈춘다. 다시 start하면 같은 회차로 이어진다 */
+function pausePlanned(dir: string, work: string, paused: Paused[], say: (line: string) => void = out) {
+  for (const p of paused) {
+    if (!markNode(dir, work, p.id, 'todo', undefined, sessionKey())) continue;
+    say(`⏸ ${p.id}는 앞에 끝나지 않은 노드(${p.by.join(', ')})가 생겨서 잠시 멈췄어요. 그 노드가 끝나면 muwi node ${p.id} start로 이어서 해요 (같은 회차로 이어져요).`);
+  }
 }
 
 function join(dir: string, work: string) {
@@ -286,9 +310,12 @@ function cmdPlan(a: Args, dir: string) {
       );
     }
   }
-  const { plan, created, changed } = savePlan(dir, work, () => input, a, true);
+  const saved = savePlan(dir, work, () => input, a, true);
+  const { created, changed, paused } = saved;
   join(dir, work);
-  if (a.flags.json) return out(JSON.stringify({ work, created, changed, nodes: plan.nodes }, null, 2));
+  pausePlanned(dir, work, paused, a.flags.json ? () => {} : out);
+  const plan = paused.length ? (readPlan(dir, work) ?? saved.plan) : saved.plan;
+  if (a.flags.json) return out(JSON.stringify({ work, created, changed, nodes: plan.nodes, ...(paused.length ? { paused } : {}) }, null, 2));
   if (!changed) return out(`바뀐 것이 없어요: ${work}`);
   out(`${created ? '계획을 적었어요' : '계획을 바꿨어요'}: ${work} (노드 ${plan.nodes.length}개)`);
   printPlan(plan);
@@ -314,7 +341,7 @@ function cmdAdd(a: Args, dir: string) {
   const after = (str(a, 'after') ?? '').split(',').map(s => s.trim()).filter(Boolean);
   const before = str(a, 'before');
   const fresh = { id, title, after, ...(str(a, 'run') ? { run: str(a, 'run') } : {}), ...(str(a, 'show') ? { show: str(a, 'show') } : {}) } as NodeInput;
-  const { plan } = savePlan(dir, work, old => {
+  const { plan, paused } = savePlan(dir, work, old => {
     if (!old) throw new Fail(`작업이 없어요: ${work} (muwi status로 목록을 봐요)`);
     if (old.nodes.some(n => n.id === id)) throw new Fail(`이미 있는 노드예요: ${id}`);
     if (before && !old.nodes.some(n => n.id === before)) throw new Fail(`--before의 ${before}는 없는 노드예요. 있는 노드: ${old.nodes.map(n => n.id).join(', ')}`);
@@ -324,7 +351,8 @@ function cmdAdd(a: Args, dir: string) {
   }, a);
   join(dir, work);
   out(`노드를 넣었어요: ${id} (${work}, 노드 ${plan.nodes.length}개)`);
-  printPlan(plan);
+  pausePlanned(dir, work, paused);
+  printPlan(readPlan(dir, work) ?? plan);
 }
 
 function cmdRemove(a: Args, dir: string) {
@@ -349,11 +377,11 @@ function cmdRemove(a: Args, dir: string) {
   printPlan(plan);
 }
 
-const ACTION: Record<string, NodeStatus> = { start: 'doing', done: 'done', wait: 'waiting', block: 'blocked', todo: 'todo' };
+const ACTION: Record<string, NodeStatus> = { start: 'doing', done: 'done', wait: 'waiting', block: 'blocked', pause: 'todo', todo: 'todo' };
 
 function cmdNode(id: string | undefined, action: string | undefined, text: string | undefined, a: Args, dir: string) {
   const status = action ? ACTION[action] : undefined;
-  if (!id || !status) throw new Fail('사용법: muwi node <id> start | done ["<결과>"] | wait "<물어볼 것>" | block "<이유>"');
+  if (!id || !status) throw new Fail('사용법: muwi node <id> start | done ["<결과>"] | wait "<물어볼 것>" | block "<이유>" | pause');
   const note = (text ?? str(a, 'result'))?.trim() || undefined;
   if (status === 'waiting' && !note) throw new Fail('무엇을 기다리는지 적어요: muwi node <id> wait "<사람에게 물어볼 것>"');
   if (status === 'blocked' && !note) throw new Fail('왜 막혔는지 적어요: muwi node <id> block "<이유>"');
@@ -366,8 +394,8 @@ function cmdNode(id: string | undefined, action: string | undefined, text: strin
   }
   join(dir, work);
   const done = result.nodes.filter(n => n.status === 'done').length;
-  const label = { doing: '시작', done: '끝', waiting: '사람을 기다림', blocked: '막힘', todo: '아직으로 되돌림' }[status];
-  out(`${MARK[status]} ${id} ${label} (${work}, ${done}/${result.nodes.length} 끝)`);
+  const label = { doing: '시작', done: '끝', waiting: '사람을 기다림', blocked: '막힘', todo: '잠시 멈춤 (다시 start하면 같은 회차로 이어져요)' }[status];
+  out(`${status === 'todo' ? '⏸' : MARK[status]} ${id} ${label} (${work}, ${done}/${result.nodes.length} 끝)`);
   if (status === 'done' && done === result.nodes.length) out('모든 노드가 끝났어요.');
 }
 
@@ -459,8 +487,9 @@ function printShow(v: WorkView) {
   for (const n of v.nodes) {
     // 하던 세션이 닫혔으면 그렇게 적는다. 상태는 그대로 두지만 지금 하고 있는 쪽이 없다
     const who = [whoLine(v, n), n.closed ? '세션이 닫힘' : ''].filter(Boolean).join(' · ');
-    const meta = [n.attempts > 1 ? `${n.attempts}회차` : '', n.spentMs > 0 ? dur(n.spentMs) : '', who].filter(Boolean).join(' · ');
-    out(`  ${MARK[n.status]} ${n.id.padEnd(width)}  ${n.title}${n.after.length ? `  ← ${n.after.join(', ')}` : ''}${meta ? `  (${meta})` : ''}`);
+    const flow = n.paused ? '잠시 멈춤' : n.early ? '순서 앞당김 (앞 노드가 끝나기 전에 시작)' : '';
+    const meta = [flow, n.attempts > 1 ? `${n.attempts}회차` : '', n.spentMs > 0 ? dur(n.spentMs) : '', who].filter(Boolean).join(' · ');
+    out(`  ${n.paused ? '⏸' : MARK[n.status]} ${n.id.padEnd(width)}  ${n.title}${n.after.length ? `  ← ${n.after.join(', ')}` : ''}${meta ? `  (${meta})` : ''}`);
     const indent = ' '.repeat(width + 6);
     if (n.note) out(`${indent}${{ waiting: '기다리는 것', blocked: '막힌 이유', done: '결과' }[n.status as 'waiting' | 'blocked' | 'done'] ?? '메모'}: ${n.note}`);
     if (n.tries.length > 1) {
@@ -514,9 +543,9 @@ function printShow(v: WorkView) {
   }
 }
 
-async function withLayout(v: WorkView) {
-  const layout = await layoutGraph({ nodes: v.nodes, edges: v.edges });
-  return { ...v, layout, layoutProblems: layoutProblems(layout) };
+async function withLayout(v: WorkView, flow: Flow = 'right') {
+  const layout = await layoutGraph({ nodes: v.nodes, edges: v.edges }, undefined, flow);
+  return { ...v, layout, flow, layoutProblems: layoutProblems(layout, flow) };
 }
 
 async function cmdShow(a: Args, dir: string) {
@@ -549,7 +578,8 @@ async function cmdBoard(a: Args, dir: string) {
   let selected = null;
   if (pick) {
     const v = loadView(dir, pick);
-    if (v) selected = await withLayout(v);
+    // 그래프 칸이 세로로 길면 위→아래로 그린다 (--down)
+    if (v) selected = await withLayout(v, a.flags.down ? 'down' : 'right');
   }
   // 그래프 칸이 Herdr 터미널과 작업을 잇는 데 쓴다 (지금 보는 탭의 작업 따라가기, 계획 없는 세션 가려내기)
   const sessions = recentSessions(dir, Date.now() - PAST_DAYS * 86_400_000);
@@ -564,8 +594,24 @@ function cmdHook(a: Args, dir: string) {
     const text = fs.readFileSync(0, 'utf8');
     const mode = a.pos[0] === 'guard' || a.pos[0] === 'nudge' ? a.pos[0] : 'record';
     const payload = JSON.parse(text);
-    // 플러그인이 업데이트돼 설치 위치가 바뀌었으면, 전에 setup으로 넣어 둔 명령과 그래프 칸을 새 위치로 맞춘다
-    if (payload?.hook_event_name === 'SessionStart') refreshSetup({ root: ROOT, version: version(), dir });
+    // 이 세션이 시작된 뒤에 더 새 muwi가 설치됐으면 그 버전이 이 훅을 처리하게 넘긴다.
+    // 세션을 새로 열지 않아도 새 동작(지침, 기록 방식)이 적용된다. 훅이 걸리는 시점(hooks.json)만은 세션을 새로 열어야 바뀐다
+    if (!process.env.MUWI_HOOK_PASSED) {
+      const newest = newestPlugin();
+      if (newest && olderThan(version(), newest.version) && path.resolve(newest.root) !== path.resolve(ROOT)) {
+        const r = spawnSync(path.join(newest.root, 'bin', 'muwi'), ['hook', ...a.pos], {
+          input: text, encoding: 'utf8', env: { ...process.env, MUWI_HOOK_PASSED: '1' }, timeout: 30_000,
+        });
+        if (r.status === 0) {
+          if (r.stdout) process.stdout.write(r.stdout);
+          return;
+        }
+        // 새 버전이 처리하지 못하면 이 버전이 처리한다
+      }
+    }
+    // 플러그인이 업데이트돼 설치 위치가 바뀌었으면, 전에 setup으로 넣어 둔 명령과 그래프 칸을 새 위치로 맞춘다.
+    // 새 세션이 열릴 때뿐 아니라 열려 있는 세션에 말을 걸 때도 맞춘다 (더 낮은 버전으로는 맞추지 않는다)
+    if (payload?.hook_event_name === 'SessionStart' || payload?.hook_event_name === 'UserPromptSubmit') refreshSetup({ root: ROOT, version: version(), dir });
     const result = handleHook(payload, dir, mode);
     if (result.stdout) out(result.stdout);
   } catch (e: any) {
@@ -641,12 +687,17 @@ function cmdLayout(a: Args, dir: string) {
     const s = screenState(dir);
     return out(a.flags.json ? JSON.stringify(s) : describeScreen(s));
   }
-  const r = guardScreen(() => applyLayout(dir));
+  const graphAt = str(a, 'graph');
+  if (graphAt !== undefined && !GRAPH_AT.includes(graphAt as GraphAt)) throw new Fail(`--graph는 ${GRAPH_AT.join(', ')} 중 하나예요`);
+  const r = guardScreen(() => applyLayout(dir, process.env, graphAt ? { graphAt: graphAt as GraphAt } : {}));
   if (a.flags.json) return out(JSON.stringify(r));
-  if (r.already) return out(`이미 muwi 칸이 있는 레이아웃이에요: ${r.name}`);
+  const spot = { bottom: '터미널 아래', top: '터미널 위', right: '터미널 오른쪽' }[r.graphAt];
+  if (r.already) return out(`이미 muwi 칸이 있는 레이아웃이에요: ${r.name} (그래프: ${spot})`);
+  if (r.moved) return out(`그래프를 ${spot}에 뒀어요.`);
   out(`Herdr 앱 화면을 ${r.name} 레이아웃으로 ${r.refreshed ? '새 모양에 맞춰 다시 만들었어요' : '바꿨어요'} (${r.base} 레이아웃을 복제했어요).`);
   if (r.list) out('  사이드바: Agents 자리에 작업 목록 (계획 없는 세션도 같이 보여요)');
-  if (r.graph) out(`  터미널 아래: ${r.list ? '고른 작업의 그래프 (지금 보는 탭의 작업을 따라가요)' : '작업 목록과 그래프'}`);
+  if (r.graph) out(`  ${spot}: ${r.list ? '고른 작업의 그래프 (지금 보는 탭의 작업을 따라가요)' : '작업 목록과 그래프'}`);
+  out('그래프 자리는 muwi layout --graph bottom|top|right 로 바꿔요. 그래프 칸 위쪽의 버튼으로도 바꿀 수 있어요.');
   out(`되돌리려면 muwi layout --remove (${r.base} 레이아웃으로 돌아가요)`);
 }
 

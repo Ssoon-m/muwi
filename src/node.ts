@@ -12,7 +12,7 @@ const STARTING_MS = 120_000;
  * 순서는 보지 않는다. 앞 노드가 끝나지 않아도 시작할 수 있다.
  *
  * 회차: 처음 시작하거나, 끝냈거나 막혔던 노드를 다시 시작하면 새 회차다.
- * 기다리다 이어 하거나, 하는 중에 다른 쪽이 이어받는 것은 같은 회차다.
+ * 기다리다 이어 하거나, 잠시 멈췄다(pause) 다시 하거나, 하는 중에 다른 쪽이 이어받는 것은 같은 회차다.
  */
 export function markNode(dir: string, work: string, id: string, status: NodeStatus, note: string | undefined, key: string | null, env: NodeJS.ProcessEnv = process.env): Plan | null {
   // 서브에이전트가 시작하는 것이면 훅이 방금 그 서브에이전트를 적어 뒀다 (명령에서는 세션 id가 같아 구분할 수 없다)
@@ -32,7 +32,8 @@ export function markNode(dir: string, work: string, id: string, status: NodeStat
     else if (note) node.note = note;
     else delete node.note;
     if (status === 'doing') {
-      const resume = before === 'waiting' || before === 'doing';
+      // 기다리다 이어 하거나, 잠시 멈췄던 노드(시작한 적이 있는데 아직으로 돌아간 노드)를 다시 하는 것은 같은 회차다
+      const resume = before === 'waiting' || before === 'doing' || (before === 'todo' && (node.attempt ?? 0) > 0);
       node.attempt = resume ? (node.attempt ?? 1) : (node.attempt ?? 0) + 1;
       node.by = { session: key, ...(agent ? { agent } : {}), at };
     } else delete node.by;

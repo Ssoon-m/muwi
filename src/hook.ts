@@ -7,10 +7,11 @@
 // guard 모드(선택 설치)는 push·PR·댓글처럼 되돌릴 수 없는 명령 앞에서 사람에게 묻게 한다.
 // 서브에이전트가 한 일은 훅 입력의 agent_id로 구분한다 (서브에이전트는 세션 id가 부모와 같다).
 // muwi run으로 뜬 새 세션은 시작할 때 맡은 작업에 붙이고 노드를 시작한 것으로 적는다.
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { appendEvent, nowIso, readConfig, readEvents, readPlan } from './store.ts';
+import { appendEvent, nowIso, readConfig, readEvents, readJson, readPlan } from './store.ts';
 import type { PlanNode } from './store.ts';
 import { attach, isSettled, markSettled, readSession, recordSkill, sessionKey, touchSession, unsettle, whereNow } from './session.ts';
 import { LABEL_SESSION, hc, spawnedFor } from './herdr.ts';
@@ -28,6 +29,11 @@ export function sessionInstructions(root: string = ROOT): string {
     return '';
   }
 }
+
+/** 지침이 바뀌었는지 알아보는 데 쓰는 해시 */
+export const instructionsHash = (text: string) => crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
+
+const versionOf = (root: string) => readJson<{ version?: string }>(path.join(root, 'package.json'))?.version ?? '';
 
 /** SKILL.md 경로에서 skill 이름을 꺼낸다. skills 폴더 아래의 SKILL.md만 skill로 본다 */
 export function skillFromPath(file: unknown): string | null {
@@ -214,7 +220,8 @@ export function handleHook(payload: any, dir: string, mode: 'record' | 'guard' |
   }
 
   if (event === 'SessionStart') {
-    const session = touchSession(dir, key, patch, env);
+    const guide = sessionInstructions(root);
+    const session = touchSession(dir, key, { ...patch, ...(guide ? { instructions: instructionsHash(guide) } : {}) }, env);
     // 이 터미널에서 지금 도는 세션이 누구인지 붙여 둔다. 나중에 "그 세션이 아직 살아 있나"를 볼 때 쓴다.
     // 같은 터미널에서 /clear 하거나 새로 띄우면 여기서 새 이름으로 바뀌고, 앞 세션은 닫힌 것으로 보인다
     if (env.HC_TERMINAL_ID) hc(['label', env.HC_TERMINAL_ID, `${LABEL_SESSION}=${key}`], env, 3000);
@@ -222,16 +229,29 @@ export function handleHook(payload: any, dir: string, mode: 'record' | 'guard' |
     if (payload.source === 'compact' && session.work && readPlan(dir, session.work)) {
       appendEvent(dir, session.work, { type: 'session', what: 'compact' }, key);
     }
-    const text = [sessionInstructions(root), adoptSpawn(dir, key, env)].filter(Boolean).join('\n\n');
+    const text = [guide, adoptSpawn(dir, key, env)].filter(Boolean).join('\n\n');
     if (!text) return {};
     return { stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } }) };
   }
 
   if (event === 'UserPromptSubmit') {
     // 사람이 새로 말을 걸었다. 계획을 적었는지 다음 수정 때 다시 따지고, 앞에서 한 skip은 여기서 끝난다
-    touchSession(dir, key, { ...patch, skipped: undefined }, env);
+    const before = readSession(dir, key);
+    const guide = sessionInstructions(root);
+    const hash = guide ? instructionsHash(guide) : undefined;
+    // 세션이 시작된 뒤에 muwi가 업데이트돼 지침이 바뀌었으면 새 지침을 다시 넣는다. 세션을 새로 열지 않아도 된다
+    const changed = Boolean(hash && before?.instructions && before.instructions !== hash);
+    touchSession(dir, key, { ...patch, skipped: undefined, ...(hash ? { instructions: hash } : {}) }, env);
     unsettle(dir, key);
-    return {};
+    if (!changed) return {};
+    return {
+      stdout: JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: 'UserPromptSubmit',
+          additionalContext: `muwi가 업데이트됐다${versionOf(root) ? ` (${versionOf(root)})` : ''}. 작업 진행 방식이 바뀌었으니 앞에서 받은 muwi 지침 대신 아래 지침을 따른다.\n\n${guide}`,
+        },
+      }),
+    };
   }
 
   if (event === 'SubagentStart' || event === 'SubagentStop') {

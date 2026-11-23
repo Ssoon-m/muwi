@@ -284,3 +284,36 @@ test('nudge: muwi config nudge off 이면 알리지 않는다', () => {
   writeConfig(t.dir, { nudge: false, guard: false });
   assert.deepEqual(handleHook(edit('fresh'), t.dir, 'nudge', ENV), {});
 });
+
+/** muwi가 업데이트된 것처럼: 지침을 바꾼 새 설치 위치 */
+function newerRoot(version = '9.9.9') {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-newer-'));
+  const here = path.resolve(import.meta.dirname, '..');
+  fs.mkdirSync(path.join(root, 'hooks'));
+  const block = fs.readFileSync(path.join(here, 'hooks', 'instructions.md'), 'utf8').replace('<!-- muwi:end -->', '- 새로 생긴 규칙\n<!-- muwi:end -->');
+  fs.writeFileSync(path.join(root, 'hooks', 'instructions.md'), block);
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version }));
+  return root;
+}
+
+test('업데이트: 세션이 시작된 뒤에 지침이 바뀌면, 사람이 다음에 말을 걸 때 새 지침을 한 번 넣는다', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-guide-'));
+  const here = path.resolve(import.meta.dirname, '..');
+  const says = (root: string, session = 's1') => handleHook({ session_id: session, hook_event_name: 'UserPromptSubmit', prompt: '다음 일' }, dir, 'record', ENV, root);
+  // 세션이 시작될 때 넣은 지침을 기억한다
+  handleHook({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', ENV, here);
+  assert.ok(readSession(dir, 's1')!.instructions);
+  // 지침이 그대로면 아무것도 넣지 않는다
+  assert.deepEqual(says(here), {});
+  // muwi가 업데이트돼 지침이 바뀌었다
+  const root = newerRoot();
+  const next = JSON.parse(says(root).stdout!).hookSpecificOutput;
+  assert.equal(next.hookEventName, 'UserPromptSubmit');
+  assert.match(next.additionalContext, /muwi가 업데이트됐다 \(9\.9\.9\)\. 작업 진행 방식이 바뀌었으니/);
+  assert.match(next.additionalContext, /새로 생긴 규칙/);
+  // 한 번만 넣는다
+  assert.deepEqual(says(root), {});
+  // 지침을 기억하지 못하는 세션(예전 버전에서 시작)은 지금 것을 기억만 하고 넣지 않는다
+  assert.deepEqual(says(root, 'old'), {});
+  assert.ok(readSession(dir, 'old')!.instructions);
+});

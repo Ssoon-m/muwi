@@ -262,3 +262,65 @@ test('출력을 받는 쪽이 먼저 닫아도 (muwi show | head) 오류를 쏟�
   assert.equal(r.stdout.trim().split('\n').length, 1);
   assert.doesNotMatch(r.stderr, /EPIPE|Unhandled/);
 });
+
+test('업데이트: 열려 있는 세션의 훅은 설치된 더 새 muwi에 넘긴다', () => {
+  const { dir, muwi } = bench();
+  const claude = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-claude-'));
+  const plugin = (version: string, answer: string) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-plugin-'));
+    fs.mkdirSync(path.join(root, 'bin'));
+    fs.writeFileSync(path.join(root, 'bin', 'muwi'), `#!/bin/sh\ncat >/dev/null\necho '${answer}'\n`, { mode: 0o755 });
+    fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version }));
+    return root;
+  };
+  const install = (roots: string[]) => {
+    fs.mkdirSync(path.join(claude, 'plugins'), { recursive: true });
+    fs.writeFileSync(path.join(claude, 'plugins', 'installed_plugins.json'), JSON.stringify({
+      version: 2, plugins: { 'muwi@muwi': roots.map(installPath => ({ scope: 'user', installPath })), 'other@x': [{ installPath: '/nowhere' }] },
+    }));
+  };
+  const start = JSON.stringify({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' });
+  const hook = (env: Record<string, string> = {}) => muwi(['hook'], { session: null, input: start, env: { CLAUDE_CONFIG_DIR: claude, ...env } }).out;
+  // 더 새 버전이 설치돼 있으면 그 버전이 처리한다 (가장 새 것을 고른다)
+  install([plugin('9.0.0', '{"from":"9.0.0"}'), plugin('9.1.0', '{"from":"9.1.0"}')]);
+  assert.equal(hook().trim(), '{"from":"9.1.0"}');
+  // 넘겨받은 쪽은 다시 넘기지 않는다
+  assert.match(hook({ MUWI_HOOK_PASSED: '1' }), /작업 진행 방식 \(muwi\)/);
+  // 설치된 것이 더 낮은 버전이면 넘기지 않는다
+  install([plugin('0.0.1', '{"from":"old"}')]);
+  assert.match(hook(), /작업 진행 방식 \(muwi\)/);
+  // 새 버전이 실패하면 이 버전이 처리한다
+  const broken = plugin('9.9.9', '');
+  fs.writeFileSync(path.join(broken, 'bin', 'muwi'), '#!/bin/sh\nexit 3\n', { mode: 0o755 });
+  install([broken]);
+  assert.match(hook(), /작업 진행 방식 \(muwi\)/);
+  assert.ok(fs.existsSync(path.join(dir, '.sessions')));
+});
+
+test('그래프 흐름: 하던 노드 앞에 먼저 할 노드가 끼어들면 그 노드는 잠시 멈추고, 다시 하면 같은 회차로 이어진다', () => {
+  const { dir, muwi } = bench();
+  muwi(['plan', '--work', 'w', '--request', '작업해줘', PLAN]);
+  muwi(['node', 'read', 'start']);
+  muwi(['node', 'read', 'done']);
+  muwi(['node', 'check', 'start']); // 마무리 노드를 미리 시작해 둠 (순서 앞당김)
+  const shown = muwi(['show', 'w']).out;
+  assert.match(shown, /check .*순서 앞당김 \(앞 노드가 끝나기 전에 시작\)/);
+  // 사람이 새 일을 시켜서 마무리 노드 앞에 먼저 할 노드를 넣었다
+  const added = muwi(['add', 'fix', '리뷰 반영', '--after', 'impl', '--before', 'check', '--why', '새 요청']);
+  assert.equal(added.code, 0, added.err);
+  assert.match(added.out, /⏸ check는 앞에 끝나지 않은 노드\(fix\)가 생겨서 잠시 멈췄어요/);
+  assert.match(added.out, /⏸ check/);
+  const plan = JSON.parse(fs.readFileSync(path.join(dir, 'w', 'plan.json'), 'utf8'));
+  assert.equal(plan.nodes.find((n: any) => n.id === 'check').status, 'todo');
+  const board = JSON.parse(muwi(['board']).out);
+  assert.equal(board.works[0].state, 'idle'); // 지금 하는 노드가 없다 (노드 사이)
+  const view = JSON.parse(muwi(['show', 'w', '--json']).out);
+  const check = view.nodes.find((n: any) => n.id === 'check');
+  assert.deepEqual([check.status, check.paused, check.attempts], ['todo', true, 1]);
+  // 다시 하면 같은 회차로 이어진다 (2회차가 아니다)
+  muwi(['node', 'check', 'start']);
+  const again = JSON.parse(muwi(['show', 'w', '--json']).out).nodes.find((n: any) => n.id === 'check');
+  assert.deepEqual([again.status, again.attempts, again.paused], ['doing', 1, undefined]);
+  // 직접 멈출 수도 있다
+  assert.match(muwi(['node', 'check', 'pause']).out, /check 잠시 멈춤/);
+});
