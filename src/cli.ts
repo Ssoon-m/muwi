@@ -45,10 +45,11 @@ const HELP = `사용법: muwi <명령>
   muwi node <id> block "<이유>"         막혔다
   muwi node <id> pause                 하던 노드를 잠시 멈춘다 (다른 노드를 먼저 할 때). 다시 start하면 같은 회차로 이어진다
   muwi flag [<id>] "<메모>"             문제 지점을 표시한다
+  muwi viewed [--work <작업>]          끝난 작업을 본 것으로 적는다 (새 결과에서 뺀다. 그래프 칸이 그 작업을 보여 줄 때 적는다)
   muwi skip "<이유>"                   이 세션은 계획 없이 진행한다 (한 곳만 고치는 일, 기록할 작업이 아닐 때)
 
   보기
-  muwi status [--all] [--json]         작업 목록 (나를 기다리는 작업이 위). 오래된 작업은 접어 두고, --all이면 다 보여 준다
+  muwi status [--all] [--json]         작업 목록 (응답 대기·막힘·새 결과가 위). 오래된 작업은 접어 두고, --all이면 다 보여 준다
   muwi show [<작업>] [--json]           작업 하나의 기록: 노드, 읽은 skill, 계획이 바뀐 이유, 문제 표시
   muwi session                         이 세션이 붙어 있는 작업과 읽은 skill
   muwi open [--right]                  Herdr 앱에서 그래프 칸을 이 터미널 아래(--right면 오른쪽)에 연다
@@ -191,7 +192,7 @@ function readPlanText(a: Args): string {
 }
 
 const MARK: Record<NodeStatus, string> = { todo: '○', doing: '●', waiting: '⏸', blocked: '✗', done: '✓' };
-const STATE_NAME: Record<WorkView['state'], string> = { waiting: '나를 기다림', blocked: '막힘', doing: '작업 중', stalled: '멈춤', done: '끝', idle: '노드 사이' };
+const STATE_NAME: Record<WorkView['state'], string> = { waiting: '응답 대기', blocked: '막힘', doing: '작업 중', stalled: '멈춤', done: '끝', idle: '노드 사이' };
 
 const RUN_NAME: Record<RunBy, string> = { me: '직접', subagent: '서브에이전트', session: '새 세션' };
 const runTag = (n: { run?: RunBy; show?: ShowIn }) => (n.run ? `${RUN_NAME[n.run]}${n.show ? `, ${n.show}` : ''}` : '');
@@ -262,7 +263,7 @@ function savePlan(dir: string, work: string, make: (old: Plan | null) => PlanInp
         ...(gone.length ? { gone: gone.map(n => ({ id: n.id, title: n.title, status: n.status })) } : {}),
       }, key, at);
     }
-    // 하던 노드(작업 중, 나를 기다림) 앞에 끝나지 않은 노드가 새로 생겼으면 그 노드는 아직 할 차례가 아니다.
+    // 하던 노드(작업 중, 응답 대기) 앞에 끝나지 않은 노드가 새로 생겼으면 그 노드는 아직 할 차례가 아니다.
     // 그래프가 흐름대로 보이게 잠시 멈춘 것으로 적는다 (잠금 밖에서, pausePlanned)
     const before = new Map(old.nodes.map(n => [n.id, new Set(n.after ?? [])]));
     const done = new Set(plan.nodes.filter(n => n.status === 'done').map(n => n.id));
@@ -395,7 +396,7 @@ function cmdNode(id: string | undefined, action: string | undefined, text: strin
   }
   join(dir, work);
   const done = result.nodes.filter(n => n.status === 'done').length;
-  const label = { doing: '시작', done: '끝', waiting: '사람을 기다림', blocked: '막힘', todo: '잠시 멈춤 (다시 start하면 같은 회차로 이어져요)' }[status];
+  const label = { doing: '시작', done: '끝', waiting: '응답 대기', blocked: '막힘', todo: '잠시 멈춤 (다시 start하면 같은 회차로 이어져요)' }[status];
   out(`${status === 'todo' ? '⏸' : MARK[status]} ${id} ${label} (${work}, ${done}/${result.nodes.length} 끝)`);
   if (status === 'done' && done === result.nodes.length) out('모든 노드가 끝났어요.');
 }
@@ -410,6 +411,16 @@ function cmdFlag(a: Args, dir: string) {
   if (node && !plan.nodes.some(n => n.id === node)) throw new Fail(`없는 노드예요: ${node}. 있는 노드: ${plan.nodes.map(n => n.id).join(', ')}`);
   appendEvent(dir, work, { type: 'flag', ...(node ? { node } : {}), text }, sessionKey());
   out(`문제 지점을 표시했어요: ${node ? `${node} · ` : ''}${text} (${work})`);
+}
+
+/** 끝난 작업을 본 것으로 적는다. 그래프 칸이 사람이 고른 작업을 보여 줄 때 부른다. 아직 안 본 결과일 때만 적는다 */
+function cmdViewed(a: Args, dir: string) {
+  const work = resolveWork(a, dir);
+  const v = loadView(dir, work);
+  if (!v) throw new Fail(`없는 작업이에요: ${work}`);
+  if (!v.unread) return out(`${work}: 새 결과가 아니에요 (${v.state === 'done' ? '이미 봤어요' : '아직 끝나지 않았어요'})`);
+  appendEvent(dir, work, { type: 'viewed' }, null);
+  out(`${work}: 본 것으로 적었어요`);
 }
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
@@ -477,7 +488,7 @@ function skillsLine(t: Pick<Try, 'skills' | 'seen' | 'instant'>, started: boolea
 }
 
 function printShow(v: WorkView) {
-  out(`${v.work}${v.title ? ` · ${v.title}` : ''} · ${STATE_NAME[v.state]} (${v.counts.done}/${v.counts.total} 끝)`);
+  out(`${v.work}${v.title ? ` · ${v.title}` : ''} · ${STATE_NAME[v.state]}${v.unread ? ' · 아직 안 봄' : ''} (${v.counts.done}/${v.counts.total} 끝)`);
   if (v.request) out(`요청: ${v.request}`);
   if (v.helpers.sessions || v.helpers.subagents) {
     const lead = v.lead ? v.sessions[v.lead]?.label ?? sessionLabel(null, v.lead) : '';
@@ -567,7 +578,8 @@ function cmdStatus(a: Args, dir: string) {
   const past = board.works.filter(w => w.past);
   for (const w of board.works) {
     if (w.past && !a.flags.all) continue;
-    out(`${STATE_NAME[w.state].padEnd(7)} ${w.work}  ${w.counts.done}/${w.counts.total}${w.title ? `  ${w.title}` : ''}`);
+    // 끝났는데 사람이 아직 안 본 작업은 "새 결과"로 보여 준다
+    out(`${(w.unread ? '새 결과' : STATE_NAME[w.state]).padEnd(7)} ${w.work}  ${w.counts.done}/${w.counts.total}${w.title ? `  ${w.title}` : ''}`);
     for (const n of w.active) out(`          ${MARK[n.status]} ${n.id}  ${n.title}${n.closed ? ' (세션이 닫힘)' : ''}${n.note ? ` : ${n.note}` : ''}`);
   }
   if (past.length && !a.flags.all) out(`지난 작업 ${past.length}개는 접어 뒀어요 (${PAST_DAYS}일 넘게 바뀐 것이 없는 작업). muwi status --all로 봐요.`);
@@ -927,6 +939,7 @@ async function main(argv: string[]) {
     // 짧게: muwi start <id>, muwi done <id> "<결과>"
     case 'start': case 'done': case 'wait': case 'block': return cmdNode(a.pos[0], cmd, a.pos[1], a, dir);
     case 'flag': return cmdFlag(a, dir);
+    case 'viewed': return cmdViewed(a, dir);
     case 'show': return cmdShow(a, dir);
     case 'status': return cmdStatus(a, dir);
     case 'board': return cmdBoard(a, dir);

@@ -77,7 +77,9 @@ export type EventBody =
   /** muwi run으로 뜬 세션이 맡은 노드에 붙었다. 그 터미널에서 나중에 시작한 다른 대화는 다시 붙이지 않는다 */
   | { type: 'join'; node: string; terminal: string }
   | { type: 'flag'; node?: string; text: string }
-  | { type: 'session'; what: 'compact' };
+  | { type: 'session'; what: 'compact' }
+  /** 사람이 끝난 작업을 봤다 (그래프 칸이 사람이 고른 그 작업을 보여 줄 때 적는다). 끝난 뒤 처음 볼 때만 적는다 */
+  | { type: 'viewed' };
 
 export type Event = EventBody & { at: string; session: string | null };
 
@@ -163,6 +165,8 @@ export const readPlan = (dir: string, work: string) => readJson<Plan>(planFile(d
 
 export function writePlan(dir: string, plan: Plan) {
   writeJson(planFile(dir, plan.work), plan);
+  // 처음 계획을 적을 때 "새 결과"를 셀 시작 시각도 적어 둔다 (그 뒤에 끝난 작업이 처음부터 새 결과로 보이게)
+  resultsSince(dir);
 }
 
 export function appendEvent(dir: string, work: string, body: EventBody, session: string | null, at: string = nowIso()) {
@@ -194,6 +198,23 @@ export function readEvents(dir: string, work: string): Event[] {
   // 앞 세션에서 읽은 skill은 나중에 옮겨 적으므로(carried) 시각으로 다시 줄 세운다
   out.sort((a, b) => (a.ev.at < b.ev.at ? -1 : a.ev.at > b.ev.at ? 1 : a.i - b.i));
   return out.map(o => o.ev);
+}
+
+/**
+ * 이 시각 뒤에 끝난 작업만 "새 결과"(끝났는데 사람이 아직 안 봄)로 센다. 처음 셀 때 그 시각을 적어 둔다.
+ * 이 기능이 생기기 전에 끝난 작업이 한꺼번에 새 결과로 뜨지 않게 하려는 것이다. 기록 폴더가 없으면 적지 않는다
+ */
+const sinceFile = (dir: string) => path.join(dir, '.results-since');
+export function resultsSince(dir: string): string {
+  try {
+    const at = fs.readFileSync(sinceFile(dir), 'utf8').trim();
+    if (!Number.isNaN(Date.parse(at))) return at;
+  } catch {
+    // 아직 적지 않았다
+  }
+  const at = nowIso();
+  if (fs.existsSync(dir)) fs.writeFileSync(sinceFile(dir), at + '\n');
+  return at;
 }
 
 /** 계획이 있는 작업 이름들 */

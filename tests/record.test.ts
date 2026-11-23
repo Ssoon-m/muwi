@@ -112,7 +112,7 @@ test('회차와 걸린 시간: 끝낸 노드를 다시 하면 2회차, 사람을
   assert.equal(v.state, 'done');
 });
 
-test('작업 상태: 나를 기다림 > 막힘 > 작업 중 > 끝. 목록도 그 순서로 온다', () => {
+test('작업 상태: 응답 대기 > 막힘 > 작업 중 > 끝. 목록도 그 순서로 온다', () => {
   const a = setup([{ id: 'x' }, { id: 'y' }], 'aaa');
   at(1); a.node('x', 'doing', 's1');
   assert.equal(a.view().state, 'doing');
@@ -131,6 +131,43 @@ test('작업 상태: 나를 기다림 > 막힘 > 작업 중 > 끝. 목록도 그
   const board = loadBoard(a.dir, ENV);
   assert.deepEqual(board.works.map(w => `${w.work}:${w.state}`), ['aaa:waiting', 'ccc:doing', 'bbb:done']);
   assert.deepEqual(board.works[0].active.map(n => `${n.id}:${n.status}`), ['x:doing', 'y:waiting']);
+});
+
+test('새 결과: 모두 끝났는데 사람이 아직 안 본 작업. 보면 끝으로 내려가고, 다시 끝나면 다시 새 결과다', () => {
+  const a = setup([{ id: 'x' }], 'aaa');
+  at(1); a.node('x', 'doing', 's1');
+  assert.equal(a.view().unread, undefined);
+  at(2); a.node('x', 'done', 's1');
+  assert.equal(a.view().state, 'done');
+  assert.equal(a.view().unread, true);
+  // 목록에서는 막힘 다음, 작업 중보다 위
+  const mk = (work: string, status: NodeStatus) => {
+    const plan: Plan = { work, createdAt: '2026-11-22T06:00:00.000Z', updatedAt: '2026-11-22T06:00:00.000Z', nodes: [{ id: 'n', title: 'n', after: [], status }] };
+    writePlan(a.dir, plan);
+  };
+  mk('bbb', 'doing');
+  mk('ccc', 'blocked');
+  assert.deepEqual(loadBoard(a.dir, ENV).works.map(w => `${w.work}:${w.state}${w.unread ? ':새 결과' : ''}`), ['ccc:blocked', 'aaa:done:새 결과', 'bbb:doing']);
+  // 사람이 보면(그래프 칸이 viewed를 적는다) 끝으로 내려간다
+  at(3); appendEvent(a.dir, 'aaa', { type: 'viewed' }, null);
+  assert.equal(a.view().unread, undefined);
+  assert.deepEqual(loadBoard(a.dir, ENV).works.map(w => w.work), ['ccc', 'bbb', 'aaa']);
+  // 다시 해서 끝나면 다시 새 결과. 오래돼도 지난 작업으로 접지 않는다
+  at(4); a.node('x', 'doing', 's1');
+  at(5); a.node('x', 'done', 's1');
+  assert.equal(a.view().unread, true);
+  at(60 * 24 * 30);
+  assert.equal(loadBoard(a.dir, ENV).works.find(w => w.work === 'aaa')!.past, false);
+});
+
+test('새 결과는 처음 센 때(.results-since) 뒤에 끝난 작업만이다. 업데이트 전에 끝나 있던 작업이 한꺼번에 뜨지 않는다', () => {
+  const a = setup([{ id: 'x' }], 'old');
+  at(1); a.node('x', 'doing', 's1');
+  at(2); a.node('x', 'done', 's1');
+  // 이 기능이 들어온 때를 끝난 뒤로 둔다 (그 전 버전에서 끝난 작업)
+  fs.writeFileSync(path.join(a.dir, '.results-since'), new Date(T0 + 10 * 60_000).toISOString() + '\n');
+  assert.equal(a.view().state, 'done');
+  assert.equal(a.view().unread, undefined);
 });
 
 test('훅: Skill 도구와 SKILL.md 읽기를 세션의 작업에 기록한다', () => {
