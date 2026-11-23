@@ -156,6 +156,18 @@ test('muwi show·status·board: 사람이 읽는 글과 화면이 읽는 JSON', 
   assert.equal(json.flags[0].node, 'read');
 });
 
+test('훅이 돌지 않는 Claude Code 세션이 계획을 적으면 무엇이 빠지는지 알린다', () => {
+  const { muwi } = bench();
+  // 훅이 한 번도 보지 못한 Claude Code 세션 (muwi를 설치하기 전에 연 세션)
+  const plain = muwi(['plan', '--work', 'w1', '--request', '작업해줘', PLAN], { session: null, env: { CLAUDE_CODE_SESSION_ID: 'old-1', CLAUDECODE: '1' } });
+  assert.equal(plain.code, 0, plain.err);
+  assert.match(plain.out, /이 세션에서는 muwi 훅이 돌지 않아요[\s\S]*읽은 skill과 서브에이전트가 한 일은 기록되지 않아요/);
+  // 훅이 보고 있는 세션은 알리지 않는다
+  muwi(['hook'], { session: null, env: { CLAUDE_CODE_SESSION_ID: 'new-1', CLAUDECODE: '1' }, input: JSON.stringify({ session_id: 'new-1', hook_event_name: 'SessionStart', source: 'startup' }) });
+  const hooked = muwi(['plan', '--work', 'w2', '--request', '작업해줘', PLAN], { session: null, env: { CLAUDE_CODE_SESSION_ID: 'new-1', CLAUDECODE: '1' } });
+  assert.doesNotMatch(hooked.out, /훅이 돌지 않아요/);
+});
+
 test('muwi board: 그래프 칸이 터미널과 작업을 잇도록 세션과 터미널을 알려 준다', () => {
   const { muwi } = bench();
   // 계획을 낸 세션은 Herdr 터미널 t5에서 돈다. 다른 세션(t6)은 계획 없이 일한다

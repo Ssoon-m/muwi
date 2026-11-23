@@ -67,6 +67,11 @@ export type NodeView = PlanNode & {
   who?: Actor;
   /** 끝난 노드가 계획에 적은 것(run)과 다르게 진행됐다 */
   offPlan?: boolean;
+  /**
+   * 계획에 적은 것과 기록이 다르지만, 그 회차를 훅이 보지 못해서 정말 다르게 했는지 알 수 없다.
+   * 훅이 없으면 서브에이전트가 실행한 muwi 명령도 세션이 직접 한 것처럼 적힌다
+   */
+  runUnknown?: boolean;
   seen: boolean;
   instant: boolean;
   /** 끝나지 않았는데 이 노드를 하던 세션이 닫혔다. 하다가 멈춘 것이다 (끝났는지는 알 수 없다) */
@@ -303,8 +308,12 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
     if (changedAt) view.since = changedAt;
     if (last?.who?.session) view.session = last.who.session;
     if (last?.who) view.who = last.who;
-    // 계획과 달랐는지는 끝난 뒤에만 본다. 하는 중에는 서브에이전트가 아직 뜨지 않았을 수 있다
-    if (n.run && last?.who && n.status === 'done' && n.run !== last.who.kind) view.offPlan = true;
+    // 계획과 달랐는지는 끝난 뒤에만 본다. 하는 중에는 서브에이전트가 아직 뜨지 않았을 수 있다.
+    // 훅이 보지 못한 회차는 누가 했는지 알 수 없으므로 다르다고 하지 않는다
+    if (n.run && last?.who && n.status === 'done' && n.run !== last.who.kind) {
+      if (last.seen) view.offPlan = true;
+      else view.runUnknown = true;
+    }
     if ((n.status === 'doing' || n.status === 'waiting' || n.status === 'blocked') && last?.who?.session && closed.has(last.who.session)) view.closed = true;
     if (mine.length) view.spawn = mine[mine.length - 1];
     return view;

@@ -190,7 +190,7 @@ test('시작과 끝을 한꺼번에 적은 노드, 훅이 보지 못한 세션�
 });
 
 test('muwi run으로 뜬 세션만 "새 세션"이다. 이어서 하는 다른 대화는 직접 한 것으로 본다', () => {
-  const s = setup([{ id: 'a', run: 'session' }, { id: 'b', run: 'me' }, { id: 'c', run: 'session' }, { id: 'd', run: 'subagent' }]);
+  const s = setup([{ id: 'a', run: 'session' }, { id: 'b', run: 'me' }, { id: 'c', run: 'session' }, { id: 'd', run: 'subagent' }, { id: 'e', run: 'subagent' }]);
   // muwi run으로 뜬 세션: 붙을 때 기록이 남는다
   appendEvent(s.dir, s.work, { type: 'join', node: 'a', terminal: 't7' }, 'child');
   at(1); s.node('a', 'doing', 'child'); s.reads('react-quality', 'child');
@@ -198,8 +198,8 @@ test('muwi run으로 뜬 세션만 "새 세션"이다. 이어서 하는 다른 �
   // 다음 날 새 대화가 이어서 한다 (/clear 뒤도 같다)
   at(3); s.node('b', 'doing', 'tomorrow');
   at(4); s.node('b', 'done', 'tomorrow');
-  // 새 세션으로 하기로 한 노드를 대화가 직접 했다
-  at(5); s.node('c', 'doing', 'lead');
+  // 새 세션으로 하기로 한 노드를 대화가 직접 했다 (훅이 이 대화를 보고 있다)
+  at(5); s.hook({ hook_event_name: 'UserPromptSubmit', prompt: '계속해' }); s.node('c', 'doing', 'lead');
   assert.equal(s.of('c').offPlan, undefined); // 하는 중에는 따지지 않는다
   at(6); s.node('c', 'done', 'lead');
   // 서브에이전트로 하기로 한 노드: 세션이 시작해 두고 서브에이전트를 띄웠다
@@ -211,6 +211,11 @@ test('muwi run으로 뜬 세션만 "새 세션"이다. 이어서 하는 다른 �
   assert.deepEqual([s.of('c').who!.kind, s.of('c').offPlan], ['me', true]);
   assert.deepEqual([s.of('d').who!.kind, s.of('d').offPlan], ['subagent', undefined]);
   assert.deepEqual(s.view().helpers, { sessions: 1, subagents: 1 });
+  // 훅이 돌지 않는 세션(플러그인을 설치하기 전에 연 세션)은 서브에이전트를 알아볼 수 없다.
+  // 직접 한 것으로 적히지만, 계획과 다르다고 하지 않고 확인하지 못했다고 둔다
+  at(9); s.node('e', 'doing', 'no-hooks');
+  at(10); s.node('e', 'done', 'no-hooks');
+  assert.deepEqual([s.of('e').who!.kind, s.of('e').seen, s.of('e').offPlan, s.of('e').runUnknown], ['me', false, undefined, true]);
 });
 
 test('세션이 시작해 둔 노드를 새 세션이 넘겨받으면 같은 회차이고, 넘겨준 세션이 읽은 skill은 붙지 않는다', () => {

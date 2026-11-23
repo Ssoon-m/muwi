@@ -293,6 +293,18 @@ function cmdPlan(a: Args, dir: string) {
   out(`${created ? '계획을 적었어요' : '계획을 바꿨어요'}: ${work} (노드 ${plan.nodes.length}개)`);
   printPlan(plan);
   if (created) out('노드를 시작할 때 muwi node <id> start, 끝낼 때 muwi node <id> done "<결과 한 줄>"');
+  if (created) warnUnhooked(dir);
+}
+
+/**
+ * 훅이 돌지 않는 Claude Code 세션이면 알린다 (muwi 플러그인을 설치하기 전에 연 세션 등).
+ * 계획과 진행은 적히지만, 읽은 skill과 서브에이전트는 훅이 봐야 적히므로 빠진다
+ */
+function warnUnhooked(dir: string) {
+  const key = sessionKey();
+  const session = key ? readSession(dir, key) : null;
+  if (!session || session.tool !== 'claude' || session.hooked) return;
+  out('※ 이 세션에서는 muwi 훅이 돌지 않아요 (muwi를 설치하기 전에 연 세션일 수 있어요). 계획과 진행은 적히지만 읽은 skill과 서브에이전트가 한 일은 기록되지 않아요. 사용자에게 알리고, 기록이 필요하면 세션을 새로 열어 달라고 해요.');
 }
 
 function cmdAdd(a: Args, dir: string) {
@@ -405,7 +417,17 @@ function whoLine(v: WorkView, n: NodeView): string {
     return n.run && n.status === 'todo' ? `예정: ${runTag(n)}` : '';
   }
   const text = whoText(v, n.who);
-  return n.offPlan && n.run ? `${text} · 계획과 다름(${RUN_NAME[n.run]}으로 하기로 함)` : text;
+  if (n.offPlan && n.run) return `${text} · 계획과 다름(${withRo(RUN_NAME[n.run])} 하기로 함)`;
+  if (n.runUnknown && n.run) return `${text} · 계획: ${RUN_NAME[n.run]} (훅이 돌지 않아 계획대로 했는지 확인하지 못함)`;
+  return text;
+}
+
+/** 받침에 맞춰 '로'나 '으로'를 붙인다 (ㄹ 받침은 '로') */
+function withRo(word: string): string {
+  const last = word.charCodeAt(word.length - 1);
+  if (last < 0xac00 || last > 0xd7a3) return `${word}(으)로`;
+  const final = (last - 0xac00) % 28;
+  return final === 0 || final === 8 ? `${word}로` : `${word}으로`;
 }
 
 /**
@@ -583,7 +605,10 @@ function cmdSetup(a: Args, dir: string) {
 /** 지금 Herdr 앱 화면이 어떤지, 무엇을 할 수 있는지 사람에게 말하듯 적는다 */
 function describeScreen(s: Screen): string {
   if (!s.app || !s.shown) return 'Herdr 앱 화면: 앱이 열려 있지 않아 확인하지 못했어요. 앱을 켠 뒤 muwi layout --status로 볼 수 있어요.';
-  if (s.muwi && s.outdated) return `Herdr 앱 화면: Herdr가 업데이트돼서 muwi 레이아웃(${s.shown})이 옛 모양이에요. muwi layout을 다시 실행하면 새 모양으로 맞춰요.`;
+  if (s.muwi && s.outdated) {
+    const why = s.outdatedBy === 'herdr' ? 'Herdr가 업데이트돼서' : 'muwi 화면 배치가 바뀌어서';
+    return `Herdr 앱 화면: ${why} muwi 레이아웃(${s.shown})이 옛 모양이에요. muwi layout을 다시 실행하면 새 모양으로 맞춰요.`;
+  }
   if (s.muwi) return `Herdr 앱 화면: 지금 레이아웃(${s.shown})에 muwi 칸이 있어요.`;
   if (!s.canList && !s.canGraph) return `Herdr 앱 화면: 지금 레이아웃(${s.shown})에는 muwi 칸을 넣을 자리가 없어요. 그래프는 muwi open으로 터미널 옆에 열어요.`;
   const what = [s.canList ? '사이드바의 Agents 자리에 작업 목록을' : null, s.canGraph ? '터미널 아래에 그래프를' : null].filter(Boolean).join(', ');
