@@ -338,6 +338,9 @@ export default class Muwi extends View {
         this.error = null;
         this.loadedDown = down;
         this.loadedFit = fit;
+        // 칸 크기를 알기 전에 읽었으면(그래프 칸이 막 켜졌을 때) 크기를 안 지금 한 번 더 읽는다.
+        // 그러지 않으면 새 기록이 생길 때까지 칸 크기를 모르고 한 배치(긴 그래프를 접지 않은 한 줄)로 남는다
+        if (!fit && this.canvasSize && this.variant() !== "list") this.stale = true;
         if (this.node && !data.selected?.nodes.some((n) => n.id === this.node)) {
           this.node = null;
           this.tab = "work";
