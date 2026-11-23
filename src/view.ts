@@ -49,7 +49,7 @@ export type Try = {
   instant: boolean;
 };
 
-export type Spawn = { at: string; terminal: string; name?: string; show?: ShowIn; /** 그 세션에 맡긴 말 */ task?: string };
+export type Spawn = { at: string; terminal: string; name?: string; show?: ShowIn; /** 그 세션에 맡긴 말 */ task?: string; /** 새 세션을 띄운 폴더 */ cwd?: string };
 
 /** 노드. who·skills·seen·instant는 가장 최근 회차의 것이고, 회차별 기록은 tries에 있다 */
 export type NodeView = PlanNode & {
@@ -230,7 +230,7 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
     } else if (e.type === 'join') {
       if (e.session) joined.add(e.session);
     } else if (e.type === 'spawn') {
-      spawns.set(e.node, [...(spawns.get(e.node) ?? []), { at: e.at, terminal: e.terminal, ...(e.name ? { name: e.name } : {}), ...(e.show ? { show: e.show } : {}), ...(e.task ? { task: e.task } : {}) }]);
+      spawns.set(e.node, [...(spawns.get(e.node) ?? []), { at: e.at, terminal: e.terminal, ...(e.name ? { name: e.name } : {}), ...(e.show ? { show: e.show } : {}), ...(e.task ? { task: e.task } : {}), ...(e.cwd ? { cwd: e.cwd } : {}) }]);
     }
   }
 

@@ -615,10 +615,21 @@ export default class Muwi extends View {
   resumeHints(t, view, n) {
     const key = n.session ?? null;
     const s = key ? view.sessions?.[key] : null;
-    const folder = s?.cwd ?? view.cwd ?? null;
+    // 맡긴 세션이 기록을 남기기 전에 닫혔다: 세션 정보가 없으니 그 세션을 띄운 폴더를 쓴다 (worktree일 수 있다)
+    const unstarted = !key && Boolean(n.spawn);
+    const folder = s?.cwd ?? (unstarted ? n.spawn.cwd : null) ?? view.cwd ?? null;
     const tool = s?.tool === "codex" ? "codex" : "claude";
     const note = (text) => div().text_size(11).text_color(t.dim).child(text);
     const rows = [];
+    if (unstarted) {
+      rows.push(note("맡긴 세션이 일을 시작하기 전에 닫혔어요. 새 대화는 muwi 기록에서 맡긴 말까지 읽고 이어 가요"));
+      // 띄운 세션이 살아 있으면 그 세션에 다시 맡기라고 해도 된다
+      const lead = view.lead ? view.sessions?.[view.lead] : null;
+      if (lead?.terminal && this.alive(lead.terminal)) {
+        rows.push(note(`띄운 세션(${lead.label})에 이렇게 말하면 다시 맡겨요`));
+        rows.push(this.copyRow(t, `again-${n.id}`, `${n.id} 노드 다시 새 세션에 맡겨줘`));
+      }
+    }
     if (n.status !== "done") {
       rows.push(note(`${folder ? `${this.shortPath(folder)}에서 ` : ""}새 대화(${tool})를 열고 이렇게 말하세요`));
       rows.push(this.copyRow(t, `say-${n.id}`, `${view.work} 작업의 ${n.id} 노드 이어서 해줘`));
@@ -979,6 +990,8 @@ export default class Muwi extends View {
     // 시작했다가 앞에 먼저 할 노드가 끼어들어 잠시 멈췄다
     if (n.paused) return ["잠시 멈춤", times].filter(Boolean).join(" · ");
     if (n.spawn) {
+      // 맡긴 세션이 일을 시작하기 전에 터미널이 닫혔다. 더 기다려도 뜨지 않는다
+      if (!this.alive(n.spawn.terminal)) return "맡긴 세션이 닫힘";
       // 폴더 신뢰 확인이나 권한 확인에서 멈춰 있으면 그렇게 보여 준다. 사람이 그 칸에서 답해야 한다
       const agent = this.agentOf(view, n);
       return agent?.status === "blocked" ? AGENT_NAME.blocked : "새 세션이 뜨는 중";
@@ -1303,7 +1316,7 @@ export default class Muwi extends View {
       return [base, own.length ? count(own) : null, helped.length ? `${count(helped)}가 도움` : null].filter(Boolean).join(" + ");
     };
     // 실제로 한 쪽. 시작 전이면 뜨는 중인 세션
-    const whoText = n.who ? whoOf(n.who) : n.spawn ? `새 세션 ${n.spawn.terminal} · 뜨는 중` : null;
+    const whoText = n.who ? whoOf(n.who) : n.spawn ? `새 세션 ${n.spawn.terminal} · ${this.alive(n.spawn.terminal) ? "뜨는 중" : "일을 시작하기 전에 닫힘"}` : null;
     const plannedText = n.run ? `계획: ${RUN_NAME[n.run] ?? n.run}${n.show ? `, ${n.show}` : ""}` : null;
     /**
      * 한 회차(또는 한 번만 한 노드)의 읽은 skill.

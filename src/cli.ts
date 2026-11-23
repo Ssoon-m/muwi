@@ -851,7 +851,8 @@ function cmdRun(a: Args, dir: string) {
   }
 
   // 맡긴 말도 남긴다. 나중에 "맡긴 쪽이 무엇을 모르고 일했나"를 볼 수 있게
-  appendEvent(dir, work, { type: 'spawn', node: id, terminal, name, ...(show ? { show } : {}), task: task.trim().slice(0, 2000) }, sessionKey());
+  // 띄운 폴더도 남긴다. 새 세션이 기록을 남기기 전에 닫혀도 어디서 이어 하면 되는지 알려 줄 수 있게 (worktree에 띄웠을 때)
+  appendEvent(dir, work, { type: 'spawn', node: id, terminal, name, ...(show ? { show } : {}), task: task.trim().slice(0, 2000), cwd: path.resolve(cwd) }, sessionKey());
   join(dir, work);
   out(`새 세션을 띄웠어요: ${name} (${terminal}) → 노드 ${id}${placed ? ` · ${placed}` : ''}`);
   if (!sent) out(`맡길 일이 아직 전달되지 않았어요. hc read ${terminal}로 화면을 보고(폴더 신뢰 확인이 떠 있을 수 있어요) 풀어 준 뒤 hc send ${terminal} "<맡길 일>"로 다시 보내요.`);
