@@ -303,8 +303,20 @@ export function removeSetup(dir: string, log: (line: string) => void = () => {})
 export function refreshSetup(o: SetupOptions): boolean {
   const install = readInstall(o.dir);
   if (!install || (install.root === o.root && install.version === o.version)) return false;
+  // 플러그인을 업데이트하기 전부터 열려 있던 세션은 옛 버전의 훅을 쓴다. 그 세션이 새로 시작해도(/clear) 새 설치를 되돌리지 않는다
+  if (olderThan(o.version, install.version)) return false;
   runSetup(o);
   return true;
+}
+
+/** a가 b보다 낮은 버전인가 (1.2.10 > 1.2.9) */
+export function olderThan(a: string, b: string): boolean {
+  const pa = a.split('.').map(n => parseInt(n, 10) || 0);
+  const pb = b.split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) < (pb[i] ?? 0);
+  }
+  return false;
 }
 
 /** Herdr 앱 칸이 문제없이 불리는지 앱에 확인받는다. 앱 명령이 없으면 건너뛴다 */
