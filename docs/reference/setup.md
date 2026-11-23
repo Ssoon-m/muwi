@@ -9,6 +9,7 @@ muwi가 무엇을 어디에 설치하는지, 설정으로 무엇을 바꿀 수 �
 | Claude Code | 플러그인을 지원하는 버전 |
 | Node | 24 이상. 빌드나 `npm install`은 필요 없습니다 |
 | [Herdr 앱](https://herdr.dev) | 그래프를 보거나 새 세션을 띄울 때 필요합니다 |
+| Git for Windows | Windows에서만. Claude Code가 훅을 Git Bash로 실행합니다. [Windows에서 쓰기](#windows에서-쓰기)를 보세요 |
 
 PATH에 Node가 없는 곳(Herdr가 띄우는 세션, 그래프 칸)에서는 muwi가 로그인 셸에 물어 Node를 찾고 `~/.cache/muwi/node`에 적어 둡니다. Node 버전을 바꿨다면 `muwi setup`을 다시 실행하세요. 캐시를 버리고 다시 찾습니다. 자세한 내용은 [문제 해결하기](../guides/troubleshooting.md#node-24-이상이-필요하다고-나올-때)에 있습니다.
 
@@ -47,9 +48,10 @@ muwi setup
 | 항목 | 위치 | 조건 |
 | --- | --- | --- |
 | 터미널용 `muwi` 명령 | `~/.local/bin/muwi` | 항상 |
+| PowerShell·cmd용 `muwi` 명령 | `~/.local/bin/muwi.cmd` | Windows에서만 |
 | 그래프 칸 | `~/.config/herdr-app/mods/muwi` | Herdr 앱이 있을 때 |
 
-설치한 항목은 `~/.muwi/install.json`에 기록합니다. `muwi setup --remove`는 이 기록에 있는 것만 지웁니다.
+설치한 항목은 `~/.muwi/setup.json`에 기록합니다. `muwi setup --remove`는 이 기록에 있는 것만 지웁니다. 0.5.4까지는 `install.json`에 적었고, 0.5.5 이후 처음 setup을 할 때 옮깁니다. 0.4.0·0.5.0으로 연 세션이 `install.json`을 보고 설치를 옛 버전으로 되돌리던 문제 때문에 이름을 바꿨습니다.
 
 플러그인이 업데이트되면 다음 세션이 시작될 때 두 항목을 새 버전에 맞춥니다.
 
@@ -139,6 +141,20 @@ muwi setup --codex
 `~/.codex/AGENTS.md`에 지침을, `~/.codex/skills/muwi`에 사용법 skill을 넣습니다.
 
 Codex에는 훅이 없습니다. AI가 계획과 진행을 기록할 수는 있지만, 읽은 skill이 기록되지 않고 계획 알림도 없습니다.
+
+## Windows에서 쓰기
+
+Windows에서도 같은 방법으로 설치합니다. 다른 점은 이렇습니다.
+
+| 항목 | Windows에서 |
+| --- | --- |
+| 훅 | Claude Code가 Git Bash로 실행합니다. Git for Windows가 없으면 훅이 돌지 않아 진행이 기록되지 않습니다. 훅이 실패해도 작업은 막지 않습니다 |
+| Claude Code 안의 `muwi` 명령 | Bash 도구(Git Bash)는 플러그인의 `bin/muwi`를, PowerShell 도구는 `bin/muwi.cmd`를 씁니다 |
+| 터미널용 명령 | `muwi setup`이 `%USERPROFILE%\.local\bin`에 `muwi`(Git Bash용)와 `muwi.cmd`(PowerShell·cmd용)를 넣습니다. 이 폴더가 PATH에 없으면 추가하세요 |
+| 그래프 칸 | `muwi.cmd`로 기록을 읽습니다 |
+| 줄바꿈 | 저장소의 `.gitattributes`가 스크립트를 LF로 받게 합니다. `core.autocrlf` 설정과 상관없이 Git Bash에서 깨지지 않습니다 |
+
+GitHub Actions의 Windows에서 시험 전체를 돌리고, Git Bash로 훅을, PowerShell과 cmd로 `muwi.cmd`를 실제로 실행해 확인합니다. Windows용 Herdr 앱에서 그래프 칸이 도는지와 실제 Claude Code 세션이 훅을 부르는 것은 아직 확인하지 못했습니다. 문제가 있으면 [이슈](https://github.com/Ssoon-m/muwi/issues)로 알려 주세요.
 
 ## 업데이트하기
 

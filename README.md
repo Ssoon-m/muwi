@@ -42,7 +42,7 @@ muwi에는 AI가 순서에서 벗어나는 것을 막는 기능이 없습니다.
 
 ## 설치하기
 
-Claude Code, [Herdr 앱](https://herdr.dev), Node 24 이상이 필요합니다.
+Claude Code, [Herdr 앱](https://herdr.dev), Node 24 이상이 필요합니다. Windows에서는 Git for Windows도 필요합니다 ([Windows에서 쓰기](docs/reference/setup.md#windows에서-쓰기)).
 
 1. 터미널에서 플러그인을 설치하세요.
 
