@@ -22,7 +22,7 @@ test('훅 넣기: 남의 훅은 그대로 두고 우리 것만 한 벌 넣는다
   assert.deepEqual(once.hooks!.PostToolUse, [{ matcher: 'Skill|Read', hooks: [ours()] }]);
   assert.deepEqual(once.hooks!.PreToolUse, [
     theirs,
-    { matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [ours(' nudge')] },
+    { matcher: 'Edit|Write|MultiEdit|NotebookEdit|Agent|Task', hooks: [ours(' nudge')] },
     { matcher: 'Bash', hooks: [ours(' guard')] },
   ]);
   assert.deepEqual(removeHooks(once), start);

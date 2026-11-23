@@ -241,6 +241,25 @@ test('nudge: 사람이 새로 일을 시키면 다시 따진다. skip은 그 요
   assert.match(reason, /muwi skip/);
 });
 
+test('nudge: 파일을 고치지 않는 일도 서브에이전트를 띄우면 계획을 먼저 묻는다 (PR 리뷰의 점검들처럼)', () => {
+  const t = setup([{ id: 'impl' }]);
+  const spawn = (session: string, extra: object = {}) =>
+    ({ session_id: session, hook_event_name: 'PreToolUse', tool_name: 'Agent', tool_input: { description: '팀 기준 점검', prompt: '…' }, ...extra });
+  const first = handleHook(spawn('reviewer'), t.dir, 'nudge', ENV);
+  assert.ok(denied(first));
+  const reason = JSON.parse(first.stdout!).hookSpecificOutput.permissionDecisionReason;
+  assert.match(reason, /여러 단계로 하는 일이면 파일을 고치지 않아도 계획을 적어요/);
+  assert.match(reason, /서브에이전트 띄우기를 다시 시도하세요/);
+  assert.match(reason, /muwi skip/);
+  // 예전 이름(Task)도 같다
+  assert.ok(denied(handleHook({ ...spawn('reviewer'), tool_name: 'Task' }, t.dir, 'nudge', ENV)));
+  // 서브에이전트 안에서 또 띄우는 것은 따지지 않는다 (맡긴 세션이 이미 따졌다)
+  assert.deepEqual(handleHook(spawn('reviewer', { agent_id: 'ag1' }), t.dir, 'nudge', ENV), {});
+  // 계획을 적으면 지나간다
+  attach(t.dir, 'reviewer', t.work, ENV);
+  assert.deepEqual(handleHook(spawn('reviewer'), t.dir, 'nudge', ENV), {});
+});
+
 test('nudge: 계획을 적은 세션과 맡은 노드를 시작한 세션은 알리지 않는다', () => {
   const t = setup([{ id: 'impl' }]);
   at(1); t.node('impl', 'doing', 'worker'); // muwi node impl start --work w1

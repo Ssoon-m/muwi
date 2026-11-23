@@ -4,7 +4,7 @@
 # 여기서 끝나서 node를 띄우지 않는다.
 #   hook.sh        세션이 시작되면 지침을 넣고, 읽은 skill과 서브에이전트의 시작·끝을 기록한다.
 #                  사람이 새로 말을 걸면 계획을 적었는지 다시 따지게 한다
-#   hook.sh nudge  계획 없이 파일을 고치려 할 때 알려 준다 (계획을 적거나 muwi skip 하면 그 요청 동안 그친다)
+#   hook.sh nudge  계획 없이 파일을 고치거나 서브에이전트를 띄우려 할 때 알려 준다 (계획을 적거나 muwi skip 하면 그 요청 동안 그친다)
 #   hook.sh guard  push·PR·댓글 앞에서 사람에게 묻게 한다 (muwi config guard on 일 때)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 payload=$(cat)

@@ -212,7 +212,7 @@ export function listWorks(dir: string): string[] {
 
 /** 켜고 끄는 것 (muwi config). 파일이 없으면 기본값 */
 export type Config = {
-  /** 계획을 적지 않은 세션이 파일을 고치려 할 때 알린다 */
+  /** 계획을 적지 않은 세션이 파일을 고치거나 서브에이전트를 띄우려 할 때 알린다 */
   nudge: boolean;
   /** push·PR·댓글 앞에서 사람에게 묻는다 */
   guard: boolean;

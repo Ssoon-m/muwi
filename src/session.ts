@@ -18,7 +18,7 @@ export type Session = {
   work?: string;
   /** 이 세션이 읽은 skill과 처음 읽은 시각. 작업을 옮겨도 세션은 내용을 갖고 있으므로 따로 기억한다 */
   loaded: Record<string, string>;
-  /** 계획 없이 파일을 고치려 해서 처음 알린 시각 (nudge 훅) */
+  /** 계획 없이 파일을 고치거나 서브에이전트를 띄우려 해서 처음 알린 시각 (nudge 훅) */
   nudged?: string;
   /** 계획 없이 진행하겠다고 밝혔다 (muwi skip). 사람이 다음 말을 하면 지워진다 */
   skipped?: { at: string; reason: string };
