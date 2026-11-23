@@ -21,13 +21,23 @@
 
 | 명령 | 설명 |
 | --- | --- |
-| `muwi open [--right]` | Herdr 앱에서 그래프 칸을 현재 터미널 아래에 엽니다. `--right`를 붙이면 오른쪽에 엽니다 |
+| `muwi open [--right]` | Herdr 앱에서 그래프 칸을 현재 터미널 아래에 엽니다. `--right`를 붙이면 오른쪽에 엽니다. 그 탭에서만 보입니다 |
 | `muwi status [--all] [--json]` | 작업 목록을 보여 줍니다. 사용자를 기다리는 작업이 위에 나옵니다. 지난 작업은 접혀 있고 `--all`을 붙이면 모두 나옵니다 |
 | `muwi show [<작업>] [--json]` | 작업 하나의 기록을 보여 줍니다: 노드, 회차, 누가 했는지, 읽은 skill, 계획이 바뀐 기록, 빠진 노드, 문제 표시 |
 | `muwi session` | 현재 세션이 붙어 있는 작업과 읽은 skill을 보여 줍니다 |
 | `muwi --version` | 버전을 보여 줍니다 |
 
 `--json`을 붙이면 같은 내용을 JSON으로 출력합니다.
+
+## Herdr 앱 화면
+
+| 명령 | 설명 |
+| --- | --- |
+| `muwi layout` | 지금 레이아웃을 복제해서 사이드바의 Agents 자리에 작업 목록을, 터미널 아래에 그래프를 넣고 그 레이아웃으로 바꿉니다. 원래 레이아웃은 그대로 남습니다. 이미 muwi 칸이 있으면 그대로 둡니다. Herdr가 업데이트된 뒤에 실행하면 새 모양으로 다시 만듭니다 |
+| `muwi layout --status [--json]` | 지금 화면에 muwi 칸이 있는지, 넣을 자리가 있는지 보여 줍니다 |
+| `muwi layout --remove` | 원래 레이아웃으로 돌아가고 muwi가 만든 복제본을 지웁니다. 복제본을 손으로 고쳤으면 지우지 않습니다 |
+
+자세한 내용은 [설치와 설정](setup.md#herdr-앱-화면)에 있습니다.
 
 ## 설치와 설정
 
@@ -36,10 +46,11 @@
 | `muwi setup` | 터미널용 `muwi` 명령과 Herdr 앱의 그래프 칸을 설치합니다 |
 | `muwi setup --claude` | 플러그인 없이 쓸 때 Claude Code 훅과 사용법 skill도 설치합니다 |
 | `muwi setup --codex` | Codex에 지침과 사용법 skill을 넣습니다 |
-| `muwi setup --remove` | `muwi setup`으로 설치한 것을 지웁니다 |
+| `muwi setup --remove` | `muwi setup`으로 설치한 것을 지웁니다. `muwi layout`으로 바꾼 화면도 되돌립니다 |
 | `muwi config` | 현재 설정을 보여 줍니다 |
 | `muwi config nudge on\|off` | 계획 알림을 켜거나 끕니다. 기본값은 `on`입니다 |
 | `muwi config guard on\|off` | push 전에 묻기를 켜거나 끕니다. 기본값은 `off`입니다 |
+| `muwi config layout on\|off` | 화면에 muwi 칸이 없을 때 `muwi layout`을 권하는 안내를 켜거나 끕니다. 기본값은 `on`입니다 |
 
 각 항목이 무엇을 설치하고 설정하는지는 [설치와 설정](setup.md)에 있습니다.
 

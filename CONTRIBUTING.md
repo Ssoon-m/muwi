@@ -35,6 +35,7 @@ claude --plugin-dir .                     # 설치하지 않고 이 폴더를 �
 | `src/view.ts` | 계획과 사건 기록을 합쳐 화면에 보여 줄 형태로 만들기 |
 | `src/layout.ts`, `src/vendor/` | 그래프 배치 (elkjs) |
 | `src/setup.ts` | `muwi setup` |
+| `src/screen.ts` | `muwi layout`: Herdr 레이아웃을 복제해 muwi 칸을 넣고 빼기 |
 | `hooks/` | 플러그인 훅(`hooks.json`, `hook.sh`)과 세션 지침(`instructions.md`) |
 | `skills/muwi/` | 사용법 skill: 계획 적는 방법, 맡기는 방법, 기록 진단 절차 |
 | `herdr-app/muwi/` | Herdr 앱의 그래프 칸 |
@@ -58,7 +59,8 @@ claude --plugin-dir .                     # 설치하지 않고 이 폴더를 �
 | 동작 | 테스트 |
 | 명령이나 옵션 | `muwi --help`, [명령어](docs/reference/commands.md), 사용법 skill |
 | 기록 형식 | `SCHEMA`, [기록 파일](docs/reference/records.md) |
-| 그래프 칸 | `herdr-app/muwi/main.js`의 견본 자료(`SAMPLE`), [그래프 화면](docs/reference/graph.md) |
+| 그래프 칸 | `herdr-app/muwi/main.js`의 견본 자료(`SAMPLE`), [그래프 화면](docs/reference/graph.md). `herdr-app check herdr-app/muwi`가 통과하는지와 Herdr 앱에서 직접 보는 것까지 확인하세요 |
+| Herdr 화면 바꾸기 | `src/screen.ts`의 `placeMuwi` 테스트(`tests/screen.test.ts`), [설치와 설정](docs/reference/setup.md#herdr-앱-화면) |
 | 훅 | `hooks/hooks.json`, `src/setup.ts`의 훅 목록, [동작 원리](docs/how-it-works.md#훅이-하는-일) |
 
 커밋은 역할별로 나누고 `feat(범위): 설명`, `fix`, `docs`, `test`, `chore` 형식으로 쓰세요.
