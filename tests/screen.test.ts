@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { ScreenError, applyLayout, hasMuwi, placeMuwi, readLayoutRecord, removeLayout, screenState, type LayoutNode } from '../src/screen.ts';
+import { PLACE_VERSION, ScreenError, applyLayout, hasMuwi, placeMuwi, readLayoutRecord, removeLayout, screenState, type LayoutNode } from '../src/screen.ts';
 
 const CLI = path.resolve(import.meta.dirname, '../src/cli.ts');
 
@@ -54,8 +54,15 @@ test('레이아웃에 muwi 칸 넣기: Agents 자리에 작업 목록, 터미널
   assert.ok(list && graph);
   // Agents 칸은 자리와 크기를 그대로 두고 내용만 바꾼다
   assert.deepEqual(find(tree, 'agents'), { id: 'agents', type: 'block', size: { weight: 1 }, min: 90, content: { mod: 'muwi', props: { variant: 'list' } } });
-  // 그래프는 터미널 영역(오른쪽 패널까지)을 담은 줄 바로 아래, 상태 줄 위에
-  assert.deepEqual(find(tree, 'work')!.children!.map(c => c.id), ['tabs', 'work-body', 'muwi-graph', 'status']);
+  // 그래프는 터미널 영역(오른쪽 패널까지)을 담은 줄 아래, 상태 줄 위에.
+  // 둘을 새 세로 묶음으로 감싸서 사이 경계를 끌 수 있게 한다 (작업 영역 묶음은 끌 수 없게 돼 있다)
+  assert.deepEqual(find(tree, 'work')!.children!.map(c => c.id), ['tabs', 'muwi-split', 'status']);
+  const split = find(tree, 'muwi-split')!;
+  assert.equal(split.type, 'column');
+  assert.equal(split.resizable, true);
+  assert.deepEqual(split.children!.map(c => c.id), ['work-body', 'muwi-graph']);
+  assert.deepEqual(split.children![0].size, { weight: 1 });
+  assert.deepEqual(find(tree, 'muwi-graph')!.size, { px: 300 });
   assert.deepEqual(find(tree, 'muwi-graph')!.content, { mod: 'muwi', props: { variant: 'graph' } });
   assert.ok(hasMuwi(tree));
   assert.equal(hasMuwi(MAIN), false);
@@ -73,7 +80,9 @@ test('레이아웃에 muwi 칸 넣기: Agents 칸이 없으면 목록까지 있�
   assert.equal(list, false);
   assert.equal(graph, true);
   const wrap = tree.children![1];
+  assert.equal(wrap.id, 'muwi-split');
   assert.equal(wrap.type, 'column');
+  assert.equal(wrap.resizable, true);
   assert.deepEqual(wrap.size, { weight: 3 });
   assert.deepEqual(wrap.children!.map(c => c.id), ['main', 'muwi-graph']);
   assert.deepEqual(wrap.children![0].size, { weight: 1 });
@@ -178,6 +187,23 @@ test('muwi layout: Herdr가 업데이트되면 새 모양으로 다시 복제한
   assert.ok(fs.existsSync(file));
   // 남겨 둔 복제본과 이름이 겹치지 않게 다음 이름을 쓴다
   assert.equal(applyLayout(h.records, h.env).name, 'muwi-2');
+});
+
+test('muwi layout: muwi의 배치가 바뀌면 옛 판으로 만든 복제본을 다시 만든다', () => {
+  const h = fakeApp();
+  applyLayout(h.records, h.env);
+  assert.equal(readLayoutRecord(h.records)!.shape, PLACE_VERSION);
+  // 옛 판(높이를 바꿀 수 없던 배치)으로 만든 것처럼 기록을 되돌린다
+  const file = path.join(h.records, 'layout.json');
+  const old = JSON.parse(fs.readFileSync(file, 'utf8'));
+  delete old.shape;
+  fs.writeFileSync(file, JSON.stringify(old));
+  const s = screenState(h.records, h.env);
+  assert.equal(s.outdated, true);
+  assert.equal(s.outdatedBy, 'muwi');
+  assert.equal(applyLayout(h.records, h.env).refreshed, true);
+  assert.equal(readLayoutRecord(h.records)!.shape, PLACE_VERSION);
+  assert.equal(screenState(h.records, h.env).outdated, false);
 });
 
 test('muwi layout: 앱이 닫혀 있거나 넣을 자리가 없으면 아무것도 바꾸지 않고 이유를 알린다', () => {

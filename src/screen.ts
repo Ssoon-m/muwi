@@ -12,6 +12,15 @@ import { readJson, writeJson } from './store.ts';
 
 export const LAYOUT_NAME = 'muwi';
 export const GRAPH_ID = 'muwi-graph';
+/** 터미널 영역과 그래프를 담는 세로 묶음. 이 묶음 안의 경계는 끌어서 높이를 바꿀 수 있다 */
+export const SPLIT_ID = 'muwi-split';
+/**
+ * muwi 칸을 넣는 배치의 판. 배치를 바꾸면 올린다. 옛 판으로 만든 복제본은 muwi layout이 다시 만든다
+ *   1: 그래프를 터미널 영역 아래에 끼워 넣음 (높이 고정)
+ *   2: 터미널 영역과 그래프를 끌 수 있는 경계로 나눔
+ */
+export const PLACE_VERSION = 2;
+const GRAPH_PX = 300;
 /** Herdr가 직접 내는 레이아웃. 업데이트되면 그 모양을 따라 다시 복제할 수 있다 */
 const SHIPPED = new Set(['main', 'terminals', 'win98']);
 
@@ -35,6 +44,8 @@ export type LayoutRecord = {
   version?: string;
   /** 우리가 쓴 복제본 파일의 해시. 다르면 사람이 고친 것이다 */
   hash: string;
+  /** 어느 판의 배치로 넣었나 (PLACE_VERSION). 없으면 1 */
+  shape?: number;
   list: boolean;
   graph: boolean;
   at: string;
@@ -77,7 +88,8 @@ export function hasMuwi(tree: LayoutNode): boolean {
 /**
  * 레이아웃 나무에 muwi 칸을 넣은 새 나무를 돌려준다. 넣을 자리를 찾지 못한 쪽은 false.
  *   list: Agents 칸(content.mod "agents")의 내용을 muwi 작업 목록으로 바꿨다. 칸의 자리·크기는 그대로다
- *   graph: 터미널 영역(content.tab "active")을 담은 세로 묶음에서 그 바로 아래에 그래프 칸을 넣었다
+ *   graph: 터미널 영역(content.tab "active")을 담은 칸 아래에 그래프 칸을 넣었다. 둘을 새 세로 묶음으로 감싸서
+ *          그 사이 경계를 끌어 높이를 바꿀 수 있게 한다 (Herdr의 기본 레이아웃은 작업 영역의 경계를 끌 수 없게 해 둔다)
  */
 export function placeMuwi(tree: LayoutNode): { tree: LayoutNode; list: boolean; graph: boolean } {
   const root = structuredClone(tree);
@@ -95,36 +107,35 @@ export function placeMuwi(tree: LayoutNode): { tree: LayoutNode; list: boolean; 
     const block: LayoutNode = {
       id: GRAPH_ID,
       type: 'block',
-      size: { px: 260 },
+      size: { px: GRAPH_PX },
       min: 140,
       max: 900,
       content: { mod: 'muwi', props: { variant: list ? 'graph' : 'full' } },
     };
-    // 터미널 영역을 담은 가장 가까운 세로 묶음에서, 터미널 영역 쪽 칸 바로 아래에 넣는다
+    // 터미널 영역을 담은 가장 가까운 세로 묶음에서 터미널 영역 쪽 칸을 고른다 (오른쪽 패널이 있으면 그것까지).
+    // 세로 묶음이 없으면 터미널 영역 칸 자체를 고른다
+    let parent = trail[trail.length - 2];
+    let target = trail[trail.length - 1];
     for (let i = trail.length - 2; i >= 0; i--) {
-      const parent = trail[i];
-      if (parent.type !== 'column') continue;
-      const at = parent.children!.indexOf(trail[i + 1]);
-      parent.children!.splice(at + 1, 0, block);
-      graph = true;
+      if (trail[i].type !== 'column') continue;
+      parent = trail[i];
+      target = trail[i + 1];
       break;
     }
-    if (!graph) {
-      // 세로 묶음이 없으면 터미널 영역을 세로 묶음으로 감싸서 아래에 넣는다
-      const tab = trail[trail.length - 1];
-      const parent = trail[trail.length - 2];
-      const at = parent.children!.indexOf(tab);
-      const { size, min, max, ...rest } = tab;
-      parent.children![at] = {
-        id: 'muwi-work',
-        type: 'column',
-        ...(size !== undefined ? { size } : {}),
-        ...(min !== undefined ? { min } : {}),
-        ...(max !== undefined ? { max } : {}),
-        children: [{ ...rest, size: { weight: 1 } }, block],
-      };
-      graph = true;
-    }
+    // 고른 칸과 그래프를 끌 수 있는 경계로 나눈 세로 묶음으로 감싼다. 묶음은 고른 칸의 자리와 크기를 물려받는다
+    const at = parent.children!.indexOf(target);
+    const { size, min, max, ...rest } = target;
+    parent.children![at] = {
+      id: SPLIT_ID,
+      type: 'column',
+      resizable: true,
+      divider: { width: 1, color: 'border' },
+      ...(size !== undefined ? { size } : {}),
+      ...(min !== undefined ? { min } : {}),
+      ...(max !== undefined ? { max } : {}),
+      children: [{ ...rest, size: { weight: 1 }, min: 120 }, block],
+    };
+    graph = true;
   }
   return { tree: root, list, graph };
 }
@@ -141,8 +152,9 @@ export type Screen = {
   canGraph: boolean;
   /** muwi layout으로 바꾼 기록 */
   record: LayoutRecord | null;
-  /** 우리 복제본이 옛 Herdr 버전에서 복제한 것이다 (Herdr가 업데이트됐다) */
+  /** 우리 복제본을 새로 만들어야 한다: Herdr가 업데이트됐거나(herdr) muwi의 배치가 바뀌었다(muwi) */
   outdated: boolean;
+  outdatedBy?: 'herdr' | 'muwi';
   /** 사람이 복제본을 손으로 고쳤다 */
   edited: boolean;
   version?: string;
@@ -187,6 +199,9 @@ export function screenState(dir: string, env: NodeJS.ProcessEnv = process.env): 
   const file = readTree(env, shown);
   if (!file) return { ...base, shown, version };
   const placed = placeMuwi(file.tree);
+  const ours = Boolean(record && record.name === shown);
+  const herdrMoved = ours && SHIPPED.has(record!.base) && Boolean(version && record!.version && version !== record!.version);
+  const muwiMoved = ours && (record!.shape ?? 1) < PLACE_VERSION;
   return {
     ...base,
     shown,
@@ -194,7 +209,8 @@ export function screenState(dir: string, env: NodeJS.ProcessEnv = process.env): 
     muwi: hasMuwi(file.tree),
     canList: placed.list,
     canGraph: placed.graph,
-    outdated: Boolean(record && record.name === shown && SHIPPED.has(record.base) && version && record.version && version !== record.version),
+    outdated: herdrMoved || muwiMoved,
+    ...(herdrMoved ? { outdatedBy: 'herdr' as const } : muwiMoved ? { outdatedBy: 'muwi' as const } : {}),
   };
 }
 
@@ -251,8 +267,11 @@ export function applyLayout(dir: string, env: NodeJS.ProcessEnv = process.env): 
   let refreshed = false;
   if (state.muwi) {
     if (!state.outdated) return { name: state.shown, base: state.record?.base ?? state.shown, list: true, graph: true, already: true };
-    // Herdr가 업데이트됐다. 우리 복제본을 원래 레이아웃의 새 모양으로 다시 만든다 (사람이 손으로 고쳤으면 그대로 둔다)
-    if (state.edited) throw new ScreenError(`Herdr가 업데이트됐지만 ${state.shown} 레이아웃을 손으로 고친 것 같아 다시 만들지 않았어요.`);
+    // Herdr가 업데이트됐거나 muwi의 배치가 바뀌었다. 우리 복제본을 다시 만든다 (사람이 손으로 고쳤으면 그대로 둔다)
+    if (state.edited) {
+      const why = state.outdatedBy === 'herdr' ? 'Herdr가 업데이트됐지만' : 'muwi 화면 배치가 바뀌었지만';
+      throw new ScreenError(`${why} ${state.shown} 레이아웃을 손으로 고친 것 같아 다시 만들지 않았어요. 고친 복제본은 남겨 두고 새로 만들려면 muwi layout --remove 뒤에 muwi layout을 실행해요.`);
+    }
     base = state.record!.base;
     switchTo(env, base);
     fs.rmSync(layoutPath(env, state.shown), { force: true });
@@ -295,6 +314,7 @@ export function applyLayout(dir: string, env: NodeJS.ProcessEnv = process.env): 
     base,
     ...(copy.tree.cloned_from?.version ? { version: copy.tree.cloned_from.version } : state.version ? { version: state.version } : {}),
     hash: hashOf(text),
+    shape: PLACE_VERSION,
     list: placed.list,
     graph: placed.graph,
     at: new Date().toISOString(),
