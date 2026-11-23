@@ -393,7 +393,16 @@ export default class Muwi extends View {
   go(terminal) {
     if (!terminal || checking()) return;
     if (panes().some((p) => p.terminal === terminal)) run("pane.focus", { terminal });
-    else if (agents().some((a) => a.address === terminal)) run("terminal.peek", { terminal });
+    else if (this.alive(terminal)) run("terminal.peek", { terminal });
+    // 누르는 사이에 터미널이 닫혔다. 앱의 오류(terminal.peek failed) 대신 무슨 일인지 알린다
+    else notify({ title: "그 세션의 터미널이 닫혔어요", body: "이어서 하려면 새 대화에서 이 작업을 이어 달라고 하면 돼요.", level: "info" });
+  }
+
+  /** 그 터미널이 아직 떠 있는가. 세션을 끝내거나 터미널을 닫으면 없어져서 그리로 갈 수 없다 */
+  alive(terminal) {
+    if (!terminal) return false;
+    if (checking()) return true; // herdr-app check는 견본으로 버튼까지 그려 본다
+    return panes().some((p) => p.terminal === terminal) || (terminals() ?? []).some((x) => x.address === terminal);
   }
 
   colors(t) {
@@ -1292,12 +1301,14 @@ export default class Muwi extends View {
       .when(Boolean(whoText || plannedText), (el) => el.child(v_flex().gap(4).child(label("누가"))
         // 글이 길면 줄을 바꾸고, 버튼은 그 아래에 둔다 (칸이 좁아도 잘리지 않게)
         .when(Boolean(whoText), (el) => el.child(line(`${whoText}${agent ? ` · ${AGENT_NAME[agent.status] ?? agent.status}` : ""}`, t.foreground)))
-        .when(Boolean(whoText && terminal), (el) => el.child(h_flex().child(
+        // 터미널이 떠 있을 때만 갈 수 있다. 닫혔으면 버튼 대신 닫혔다고 적는다 (누르면 앱이 오류를 낸다)
+        .when(Boolean(whoText && terminal) && this.alive(terminal), (el) => el.child(h_flex().child(
           h_flex().id(`go-${n.id}`).h(20).px(7).flex_none().items_center().rounded(5).bg(t.raised).border_1().border_color(t.border)
             .text_size(10.5).text_color(t.muted).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground))
             // pane이 있으면 그 pane으로 가고, pane 없이 떠 있는 세션이면 그 자리에서 들여다본다
-            .on_click(() => run(panes().some((p) => p.terminal === terminal) ? "pane.focus" : "terminal.peek", { terminal }))
+            .on_click(() => this.go(terminal))
             .child("터미널로 가기"))))
+        .when(Boolean(whoText && terminal) && !this.alive(terminal), (el) => el.child(line(n.closed ? "터미널이 닫혔어요" : "터미널이 닫혔어요. 이어서 하려면 새 대화에서 이 작업을 이어 달라고 하면 돼요.", t.dim)))
         .when(Boolean(plannedText), (el) => el.child(line(
           n.offPlan ? `${plannedText} · 계획과 다르게 했어요`
             : n.runUnknown ? `${plannedText} · 이 세션에서 훅이 돌지 않아 계획대로 했는지 확인하지 못했어요` : plannedText,
