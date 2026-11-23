@@ -157,6 +157,30 @@ export function recordSkill(dir: string, key: string, skill: string, via: 'tool'
   return session;
 }
 
+/** 그래프 칸이 터미널과 작업을 잇는 데 쓰는 세션 정보 */
+export type SessionLink = { key: string; terminal: string; work?: string; seenAt: string };
+
+/**
+ * 최근에 본 세션 중 Herdr 터미널이 있는 것. 그래프 칸은 이걸로 "이 터미널의 세션은 어느 작업을 하는가"를 안다.
+ * 오래된 세션은 넣지 않는다 (Herdr를 다시 켜면 터미널 주소가 다시 쓰인다)
+ */
+export function recentSessions(dir: string, since: number): SessionLink[] {
+  let names: string[];
+  try {
+    names = fs.readdirSync(path.join(dir, '.sessions'));
+  } catch {
+    return [];
+  }
+  const out: SessionLink[] = [];
+  for (const name of names) {
+    if (!name.endsWith('.json')) continue;
+    const s = readJson<Session>(path.join(dir, '.sessions', name));
+    if (!s?.key || !s.terminal || !s.seenAt || Date.parse(s.seenAt) < since) continue;
+    out.push({ key: s.key, terminal: s.terminal, ...(s.work ? { work: s.work } : {}), seenAt: s.seenAt });
+  }
+  return out.sort((a, b) => (a.seenAt < b.seenAt ? 1 : a.seenAt > b.seenAt ? -1 : 0));
+}
+
 /** 화면에 보여 줄 짧은 이름: 터미널 주소가 있으면 그것, 없으면 세션 id 앞 네 글자 */
 export function sessionLabel(s: Pick<Session, 'key' | 'terminal' | 'herdrPane'> | null | undefined, key: string | null): string {
   if (!key) return '';

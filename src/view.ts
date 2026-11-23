@@ -382,7 +382,30 @@ export type WorkSummary = Pick<WorkView, 'work' | 'title' | 'request' | 'state' 
   active: { id: string; title: string; status: NodeStatus; note?: string; closed?: boolean }[];
   /** 지난 작업: 끝났거나 멈춘 채로 오래됐다. 목록에서 접어 둔다 */
   past: boolean;
+  /** 이 작업으로 갈 때 열 Herdr 터미널. 모르면 없다 */
+  terminal?: string;
 };
+
+const URGENT: Partial<Record<NodeStatus, number>> = { waiting: 0, blocked: 1, doing: 2 };
+
+/**
+ * 이 작업으로 갈 때 열 터미널: 사람을 기다리는 노드 → 막힌 노드 → 하는 노드를 하는 세션,
+ * 그런 노드가 없으면 계획을 낸 세션, 그다음 가장 최근에 본 세션. 세션이 닫힌 노드는 건너뛴다
+ */
+export function terminalOf(v: Pick<WorkView, 'nodes' | 'sessions' | 'lead'>): string | undefined {
+  const live = v.nodes
+    .filter(n => URGENT[n.status] !== undefined && !n.closed && n.session)
+    .sort((a, b) => URGENT[a.status]! - URGENT[b.status]!);
+  for (const n of live) {
+    const t = v.sessions[n.session!]?.terminal;
+    if (t) return t;
+  }
+  const lead = v.lead ? v.sessions[v.lead]?.terminal : undefined;
+  if (lead) return lead;
+  return Object.values(v.sessions)
+    .filter(s => s.terminal)
+    .sort((a, b) => (b.seenAt ?? '').localeCompare(a.seenAt ?? ''))[0]?.terminal;
+}
 
 /** 모든 작업을 급한 순서로: 나를 기다림 → 막힘 → 작업 중 → 멈춤 → 노드 사이 → 끝. 같은 상태면 최근 것이 위 */
 export function loadBoard(dir: string, env: NodeJS.ProcessEnv = process.env): { works: WorkSummary[]; errors: { work: string; message: string }[] } {
@@ -395,6 +418,7 @@ export function loadBoard(dir: string, env: NodeJS.ProcessEnv = process.env): { 
       if (!v) continue;
       // 살아 있는 세션이 하고 있는 작업은 오래돼도 접지 않는다
       const quiet = v.state === 'done' || v.state === 'stalled' || v.state === 'idle';
+      const terminal = terminalOf(v);
       works.push({
         work: v.work,
         title: v.title,
@@ -406,6 +430,7 @@ export function loadBoard(dir: string, env: NodeJS.ProcessEnv = process.env): { 
           .filter(n => n.status === 'waiting' || n.status === 'blocked' || n.status === 'doing')
           .map(n => ({ id: n.id, title: n.title, status: n.status, ...(n.note ? { note: n.note } : {}), ...(n.closed ? { closed: true } : {}) })),
         past: quiet && now - Date.parse(v.updatedAt) > PAST_DAYS * 86_400_000,
+        ...(terminal ? { terminal } : {}),
       });
     } catch (e: any) {
       errors.push({ work, message: e?.message ?? String(e) });

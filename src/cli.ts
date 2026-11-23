@@ -8,8 +8,9 @@ import { layoutGraph, layoutProblems } from './layout.ts';
 import { ROOT, handleHook } from './hook.ts';
 import { markNode } from './node.ts';
 import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
-import { attach, markSettled, readSession, sessionKey, sessionLabel, touchSession } from './session.ts';
+import { attach, markSettled, readSession, recentSessions, sessionKey, sessionLabel, touchSession } from './session.ts';
 import { checkMod, refreshSetup, removeSetup, runSetup } from './setup.ts';
+import { ScreenError, applyLayout, removeLayout, screenState, type Screen } from './screen.ts';
 import {
   SCHEMA, SHOW_IN, appendEvent, checkWorkName, listWorks, nowIso, readConfig, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
   type Config, type NodeStatus, type Plan, type RunBy, type ShowIn,
@@ -49,12 +50,19 @@ const HELP = `사용법: muwi <명령>
   muwi session                         이 세션이 붙어 있는 작업과 읽은 skill
   muwi open [--right]                  Herdr 앱에서 그래프 칸을 이 터미널 아래(--right면 오른쪽)에 연다
 
+  Herdr 앱 화면
+  muwi layout                          지금 레이아웃을 복제해 사이드바 Agents 자리에 작업 목록을, 터미널 아래에
+                                       그래프를 넣고 그 레이아웃으로 바꾼다. 원래 레이아웃은 그대로 남는다
+  muwi layout --status [--json]        지금 화면에 muwi 칸이 있는지, 넣을 자리가 있는지 본다
+  muwi layout --remove                 원래 레이아웃으로 돌아가고 muwi가 만든 복제본을 지운다
+
   설치와 설정
   muwi setup                         터미널용 muwi 명령과 Herdr 앱 그래프 칸을 넣는다
   muwi setup --claude                플러그인 없이 쓸 때: Claude Code 훅과 사용법 skill도 넣는다
   muwi setup --codex                 Codex에 지침과 사용법 skill을 넣는다 (훅이 없어 계획 기록만 된다)
-  muwi setup --remove                setup으로 넣은 것을 뺀다
-  muwi config [nudge|guard on|off]   계획 알림(nudge), push·PR 앞에서 묻기(guard)를 켜고 끈다
+  muwi setup --remove                setup으로 넣은 것을 뺀다 (muwi layout으로 바꾼 화면도 되돌린다)
+  muwi config [nudge|guard|layout on|off]
+                                     계획 알림(nudge), push·PR 앞에서 묻기(guard), 화면 바꾸기 안내(layout)를 켜고 끈다
   muwi --version
 
 작업은 --work <이름>으로 고른다. 없으면 이 세션이 붙어 있는 작업을 쓴다.
@@ -521,7 +529,11 @@ async function cmdBoard(a: Args, dir: string) {
     const v = loadView(dir, pick);
     if (v) selected = await withLayout(v);
   }
-  out(JSON.stringify({ dir, ...board, selected }));
+  // 그래프 칸이 Herdr 터미널과 작업을 잇는 데 쓴다 (지금 보는 탭의 작업 따라가기, 계획 없는 세션 가려내기)
+  const sessions = recentSessions(dir, Date.now() - PAST_DAYS * 86_400_000);
+  // 화면에 muwi 칸이 없을 때 그래프 칸이 바꾸자고 안내해도 되는가 (muwi config layout)
+  const suggest = readConfig(dir).layout;
+  out(JSON.stringify({ dir, ...board, sessions, suggest, selected }));
 }
 
 function cmdHook(a: Args, dir: string) {
@@ -549,7 +561,11 @@ function version(): string {
 }
 
 function cmdSetup(a: Args, dir: string) {
-  if (a.flags.remove) return removeSetup(dir, out);
+  if (a.flags.remove) {
+    // 화면을 바꿔 뒀으면 먼저 되돌린다. 그래프 칸을 빼면 그 레이아웃의 칸이 비기 때문이다
+    if (fs.existsSync(`${dir}/layout.json`)) layoutRemoved(guardScreen(() => removeLayout(dir)));
+    return removeSetup(dir, out);
+  }
   const install = runSetup({ root: ROOT, version: version(), dir, claude: Boolean(a.flags.claude), codex: Boolean(a.flags.codex), log: out });
   if (install.herdr) {
     const checked = checkMod(install.herdr);
@@ -557,12 +573,63 @@ function cmdSetup(a: Args, dir: string) {
   }
   if (!install.claude) out('Claude Code의 훅·지침·사용법 skill은 플러그인이 넣어 줘요. 플러그인 없이 쓰려면 muwi setup --claude');
   else out('이미 열려 있는 Claude Code 세션은 다시 시작해야 훅이 적용돼요.');
+  if (install.herdr) {
+    const screen = screenState(dir);
+    // 안내를 꺼 뒀으면 화면이 이미 muwi일 때만 알린다
+    if (readConfig(dir).layout || screen.muwi) out(describeScreen(screen));
+  }
 }
 
-const CONFIG_KEYS: (keyof Config)[] = ['nudge', 'guard'];
+/** 지금 Herdr 앱 화면이 어떤지, 무엇을 할 수 있는지 사람에게 말하듯 적는다 */
+function describeScreen(s: Screen): string {
+  if (!s.app || !s.shown) return 'Herdr 앱 화면: 앱이 열려 있지 않아 확인하지 못했어요. 앱을 켠 뒤 muwi layout --status로 볼 수 있어요.';
+  if (s.muwi && s.outdated) return `Herdr 앱 화면: Herdr가 업데이트돼서 muwi 레이아웃(${s.shown})이 옛 모양이에요. muwi layout을 다시 실행하면 새 모양으로 맞춰요.`;
+  if (s.muwi) return `Herdr 앱 화면: 지금 레이아웃(${s.shown})에 muwi 칸이 있어요.`;
+  if (!s.canList && !s.canGraph) return `Herdr 앱 화면: 지금 레이아웃(${s.shown})에는 muwi 칸을 넣을 자리가 없어요. 그래프는 muwi open으로 터미널 옆에 열어요.`;
+  const what = [s.canList ? '사이드바의 Agents 자리에 작업 목록을' : null, s.canGraph ? '터미널 아래에 그래프를' : null].filter(Boolean).join(', ');
+  return [
+    `Herdr 앱 화면: 지금 레이아웃(${s.shown})에는 muwi 칸이 없어요.`,
+    `  muwi layout을 실행하면 이 레이아웃을 복제해서 ${what} 넣고 그 레이아웃으로 바꿔요. 지금 레이아웃은 그대로 남아요.`,
+    '  바꾸지 않고 보려면 muwi open (이 터미널 아래에 그래프 칸을 연다)',
+  ].join('\n');
+}
+
+function guardScreen<T>(run: () => T): T {
+  try {
+    return run();
+  } catch (e) {
+    if (e instanceof ScreenError) throw new Fail(e.message);
+    throw e;
+  }
+}
+
+function layoutRemoved(r: ReturnType<typeof removeLayout>) {
+  if (r.none) return out('muwi layout으로 바꾼 화면이 없어요.');
+  if (r.switchedTo) out(`Herdr 앱 화면을 ${r.switchedTo} 레이아웃으로 되돌렸어요.`);
+  if (r.deleted) out('muwi가 만든 레이아웃 복제본을 지웠어요.');
+  if (r.kept) out(`레이아웃 복제본은 남겨 뒀어요 (손으로 고쳤거나 마지막으로 보던 레이아웃이에요): ${r.kept}`);
+}
+
+function cmdLayout(a: Args, dir: string) {
+  if (a.flags.remove) return layoutRemoved(guardScreen(() => removeLayout(dir)));
+  if (a.flags.status) {
+    const s = screenState(dir);
+    return out(a.flags.json ? JSON.stringify(s) : describeScreen(s));
+  }
+  const r = guardScreen(() => applyLayout(dir));
+  if (a.flags.json) return out(JSON.stringify(r));
+  if (r.already) return out(`이미 muwi 칸이 있는 레이아웃이에요: ${r.name}`);
+  out(`Herdr 앱 화면을 ${r.name} 레이아웃으로 ${r.refreshed ? '새 모양에 맞춰 다시 만들었어요' : '바꿨어요'} (${r.base} 레이아웃을 복제했어요).`);
+  if (r.list) out('  사이드바: Agents 자리에 작업 목록 (계획 없는 세션도 같이 보여요)');
+  if (r.graph) out(`  터미널 아래: ${r.list ? '고른 작업의 그래프 (지금 보는 탭의 작업을 따라가요)' : '작업 목록과 그래프'}`);
+  out(`되돌리려면 muwi layout --remove (${r.base} 레이아웃으로 돌아가요)`);
+}
+
+const CONFIG_KEYS: (keyof Config)[] = ['nudge', 'guard', 'layout'];
 const CONFIG_ABOUT: Record<keyof Config, string> = {
   nudge: '계획을 적지 않은 세션이 파일을 고치려 할 때 알린다',
   guard: 'push·PR·댓글 앞에서 사람에게 묻는다',
+  layout: 'Herdr 앱 화면에 muwi 칸이 없을 때 넣자고 안내한다 (muwi setup, 그래프 칸)',
 };
 
 function cmdConfig(a: Args, dir: string) {
@@ -781,6 +848,7 @@ async function main(argv: string[]) {
     case 'config': return cmdConfig(a, dir);
     case 'version': case '--version': case '-v': return out(version());
     case 'open': return cmdOpen(a);
+    case 'layout': return cmdLayout(a, dir);
     case 'skip': return cmdSkip(a, dir);
     case 'run': return cmdRun(a, dir);
     case 'tidy': return cmdTidy(a, dir);
