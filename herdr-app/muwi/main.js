@@ -402,7 +402,13 @@ export default class Muwi extends View {
     if (panes().some((p) => p.terminal === terminal)) run("pane.focus", { terminal });
     else if (this.alive(terminal)) run("terminal.peek", { terminal });
     // 누르는 사이에 터미널이 닫혔다. 앱의 오류(terminal.peek failed) 대신 무슨 일인지 알린다
-    else notify({ title: "그 세션의 터미널이 닫혔어요", body: "이어서 하려면 새 대화에서 이 작업을 이어 달라고 하면 돼요.", level: "info" });
+    else notify({ title: "그 세션의 터미널이 닫혔어요", body: "기록 칸의 \"이어서 하려면\"에서 이어 갈 수 있어요.", level: "info" });
+  }
+
+  /** 그 노드를 하는 세션의 터미널로 간다 (카드를 두 번 눌렀을 때). 아직 아무도 하지 않은 노드면 할 것이 없다 */
+  goNode(view, n) {
+    const terminal = this.terminalOf(view, n);
+    if (terminal) this.go(terminal);
   }
 
   /** 그 터미널이 아직 떠 있는가. 세션을 끝내거나 터미널을 닫으면 없어져서 그리로 갈 수 없다 */
@@ -1152,15 +1158,13 @@ export default class Muwi extends View {
         .border_color(picked ? t.accent : active ? tint(color, 0.9) : n.status === "done" ? t.input : t.border)
         .cursor_pointer()
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .on_click((_e, cx) => {
-          if (this.node === n.id && this.tab === "node") {
-            this.node = null;
-            this.tab = "work";
-          } else {
-            this.node = n.id;
-            this.tab = "node";
-            this.drawer = true;
-          }
+        // 누르면 그 노드의 기록을 본다. 두 번 누르면 그 노드를 하는 세션의 터미널로 간다.
+        // 작업의 기록은 위의 "작업" 탭이나 그래프의 빈 곳을 눌러서 본다 (다시 눌러 고르기를 풀지 않는다: 두 번 누르기와 겹친다)
+        .on_click((e, cx) => {
+          this.node = n.id;
+          this.tab = "node";
+          this.drawer = true;
+          if ((e?.click_count ?? 1) >= 2) this.goNode(view, n);
           cx.notify();
         })
         .child(this.statusIcon(t, n, color, 17 * z))
