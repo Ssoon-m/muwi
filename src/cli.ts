@@ -13,7 +13,7 @@ import { attach, markSettled, readSession, recentSessions, sessionKey, sessionLa
 import { checkMod, newestPlugin, olderThan, refreshSetup, removeSetup, runSetup } from './setup.ts';
 import { GRAPH_AT, ScreenError, applyLayout, removeLayout, screenState, type GraphAt, type Screen } from './screen.ts';
 import {
-  SCHEMA, SHOW_IN, appendEvent, checkWorkName, listWorks, nowIso, readConfig, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
+  SCHEMA, SHOW_IN, appendEvent, checkWorkName, clock, listWorks, nowIso, readConfig, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
   type Config, type NodeStatus, type Plan, type RunBy, type ShowIn,
 } from './store.ts';
 import { PAST_DAYS, loadBoard, loadView, type Actor, type NodeView, type Try, type WorkView } from './view.ts';
@@ -416,12 +416,13 @@ function clockTime(iso: string) {
   const d = new Date(iso);
   return `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
+/** 걸린 시간: 1h 1m 1s (그래프 칸과 같은 모양) */
 function dur(ms: number) {
-  const s = Math.max(0, Math.round(ms / 1000));
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ${s % 60}s`;
-  return `${Math.floor(m / 60)}h ${m % 60}m`;
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  if (h > 0) return `${h}h ${m}m ${sec}s`;
+  if (m > 0) return `${m}m ${sec}s`;
+  return `${sec}s`;
 }
 
 /** 회차를 누가 했는지 한마디로 */
@@ -572,6 +573,8 @@ function cmdStatus(a: Args, dir: string) {
 }
 
 async function cmdBoard(a: Args, dir: string) {
+  // 작업 시간을 센 때. 그래프 칸은 진행 중인 노드에 이 뒤로 흐른 시간을 더해 초마다 늘린다
+  const now = clock.now().getTime();
   const board = loadBoard(dir);
   // 고른 작업이 없으면 맨 위 작업을 보여 준다. 접어 둔 지난 작업보다 지금 작업이 먼저다
   const pick = str(a, 'work') ?? (board.works.find(w => !w.past) ?? board.works[0])?.work;
@@ -585,7 +588,7 @@ async function cmdBoard(a: Args, dir: string) {
   const sessions = recentSessions(dir, Date.now() - PAST_DAYS * 86_400_000);
   // 화면에 muwi 칸이 없을 때 그래프 칸이 바꾸자고 안내해도 되는가 (muwi config layout)
   const suggest = readConfig(dir).layout;
-  out(JSON.stringify({ dir, ...board, sessions, suggest, selected }));
+  out(JSON.stringify({ dir, now, ...board, sessions, suggest, selected }));
 }
 
 function cmdHook(a: Args, dir: string) {
@@ -599,7 +602,8 @@ function cmdHook(a: Args, dir: string) {
     if (!process.env.MUWI_HOOK_PASSED) {
       const newest = newestPlugin();
       if (newest && olderThan(version(), newest.version) && path.resolve(newest.root) !== path.resolve(ROOT)) {
-        const r = spawnSync(path.join(newest.root, 'bin', 'muwi'), ['hook', ...a.pos], {
+        // 새 버전의 cli.ts를 지금 Node로 바로 실행한다 (bin/muwi는 sh 스크립트라 Windows에서 바로 실행되지 않는다)
+        const r = spawnSync(process.execPath, [path.join(newest.root, 'src', 'cli.ts'), 'hook', ...a.pos], {
           input: text, encoding: 'utf8', env: { ...process.env, MUWI_HOOK_PASSED: '1' }, timeout: 30_000,
         });
         if (r.status === 0) {

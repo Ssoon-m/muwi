@@ -16,7 +16,7 @@ const OURS = /(^|\s)MUWI_HOOK=1(\s|$)/;
 /** 설정 파일에 넣을 훅 명령 */
 export const hookCommandFor = (root: string) => `${HOOK_MARK} sh "${path.join(root, 'hooks', 'hook.sh')}"`;
 
-type HookGroup = { matcher?: string; hooks?: { type?: string; command?: string }[] };
+type HookGroup = { matcher?: string; hooks?: { type?: string; command?: string; onFailure?: string }[] };
 type Settings = { hooks?: Record<string, HookGroup[]> } & Record<string, unknown>;
 
 const isOurCommand = (c: unknown) => typeof c === 'string' && OURS.test(c);
@@ -51,7 +51,8 @@ export function mergeHooks(settings: Settings, hookCommand: string): Settings {
   const add = (event: string, group: HookGroup) => {
     hooks[event] = [...(hooks[event] ?? []), group];
   };
-  const cmd = (extra = '') => ({ type: 'command', command: `${hookCommand}${extra}` });
+  // 훅이 실패해도(Windows에서 Git Bash가 없어 sh를 못 찾는 등) 하려던 일을 막지 않는다
+  const cmd = (extra = '') => ({ type: 'command', command: `${hookCommand}${extra}`, onFailure: 'continue' });
   add('SessionStart', { hooks: [cmd()] });
   add('UserPromptSubmit', { hooks: [cmd()] });
   add('SubagentStart', { hooks: [cmd()] });
@@ -152,19 +153,23 @@ export type Install = {
   root: string;
   version: string;
   bin?: string;
+  /** Windows에서 넣은 muwi.cmd */
+  cmd?: string;
   herdr?: string;
   codex?: { agents: string; skill: string };
   claude?: { settings: string; skill: string };
   at: string;
 };
 
-export type Places = { home: string; bin: string; herdr: string; codex: string; claude: string; nodeCache: string };
+export type Places = { home: string; bin: string; cmd: string; herdr: string; codex: string; claude: string; nodeCache: string };
 
 export function places(env: NodeJS.ProcessEnv = process.env): Places {
   const home = env.HOME || os.homedir();
   return {
     home,
     bin: path.join(home, '.local', 'bin', 'muwi'),
+    // Windows의 PowerShell·cmd와 Herdr 앱 그래프 칸이 쓰는 명령 (sh 스크립트는 Git Bash에서만 실행된다)
+    cmd: path.join(home, '.local', 'bin', 'muwi.cmd'),
     herdr: env.HERDR_APP_HOME || path.join(home, '.config', 'herdr-app'),
     codex: env.CODEX_HOME || path.join(home, '.codex'),
     claude: env.CLAUDE_CONFIG_DIR || path.join(home, '.claude'),
@@ -173,23 +178,52 @@ export function places(env: NodeJS.ProcessEnv = process.env): Places {
   };
 }
 
-const installFile = (dir: string) => path.join(dir, 'install.json');
-export const readInstall = (dir: string) => readJson<Install>(installFile(dir));
+/**
+ * 설치 기록. 0.5.4까지는 install.json에 적었다.
+ * 0.4.0·0.5.0의 훅은 세션이 시작될 때마다(압축·/clear 포함) install.json의 버전이 자기와 다르면 자기 버전으로 setup을
+ * 다시 해서, 새 버전의 그래프 칸을 옛것으로 덮어썼다. 새 이름에 적으면 그 세션들은 기록을 찾지 못해 아무것도 하지 않는다.
+ * install.json은 0.5.4 이하에서 올라올 때만 읽고, setup이 기록을 새로 적을 때 지운다.
+ */
+const installFile = (dir: string) => path.join(dir, 'setup.json');
+const legacyInstallFile = (dir: string) => path.join(dir, 'install.json');
+export const readInstall = (dir: string) => readJson<Install>(installFile(dir)) ?? readJson<Install>(legacyInstallFile(dir));
 
 const WRAPPER_MARK = '# muwi setup이 만든 파일';
+/** muwi.cmd의 표시. cmd.exe가 읽는 파일이라 ASCII로 적는다 */
+const CMD_MARK = 'rem Created by muwi setup.';
 
 /**
  * 터미널과 Herdr 앱에서 쓸 muwi 명령. 설치된 위치의 bin/muwi를 부른다.
  * Node는 실행할 때마다 bin/muwi가 찾는다 (nvm 기본 버전을 바꾸면 따라간다).
  * setup을 실행한 Node는 다른 곳에서 못 찾을 때만 쓴다.
  */
-function wrapper(root: string): string {
-  return `#!/bin/sh\n${WRAPPER_MARK}. 고치지 말고 muwi setup을 다시 실행해요.\nMUWI_SETUP_NODE="${process.execPath}" exec "${path.join(root, 'bin', 'muwi')}" "$@"\n`;
+function wrapper(root: string, platform: NodeJS.Platform): string {
+  // Git Bash는 C:\\… 대신 C:/…를 잘 읽는다
+  const posix = (p: string) => (platform === 'win32' ? p.replace(/\\/g, '/') : p);
+  return `#!/bin/sh\n${WRAPPER_MARK}. 고치지 말고 muwi setup을 다시 실행해요.\nMUWI_SETUP_NODE="${posix(process.execPath)}" exec "${posix(path.join(root, 'bin', 'muwi'))}" "$@"\n`;
+}
+
+/**
+ * Windows의 PowerShell·cmd에서 쓸 muwi.cmd. setup을 실행한 Node로 cli.ts를 바로 실행한다.
+ * 그 Node가 없어졌으면 PATH의 node를 쓴다 (Windows의 Herdr 앱이 띄운 프로그램도 사용자 PATH를 받는다)
+ */
+function cmdWrapper(root: string): string {
+  return [
+    '@echo off',
+    `${CMD_MARK} Do not edit. Run muwi setup again.`,
+    'setlocal',
+    `set "MUWI_NODE=${process.execPath}"`,
+    'if not exist "%MUWI_NODE%" set "MUWI_NODE=node"',
+    `"%MUWI_NODE%" "${path.join(root, 'src', 'cli.ts')}" %*`,
+    'exit /b %ERRORLEVEL%',
+    '',
+  ].join('\r\n');
 }
 
 function isOurWrapper(file: string): boolean {
   try {
-    return fs.readFileSync(file, 'utf8').includes(WRAPPER_MARK);
+    const text = fs.readFileSync(file, 'utf8');
+    return text.includes(WRAPPER_MARK) || text.includes(CMD_MARK);
   } catch {
     return false;
   }
@@ -215,7 +249,11 @@ function installMod(root: string, appHome: string): string {
   return to;
 }
 
-export type SetupOptions = { root: string; version: string; dir: string; env?: NodeJS.ProcessEnv; claude?: boolean; codex?: boolean; log?: (line: string) => void };
+export type SetupOptions = {
+  root: string; version: string; dir: string; env?: NodeJS.ProcessEnv; claude?: boolean; codex?: boolean; log?: (line: string) => void;
+  /** 어느 OS에 넣는가 (테스트가 Windows를 흉내 낼 때 준다) */
+  platform?: NodeJS.Platform;
+};
 
 /**
  * 플러그인 밖의 것을 넣는다: 터미널용 명령, Herdr 앱 칸(앱이 있을 때).
@@ -226,6 +264,7 @@ export type SetupOptions = { root: string; version: string; dir: string; env?: N
 export function runSetup(o: SetupOptions): Install {
   const env = o.env ?? process.env;
   const log = o.log ?? (() => {});
+  const platform = o.platform ?? process.platform;
   const p = places(env);
   const before = readInstall(o.dir);
   const install: Install = { root: o.root, version: o.version, at: nowIso() };
@@ -238,10 +277,20 @@ export function runSetup(o: SetupOptions): Install {
   if (fs.existsSync(p.bin) && !isOurWrapper(p.bin)) {
     log(`${p.bin}에 다른 파일이 있어서 명령은 넣지 않았어요.`);
   } else {
-    writeText(p.bin, wrapper(o.root), 0o755);
+    writeText(p.bin, wrapper(o.root, platform), 0o755);
     fs.chmodSync(p.bin, 0o755);
     install.bin = p.bin;
     log(`muwi 명령: ${p.bin}`);
+  }
+  // Windows: PowerShell·cmd와 Herdr 앱 그래프 칸이 쓰는 muwi.cmd도 넣는다 (sh 스크립트는 Git Bash에서만 실행된다)
+  if (platform === 'win32') {
+    if (fs.existsSync(p.cmd) && !isOurWrapper(p.cmd)) {
+      log(`${p.cmd}에 다른 파일이 있어서 muwi.cmd는 넣지 않았어요.`);
+    } else {
+      writeText(p.cmd, cmdWrapper(o.root));
+      install.cmd = p.cmd;
+      log(`muwi 명령 (PowerShell·cmd): ${p.cmd}`);
+    }
   }
 
   if (fs.existsSync(p.herdr)) {
@@ -272,6 +321,7 @@ export function runSetup(o: SetupOptions): Install {
   }
 
   writeJson(installFile(o.dir), install);
+  fs.rmSync(legacyInstallFile(o.dir), { force: true });
   return install;
 }
 
@@ -283,6 +333,7 @@ export function removeSetup(dir: string, log: (line: string) => void = () => {})
     return;
   }
   if (install.bin && isOurWrapper(install.bin)) fs.rmSync(install.bin, { force: true });
+  if (install.cmd && isOurWrapper(install.cmd)) fs.rmSync(install.cmd, { force: true });
   if (install.herdr) fs.rmSync(install.herdr, { recursive: true, force: true });
   if (install.codex) {
     uninstallBlock(install.codex.agents);
@@ -293,6 +344,7 @@ export function removeSetup(dir: string, log: (line: string) => void = () => {})
     fs.rmSync(install.claude.skill, { recursive: true, force: true });
   }
   fs.rmSync(installFile(dir), { force: true });
+  fs.rmSync(legacyInstallFile(dir), { force: true });
   log('muwi setup으로 넣은 것을 뺐어요. 기록 폴더는 그대로 있어요.');
 }
 
@@ -321,7 +373,8 @@ export function newestPlugin(env: NodeJS.ProcessEnv = process.env): { root: stri
     if (name.split('@')[0] !== 'muwi' || !Array.isArray(entries)) continue;
     for (const e of entries as { installPath?: unknown }[]) {
       const root = typeof e?.installPath === 'string' ? e.installPath : null;
-      if (!root || !fs.existsSync(path.join(root, 'bin', 'muwi'))) continue;
+      // 넘길 때 그 버전의 cli.ts를 Node로 바로 실행한다
+      if (!root || !fs.existsSync(path.join(root, 'src', 'cli.ts'))) continue;
       const v = readJson<{ version?: string }>(path.join(root, 'package.json'))?.version;
       if (v && (!best || olderThan(best.version, v))) best = { root, version: v };
     }

@@ -117,9 +117,9 @@ function fakeApp(layouts: Record<string, LayoutNode> = { main: MAIN }) {
   const stateFile = path.join(home, 'app-state.json');
   const write = (s: { layout: string; version: string; up: boolean }) => fs.writeFileSync(stateFile, JSON.stringify(s));
   write({ layout: 'main', version: '0.1.16', up: true });
-  const bin = path.join(home, 'herdr-app');
-  fs.writeFileSync(bin, `#!${process.execPath}
-const fs = require('fs'), path = require('path');
+  // Node 스크립트로 쓴다 (.cjs). muwi는 이런 도구를 Node로 실행하므로 Windows에서도 돈다
+  const bin = path.join(home, 'herdr-app.cjs');
+  fs.writeFileSync(bin, `const fs = require('fs'), path = require('path');
 const st = JSON.parse(fs.readFileSync(${JSON.stringify(stateFile)}, 'utf8'));
 const layouts = ${JSON.stringify(path.join(app, 'layouts'))};
 const save = () => fs.writeFileSync(${JSON.stringify(stateFile)}, JSON.stringify(st));
@@ -148,7 +148,7 @@ if (first === 'do' && cmd === 'layout.switch') {
   st.layout = a.name; save(); console.log('{"ok":true}'); process.exit(0);
 }
 console.error('unknown command'); process.exit(1);
-`, { mode: 0o755 });
+`);
   const env = { HOME: home, HERDR_APP_HOME: app, MUWI_HERDR_APP: bin, PATH: process.env.PATH } as NodeJS.ProcessEnv;
   const records = path.join(home, '.muwi');
   const state = () => JSON.parse(fs.readFileSync(stateFile, 'utf8'));

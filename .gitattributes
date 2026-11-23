@@ -1,0 +1,5 @@
+# Windows의 Git이 줄바꿈을 CRLF로 바꿔 받으면 sh 스크립트가 깨진다 (Git Bash가 "\r: command not found").
+# 스크립트는 어디서 받든 LF로 둔다. cmd 스크립트는 cmd.exe가 읽으므로 CRLF로 둔다.
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.png binary

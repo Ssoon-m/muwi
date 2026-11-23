@@ -200,6 +200,7 @@ test('nudge: 계획을 적지 않은 세션의 파일 수정은, 계획을 적�
   const reason = JSON.parse(first.stdout!).hookSpecificOutput.permissionDecisionReason;
   assert.match(reason, /muwi plan --work/);
   assert.match(reason, /muwi skip/);
+  assert.match(reason, /수정을 다시 시도하세요/);
   // 그냥 다시 시도하면 또 알린다 (조용히 넘어가지 않는다)
   assert.ok(denied(handleHook(edit('fresh'), t.dir, 'nudge', ENV)));
   assert.ok(!fs.existsSync(path.join(t.dir, '.sessions', 'fresh.ok')));

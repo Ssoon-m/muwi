@@ -129,11 +129,12 @@ function adoptSpawn(dir: string, key: string, env: NodeJS.ProcessEnv): string {
  * spawning: 서브에이전트를 띄우려 했다
  */
 export function nudgeText(done?: string, spawning = false): string {
-  const act = spawning ? '서브에이전트 띄우기' : '수정';
+  // 조사까지 붙여 둔다 (수정을, 서브에이전트 띄우기를)
+  const act = spawning ? '서브에이전트 띄우기를' : '수정을';
   return [
     done
-      ? `muwi: 이 세션이 하던 작업(${done})은 노드가 다 끝났어요. 지금 하려는 일을 어디에 적을지 정하고 ${act}를 다시 시도하세요.`
-      : `muwi: 지금 하려는 일의 계획이 아직 없어요. 여러 단계로 하는 일이면 파일을 고치지 않아도 계획을 적어요. 사람은 그 계획을 그래프로 보면서 진행을 확인해요. 아래 중 하나를 하고 ${act}를 다시 시도하세요.`,
+      ? `muwi: 이 세션이 하던 작업(${done})은 노드가 다 끝났어요. 지금 하려는 일을 어디에 적을지 정하고 ${act} 다시 시도하세요.`
+      : `muwi: 지금 하려는 일의 계획이 아직 없어요. 여러 단계로 하는 일이면 파일을 고치지 않아도 계획을 적어요. 사람은 그 계획을 그래프로 보면서 진행을 확인해요. 아래 중 하나를 하고 ${act} 다시 시도하세요.`,
     ...(done ? [`- 그 작업의 연장이면 노드를 넣는다: muwi add <id> "<제목>" --why "<이유>" 그리고 muwi node <id> start`] : []),
     `- 새 일이면 계획을 적는다 (작은 일이면 노드 두세 개로 충분해요): muwi plan --work <저장소>-<작업키> --request "<시킨 말>" '{"title":"…","nodes":[{"id":"…","title":"…"},{"id":"…","title":"…","after":["…"]}]}' 그리고 muwi node <id> start`,
     '- 다른 세션이 맡긴 노드를 하는 중이면: muwi node <id> start --work <작업 이름>',
@@ -145,11 +146,19 @@ export const NUDGE = nudgeText();
 /** 작업물이 아닌 곳(기록 폴더, 에이전트 설정, 임시 폴더)에 쓰는 파일은 알리지 않는다 */
 export function isScratchPath(file: unknown, dir: string, env: NodeJS.ProcessEnv = process.env): boolean {
   if (typeof file !== 'string' || !file) return true;
-  const home = env.HOME || os.homedir();
-  const roots = [dir, path.join(home, '.muwi'), path.join(home, '.claude'), path.join(home, '.codex'), '/tmp', '/private/tmp', '/var/folders', '/private/var/folders'];
-  if (env.TMPDIR) roots.push(env.TMPDIR.replace(/\/+$/, ''));
-  const full = path.resolve(file);
-  return roots.some(r => full === r || full.startsWith(r.endsWith(path.sep) ? r : r + path.sep));
+  const home = env.HOME || env.USERPROFILE || os.homedir();
+  // macOS·Linux의 임시 폴더와 Windows의 임시 폴더(%TEMP%, %TMP%)
+  const roots = [
+    dir, path.join(home, '.muwi'), path.join(home, '.claude'), path.join(home, '.codex'),
+    '/tmp', '/private/tmp', '/var/folders', '/private/var/folders', os.tmpdir(), env.TMPDIR, env.TEMP, env.TMP,
+  ].filter((r): r is string => Boolean(r));
+  // Windows는 경로의 대소문자를 가리지 않는다 (C:\Users와 c:\users는 같은 곳)
+  const norm = (p: string) => (process.platform === 'win32' ? p.toLowerCase() : p);
+  const full = norm(path.resolve(file));
+  return roots.some(root => {
+    const r = norm(path.resolve(root)).replace(/[\\/]+$/, '');
+    return full === r || full.startsWith(r + path.sep);
+  });
 }
 
 export function handleHook(payload: any, dir: string, mode: 'record' | 'guard' | 'nudge' = 'record', env: NodeJS.ProcessEnv = process.env, root: string = ROOT): HookResult {
