@@ -1,7 +1,8 @@
 // Claude Code 훅이 넘겨주는 입력을 처리한다.
 //   세션이 시작되면 세션 파일을 만들고, skill을 읽으면 사건 기록에 한 줄 남긴다.
 //   읽은 skill은 AI가 스스로 적지 않는다. 여기서 관찰한 것만 기록이 된다.
-// nudge 모드는 계획을 적지 않은 세션이 파일을 고치려 할 때 알려 준다. 지침만으로는 계획을 적지 않는 때가 있어서다.
+// nudge 모드는 계획을 적지 않은 세션이 파일을 고치거나 서브에이전트를 띄우려 할 때 알려 준다. 지침만으로는 계획을 적지 않는 때가 있어서다.
+//   둘 다 여러 단계로 하는 일의 신호다. 계획은 파일을 고치는지가 아니라 일의 크기로 정한다 (PR 리뷰처럼 고치지 않는 일도 적는다).
 //   계획을 적거나(muwi plan, muwi node … start) 계획 없이 진행하겠다고 밝히면(muwi skip) 그 뒤로는 지나간다. 순서는 막지 않는다.
 // guard 모드(선택 설치)는 push·PR·댓글처럼 되돌릴 수 없는 명령 앞에서 사람에게 묻게 한다.
 // 서브에이전트가 한 일은 훅 입력의 agent_id로 구분한다 (서브에이전트는 세션 id가 부모와 같다).
@@ -117,18 +118,20 @@ function adoptSpawn(dir: string, key: string, env: NodeJS.ProcessEnv): string {
 }
 
 /**
- * 계획 없이 파일을 고치려 할 때 알려 주는 말. 사람이 새로 일을 시킬 때마다 다시 따진다.
+ * 계획 없이 파일을 고치거나 서브에이전트를 띄우려 할 때 알려 주는 말. 사람이 새로 일을 시킬 때마다 다시 따진다.
  * done: 이 세션이 하던 작업이 있고 노드가 다 끝났으면 그 작업 이름 (그 작업의 연장일 수 있다)
+ * spawning: 서브에이전트를 띄우려 했다
  */
-export function nudgeText(done?: string): string {
+export function nudgeText(done?: string, spawning = false): string {
+  const act = spawning ? '서브에이전트 띄우기' : '수정';
   return [
     done
-      ? `muwi: 이 세션이 하던 작업(${done})은 노드가 다 끝났어요. 지금 고치려는 일을 어디에 적을지 정하고 수정을 다시 시도하세요.`
-      : 'muwi: 지금 고치려는 일의 계획이 아직 없어요. 사람은 그 계획을 그래프로 보면서 진행을 확인해요. 아래 중 하나를 하고 수정을 다시 시도하세요.',
+      ? `muwi: 이 세션이 하던 작업(${done})은 노드가 다 끝났어요. 지금 하려는 일을 어디에 적을지 정하고 ${act}를 다시 시도하세요.`
+      : `muwi: 지금 하려는 일의 계획이 아직 없어요. 여러 단계로 하는 일이면 파일을 고치지 않아도 계획을 적어요. 사람은 그 계획을 그래프로 보면서 진행을 확인해요. 아래 중 하나를 하고 ${act}를 다시 시도하세요.`,
     ...(done ? [`- 그 작업의 연장이면 노드를 넣는다: muwi add <id> "<제목>" --why "<이유>" 그리고 muwi node <id> start`] : []),
     `- 새 일이면 계획을 적는다 (작은 일이면 노드 두세 개로 충분해요): muwi plan --work <저장소>-<작업키> --request "<시킨 말>" '{"title":"…","nodes":[{"id":"…","title":"…"},{"id":"…","title":"…","after":["…"]}]}' 그리고 muwi node <id> start`,
     '- 다른 세션이 맡긴 노드를 하는 중이면: muwi node <id> start --work <작업 이름>',
-    '- 오타처럼 한 곳만 고치는 일이거나 기록할 작업이 아니면: muwi skip "<이유>" (이번에 시킨 일에만 적용돼요)',
+    `- 한 번에 끝나는 일이면 (${spawning ? '질문에 답하려고 잠깐 찾아보기 같은 것' : '오타처럼 한 곳만 고치는 일'}): muwi skip "<이유>" (이번에 시킨 일에만 적용돼요)`,
   ].join('\n');
 }
 export const NUDGE = nudgeText();
@@ -187,7 +190,11 @@ export function handleHook(payload: any, dir: string, mode: 'record' | 'guard' |
       markSettled(dir, key);
       return {};
     }
-    if (isScratchPath(payload.tool_input?.file_path ?? payload.tool_input?.notebook_path, dir, env)) return {};
+    // 서브에이전트를 띄우는 것은 여러 단계로 하는 일의 신호다 (PR 리뷰의 점검들처럼). 파일 수정과 똑같이 따진다
+    const spawning = tool === 'Agent' || tool === 'Task';
+    // 서브에이전트 안에서 일어난 일은 따지지 않는다. 맡긴 세션이 이미 따졌다
+    if (spawning && agent) return {};
+    if (!spawning && isScratchPath(payload.tool_input?.file_path ?? payload.tool_input?.notebook_path, dir, env)) return {};
     // 이번에 시킨 일에서 이미 확인했으면 다시 따지지 않는다. 사람이 새로 말을 걸면 표시가 지워진다
     if (isSettled(dir, key)) return {};
     const session = touchSession(dir, key, patch, env);
@@ -201,7 +208,7 @@ export function handleHook(payload: any, dir: string, mode: 'record' | 'guard' |
     if (!session.nudged) touchSession(dir, key, { nudged: nowIso() }, env);
     return {
       stdout: JSON.stringify({
-        hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: nudgeText(plan ? plan.work : undefined) },
+        hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: nudgeText(plan ? plan.work : undefined, spawning) },
       }),
     };
   }

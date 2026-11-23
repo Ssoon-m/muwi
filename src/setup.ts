@@ -57,7 +57,7 @@ export function mergeHooks(settings: Settings, hookCommand: string): Settings {
   add('SubagentStart', { hooks: [cmd()] });
   add('SubagentStop', { hooks: [cmd()] });
   add('PostToolUse', { matcher: 'Skill|Read', hooks: [cmd()] });
-  add('PreToolUse', { matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [cmd(' nudge')] });
+  add('PreToolUse', { matcher: 'Edit|Write|MultiEdit|NotebookEdit|Agent|Task', hooks: [cmd(' nudge')] });
   add('PreToolUse', { matcher: 'Bash', hooks: [cmd(' guard')] });
   return { ...base, hooks };
 }

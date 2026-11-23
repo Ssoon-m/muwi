@@ -652,7 +652,7 @@ function cmdLayout(a: Args, dir: string) {
 
 const CONFIG_KEYS: (keyof Config)[] = ['nudge', 'guard', 'layout'];
 const CONFIG_ABOUT: Record<keyof Config, string> = {
-  nudge: '계획을 적지 않은 세션이 파일을 고치려 할 때 알린다',
+  nudge: '계획을 적지 않은 세션이 파일을 고치거나 서브에이전트를 띄우려 할 때 알린다',
   guard: 'push·PR·댓글 앞에서 사람에게 묻는다',
   layout: 'Herdr 앱 화면에 muwi 칸이 없을 때 넣자고 안내한다 (muwi setup, 그래프 칸)',
 };
