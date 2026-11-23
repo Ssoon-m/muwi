@@ -609,52 +609,49 @@ export default class Muwi extends View {
   }
 
   /**
-   * 하던 세션의 터미널이 닫힌 노드를 이어서 하는 방법. 그 세션에 맞춘 예시를 복사할 수 있게 보여 준다:
-   * 새 대화에서 할 말(작업·노드 이름)과 그 세션이 일하던 폴더, Claude 세션이면 그 대화를 그대로 다시 여는 명령
+   * 하던 세션의 터미널이 닫힌 노드를 이어서 하는 버튼. 누르면 그 세션이 일하던 폴더에서 새 탭으로 열린다:
+   *   하던 대화 다시 열기: Claude 세션이면 claude --resume <세션 id>. 하던 대화 내용이 그대로 남아 있다
+   *   새 대화로 이어 가기: "<작업> 작업의 <노드> 노드 이어서 해줘"로 새 대화를 연다. muwi 기록(계획·결과)을 읽고 이어 간다
+   * 맡긴 세션이 기록을 남기기 전에 닫혔으면 세션 정보가 없으니 그 세션을 띄운 폴더(worktree일 수 있다)에서 새 대화로 연다
    */
   resumeHints(t, view, n) {
     const key = n.session ?? null;
     const s = key ? view.sessions?.[key] : null;
-    // 맡긴 세션이 기록을 남기기 전에 닫혔다: 세션 정보가 없으니 그 세션을 띄운 폴더를 쓴다 (worktree일 수 있다)
     const unstarted = !key && Boolean(n.spawn);
     const folder = s?.cwd ?? (unstarted ? n.spawn.cwd : null) ?? view.cwd ?? null;
     const tool = s?.tool === "codex" ? "codex" : "claude";
-    const note = (text) => div().text_size(11).text_color(t.dim).child(text);
-    const rows = [];
-    if (unstarted) {
-      rows.push(note("맡긴 세션이 일을 시작하기 전에 닫혔어요. 새 대화는 muwi 기록에서 맡긴 말까지 읽고 이어 가요"));
-      // 띄운 세션이 살아 있으면 그 세션에 다시 맡기라고 해도 된다
-      const lead = view.lead ? view.sessions?.[view.lead] : null;
-      if (lead?.terminal && this.alive(lead.terminal)) {
-        rows.push(note(`띄운 세션(${lead.label})에 이렇게 말하면 다시 맡겨요`));
-        rows.push(this.copyRow(t, `again-${n.id}`, `${n.id} 노드 다시 새 세션에 맡겨줘`));
-      }
+    const buttons = [];
+    if (s?.tool === "claude" && CLAUDE_ID.test(key)) {
+      buttons.push(this.openRow(t, `resume-${n.id}`, "하던 대화 다시 열기", "전에 하던 대화 내용이 그대로 남아 있어요", ["claude", "--resume", key], folder, n.id));
     }
     if (n.status !== "done") {
-      rows.push(note(`${folder ? `${this.shortPath(folder)}에서 ` : ""}새 대화(${tool})를 열고 이렇게 말하세요`));
-      rows.push(this.copyRow(t, `say-${n.id}`, `${view.work} 작업의 ${n.id} 노드 이어서 해줘`));
+      buttons.push(this.openRow(t, `continue-${n.id}`, "새 대화로 이어 가기", unstarted ? "muwi 기록(계획·맡긴 말)을 읽고 이어 가요" : "muwi 기록(계획·결과)을 읽고 이어 가요",
+        [tool, `${view.work} 작업의 ${n.id} 노드 이어서 해줘`], folder, n.id));
     }
-    if (s?.tool === "claude" && CLAUDE_ID.test(key)) {
-      // 폴더에 공백이나 한글이 있으면 따옴표로 감싼다
-      const q = (p) => (/^[A-Za-z0-9_./~:\\-]+$/.test(p) ? p : `'${p.replace(/'/g, "'\\''")}'`);
-      rows.push(note(n.status === "done" ? "터미널에서 실행하면 그 대화가 그대로 열려요" : "하던 대화를 그대로 다시 열려면 터미널에서"));
-      rows.push(this.copyRow(t, `resume-${n.id}`, `${folder ? `cd ${q(folder)} && ` : ""}claude --resume ${key}`));
-    }
-    return rows;
+    if (!buttons.length) return { rows: [], choices: 0 };
+    const note = (text) => div().text_size(10.5).text_color(t.dim).child(text);
+    const rows = [
+      ...(unstarted ? [note("맡긴 세션이 일을 시작하기 전에 닫혔어요")] : []),
+      ...buttons,
+      ...(folder ? [note(`누르면 ${this.shortPath(folder)}에서 새 탭으로 열려요`)] : []),
+    ];
+    return { rows, choices: buttons.length };
   }
 
-  /** 복사할 수 있는 한 줄 (할 말이나 명령). 누르면 클립보드에 넣고 알린다 */
-  copyRow(t, id, text) {
-    return h_flex().gap(6).items_start()
-      .child(div().flex_1().min_w(0).px(7).py(4).rounded(5).bg(t.raised).border_1().border_color(t.border)
-        .text_size(11).text_color(t.foreground).child(text))
-      .child(h_flex().id(`copy-${id}`).h(24).px(8).flex_none().items_center().rounded(5).bg(t.raised).border_1().border_color(t.border)
-        .text_size(10.5).text_color(t.muted).cursor_pointer().hover((st) => st.bg(t.hover).text_color(t.foreground))
-        .on_click((_e, cx) => {
-          cx.write_to_clipboard(text);
-          notify({ title: "복사했어요", body: text, level: "success", timeout: 2500 });
-        })
-        .child("복사"));
+  /** 누르면 그 폴더에서 새 탭으로 여는 버튼과, 그 아래 무엇이 열리는지 한 줄 */
+  openRow(t, id, text, about, argv, folder, name) {
+    return v_flex().gap(3)
+      .child(h_flex().child(h_flex().id(`open-${id}`).h(26).px(10).flex_none().items_center().rounded(6).bg(t.raised).border_1().border_color(t.border)
+        .text_size(11.5).text_color(t.foreground).cursor_pointer().hover((st) => st.bg(t.hover))
+        .on_click(() => this.openTerminal(argv, folder, name))
+        .child(text)))
+      .child(div().text_size(10.5).text_color(t.dim).child(about));
+  }
+
+  /** 새 탭에서 명령을 연다 (그 세션이 일하던 폴더에서) */
+  openTerminal(argv, folder, name) {
+    if (checking()) return;
+    run("terminal.open", { argv, ...(folder ? { folder } : {}), ...(name ? { name } : {}) });
   }
 
   /** 홈 폴더는 ~로 줄여 보여 준다 */
@@ -1291,9 +1288,10 @@ export default class Muwi extends View {
           .child(line([...new Set(view.outside.map((s) => s.skill))].join(", ")))))
         .when(loose.length > 0, (el) => el.child(v_flex().gap(3).child(label("문제 표시"))
           .children(loose.map((f) => line(`⚑ ${f.text}`, t.blocked)))))
-        .when(view.state === "stalled", (el) => el.child(v_flex().gap(5).child(label("이어서 하려면"))
-          .child(div().text_size(11).text_color(t.dim).child(`하던 세션이 모두 닫혔어요. ${view.cwd ? `${this.shortPath(view.cwd)}에서 ` : ""}새 대화를 열고 이렇게 말하세요`))
-          .child(this.copyRow(t, "say-work", `${view.work} 작업 이어서 해줘`))));
+        .when(view.state === "stalled", (el) => el.child(v_flex().gap(8).child(label("이어서 하려면"))
+          .child(div().text_size(10.5).text_color(t.dim).child("하던 세션이 모두 닫혔어요"))
+          .child(this.openRow(t, "continue-work", "새 대화로 이어 가기", "muwi 기록(계획·결과)을 읽고 멈춘 노드부터 이어 가요", ["claude", `${view.work} 작업 이어서 해줘`], view.cwd ?? null, view.work))
+          .when(Boolean(view.cwd), (el2) => el2.child(div().text_size(10.5).text_color(t.dim).child(`누르면 ${this.shortPath(view.cwd)}에서 새 탭으로 열려요`)))));
     }
 
     const color = n.closed ? t.muted : c[n.status];
@@ -1346,7 +1344,7 @@ export default class Muwi extends View {
     const tries = n.tries ?? [];
     const running = n.status === "doing" && !n.closed;
     // 하던 세션의 터미널이 닫혔으면 그 세션에 맞춰 이어 하는 방법을 보여 준다
-    const resume = n.closed || (terminal && !this.alive(terminal)) ? this.resumeHints(t, view, n) : [];
+    const resume = n.closed || (terminal && !this.alive(terminal)) ? this.resumeHints(t, view, n) : { rows: [], choices: 0 };
     const times = [
       n.startedAt ? `${clock(n.startedAt)} 시작` : null,
       n.spentMs > 0 ? `${dur(this.spent(n.spentMs, running, now))} 작업` : null,
@@ -1379,7 +1377,7 @@ export default class Muwi extends View {
           n.offPlan ? `${plannedText} · 계획과 다르게 했어요`
             : n.runUnknown ? `${plannedText} · 이 세션에서 훅이 돌지 않아 계획대로 했는지 확인하지 못했어요` : plannedText,
           n.offPlan ? t.blocked : t.dim)))))
-      .when(resume.length > 0, (el) => el.child(v_flex().gap(5).child(label(n.status === "done" ? "그 대화를 다시 열려면" : "이어서 하려면")).children(resume)))
+      .when(resume.choices > 0, (el) => el.child(v_flex().gap(8).child(label(n.status === "done" ? "그 대화를 다시 열려면" : resume.choices > 1 ? "이어서 하려면 (둘 중 하나)" : "이어서 하려면")).children(resume.rows)))
       .child(v_flex().gap(4).child(label(tries.length > 1 ? "회차별 기록" : "읽은 skill"))
         .when(n.attempts === 0, (el) => el.child(line("아직 시작하지 않았어요", t.dim)))
         .children(tries.length > 1
