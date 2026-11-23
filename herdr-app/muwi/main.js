@@ -315,7 +315,8 @@ export default class Muwi extends View {
         // 세로로 긴 칸이면 위→아래로 그린다
         const down = this.wantsDown();
         if (down) args.push("--down");
-        // 그래프 칸 크기를 넘긴다. 한 줄로는 너무 작아지는 긴 그래프를 칸 비율에 맞춰 여러 줄로 접는다
+        // 그래프 칸 크기를 넘긴다. 한 줄로는 너무 작아지는 긴 그래프를 칸 비율에 맞춰 여러 줄로 접고,
+        // 반대 방향이 칸에 훨씬 크게 들어가는 그래프(좁은 칸에 갈래가 많은 계획)는 반대 방향으로 그린다
         const s = this.canvasSize;
         const fit = s && this.variant() !== "list" ? { w: Math.round(s.width), h: Math.round(s.height) } : null;
         if (fit) args.push("--fit", `${fit.w}x${fit.h}`);
