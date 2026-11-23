@@ -216,8 +216,10 @@ export type Config = {
   nudge: boolean;
   /** push·PR·댓글 앞에서 사람에게 묻는다 */
   guard: boolean;
+  /** Herdr 앱 화면에 muwi 칸이 없을 때 넣자고 안내한다 (muwi setup, 그래프 칸) */
+  layout: boolean;
 };
-export const DEFAULT_CONFIG: Config = { nudge: true, guard: false };
+export const DEFAULT_CONFIG: Config = { nudge: true, guard: false, layout: true };
 const configFile = (dir: string) => path.join(dir, 'config.json');
 
 export function readConfig(dir: string): Config {

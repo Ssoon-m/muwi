@@ -11,8 +11,8 @@ const CLI = path.resolve(import.meta.dirname, '../src/cli.ts');
 function bench() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-cli-'));
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-cwd-'));
-  const muwi = (args: string[], o: { session?: string | null; input?: string; cwd?: string } = {}) => {
-    const env: Record<string, string> = { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir };
+  const muwi = (args: string[], o: { session?: string | null; input?: string; cwd?: string; env?: Record<string, string> } = {}) => {
+    const env: Record<string, string> = { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir, ...o.env };
     if (o.session !== null) env.MUWI_SESSION = o.session ?? 'lead';
     const r = spawnSync(process.execPath, [CLI, ...args], { env, cwd: o.cwd ?? cwd, input: o.input ?? '', encoding: 'utf8' });
     return { code: r.status, out: r.stdout, err: r.stderr };
@@ -156,6 +156,25 @@ test('muwi show·status·board: 사람이 읽는 글과 화면이 읽는 JSON', 
   assert.equal(json.flags[0].node, 'read');
 });
 
+test('muwi board: 그래프 칸이 터미널과 작업을 잇도록 세션과 터미널을 알려 준다', () => {
+  const { muwi } = bench();
+  // 계획을 낸 세션은 Herdr 터미널 t5에서 돈다. 다른 세션(t6)은 계획 없이 일한다
+  muwi(['plan', '--work', 'w', '--request', '작업해줘', PLAN], { env: { HC_TERMINAL_ID: 't5' } });
+  muwi(['hook'], { session: 'other', env: { HC_TERMINAL_ID: 't6' }, input: JSON.stringify({ session_id: 'other', hook_event_name: 'UserPromptSubmit', prompt: '질문' }) });
+  // 사람을 기다리는 노드를 다른 세션이 맡고 있으면 그 세션의 터미널로 간다
+  muwi(['node', 'impl', 'wait', '어느 쪽?', '--work', 'w'], { session: 'helper', env: { HC_TERMINAL_ID: 't7' } });
+  const board = JSON.parse(muwi(['board']).out);
+  assert.equal(board.works[0].terminal, 't7');
+  assert.deepEqual(
+    board.sessions.map((s: any) => [s.key, s.terminal, s.work ?? null]).sort(),
+    // 노드를 맡은 세션은 그 작업에 붙는다. 계획 없이 일하는 세션은 작업이 없다
+    [['helper', 't7', 'w'], ['lead', 't5', 'w'], ['other', 't6', null]],
+  );
+  assert.equal(board.suggest, true);
+  muwi(['config', 'layout', 'off']);
+  assert.equal(JSON.parse(muwi(['board']).out).suggest, false);
+});
+
 test('muwi hook: 깨진 입력에도 조용히 끝난다 (세션을 방해하지 않는다)', () => {
   const { dir, muwi } = bench();
   const r = muwi(['hook'], { input: '{not json' });
@@ -189,7 +208,8 @@ test('이름 없이 낸 계획은 이 세션이 하던 작업만 바꾼다 (같�
 test('muwi config·version·setup', () => {
   const { dir, muwi } = bench();
   assert.match(muwi(['--version']).out, /^\d+\.\d+\.\d+\n$/);
-  assert.match(muwi(['config']).out, /nudge\s+on[\s\S]*guard\s+off/);
+  assert.match(muwi(['config']).out, /nudge\s+on[\s\S]*guard\s+off[\s\S]*layout\s+on/);
+  assert.match(muwi(['config', 'layout', 'off']).out, /layout\s+off/);
   assert.match(muwi(['config', 'nudge', 'off']).out, /nudge\s+off/);
   assert.match(muwi(['config', 'nudge', 'maybe']).err, /사용법: muwi config/);
   // 빈 홈 폴더에 setup: 터미널용 명령만 생긴다

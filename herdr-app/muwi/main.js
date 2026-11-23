@@ -1,12 +1,16 @@
 // muwi 그래프 칸 (Herdr 앱 mod).
-// AI가 적은 작업 계획과 진행 기록을 `muwi board`로 읽어 그린다. 읽기만 한다: 기록도 세션도 바꾸지 않는다.
-//   왼쪽: 작업 목록 (나를 기다리는 작업이 위)
-//   가운데: 고른 작업의 그래프. 카드와 선의 좌표는 `muwi board`가 ELK로 계산해서 준다. 기록이 바뀌면 전체를 다시 그린다
-//   오른쪽: 고른 노드의 기록 (맡은 세션, 걸린 시간, 읽은 skill, 문제 표시) 또는 작업의 기록 (계획이 바뀐 이유)
+// AI가 적은 작업 계획과 진행 기록을 `muwi board`로 읽어 그린다. 기록도 세션도 바꾸지 않는다.
+//   작업 목록: 급한 순서로 묶는다 (나를 기다림이 위). 계획 없이 일하는 세션도 같이 보여서 Herdr의 Agents 칸을 대신한다
+//   그래프: 고른 작업의 계획. 카드와 선의 좌표는 `muwi board`가 ELK로 계산해서 준다. 기록이 바뀌면 전체를 다시 그린다
+//   기록: 고른 노드의 기록 (맡은 세션, 걸린 시간, 읽은 skill, 문제 표시) 또는 작업의 기록 (계획이 바뀐 이유)
 // 끌어서 옮기고, cmd/ctrl+스크롤로 확대한다. 지금 일어나는 곳(작업 중, 나를 기다림)이 보이게 따라간다.
-import { View, div, svg, PathBuilder } from "gpui-kit";
+// 키보드가 있는 터미널이 바뀌면 그 터미널의 세션이 하는 작업으로 바꿔 보여 준다.
+import { View, div, svg, image, PathBuilder } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { exec, home, theme, watchFolder, checking, shared, setShared, agents, panes, run, props as blockProps } from "herdr";
+import {
+  exec, home, theme, watchFolder, checking, shared, setShared, agents, panes, terminals, focused, updates, run,
+  layout as shownLayout, props as blockProps,
+} from "herdr";
 
 const SELECTED = "muwi.selected";
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -14,6 +18,28 @@ const STATE_NAME = { waiting: "나를 기다림", blocked: "막힘", doing: "작
 const STATUS_NAME = { todo: "아직", doing: "작업 중", waiting: "나를 기다림", blocked: "막힘", done: "끝" };
 const AGENT_NAME = { working: "세션 작업 중", blocked: "세션이 입력을 기다림", done: "세션이 멈춤", idle: "세션이 멈춤" };
 const RUN_NAME = { me: "직접", subagent: "서브에이전트", session: "새 세션" };
+/** 세션 상태의 급한 정도 (Herdr의 Agents 칸과 같은 순서) */
+const AGENT_RANK = { blocked: 3, working: 2, done: 1, idle: 0 };
+/** 세션이 시작될 때 muwi 훅이 터미널에 붙이는 이름표 (그 터미널에서 지금 도는 세션) */
+const LABEL_SESSION = "muwi.session";
+/** Herdr가 직접 내는 레이아웃. muwi layout은 이걸 복제해서 바꾼다 */
+const SHIPPED = ["main", "terminals", "win98"];
+
+/** 에이전트가 제목 앞에 붙이는 상태 글자를 뗀다 (Herdr의 Agents 칸과 같은 규칙) */
+const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}\p{Ps}\p{Pi}]+/u, "").replace(/^\[ [!.] \] /, "").trim();
+
+/** 프로그램 아이콘 (Herdr의 프로그램 표) */
+function programIcon(p, size, color) {
+  if (!p?.icon) return null;
+  return p.tint ? svg(p.icon).size(size).flex_none().text_color(color) : image(p.icon).w(size).h(size).flex_none();
+}
+
+/** 레이아웃 나무에 조건에 맞는 칸이 있는가 */
+function anyNode(node, match) {
+  if (!node || typeof node !== "object") return false;
+  if (match(node)) return true;
+  return (node.children ?? []).some((child) => anyNode(child, match));
+}
 
 function ago(iso, now) {
   if (!iso) return "";
@@ -89,6 +115,8 @@ const SAMPLE = (() => {
       { ...work, work: "old", title: "지난 작업", state: "done", past: true, active: [] },
     ],
     errors: [],
+    sessions: [{ key: "s1", terminal: "t1", work: "sample", seenAt: "2026-01-01T00:00:00.000Z" }],
+    suggest: false,
     selected: {
       ...work, nodes, edges: [], outside: [], compacts: [], flags: [], lead: "s1", helpers: { sessions: 1, subagents: 2 },
       gone: [{ at: "2026-01-01T00:00:00.000Z", id: "lint", title: "lint", status: "todo", why: "견본" }],
@@ -108,9 +136,9 @@ const SAMPLE = (() => {
 
 /**
  * 자리마다 다른 모양으로 쓴다 (레이아웃이나 pane의 props.variant)
- *   full (기본): 작업 목록 + 그래프 + 기록
- *   list:        작업 목록만 (사이드바)
- *   graph:       그래프와 기록만 (목록은 다른 칸에서 고른다)
+ *   full (기본): 작업 목록 + 그래프 + 기록. muwi open으로 터미널 옆에 연 칸
+ *   list:        작업 목록만 (사이드바의 Agents 자리. muwi layout이 넣는다)
+ *   graph:       그래프와 기록만 (터미널 아래. 목록은 사이드바에서 고른다)
  * 고른 작업은 shared 상태로 칸끼리 나눠 쓴다. props.work를 주면 그 작업에 고정한다.
  */
 export default class Muwi extends View {
@@ -131,6 +159,17 @@ export default class Muwi extends View {
     this.focusKey = null;
     this.stale = false;
     this.showPast = false;
+    /** 접어 둔 묶음 (작업 목록의 "나를 기다림" 같은 것) */
+    this.folded = new Set();
+    /** 키보드가 있는 터미널과 그 작업. 바뀔 때만 따라간다 (사람이 고른 것을 덮어쓰지 않게) */
+    this.followKey = null;
+    this.followTo = null;
+    /** 키보드가 있는 터미널의 세션이 계획 없이 일하는 중이다 */
+    this.planless = false;
+    /** 화면 바꾸기 안내 */
+    this.applying = false;
+    this.bannerNote = null;
+    this.bannerClosed = false;
     if (checking()) {
       this.data = SAMPLE;
       this.node = "impl";
@@ -145,6 +184,13 @@ export default class Muwi extends View {
         this.stale = false;
         this.load(cx);
       }
+    });
+    // 키보드가 다른 터미널로 옮겨 가면 곧바로 그 작업으로 바꾼다 (그리는 중에는 공유 상태를 바꾸지 않는다)
+    cx.timer.every(150, (cx) => {
+      if (!this.followTo) return;
+      const work = this.followTo;
+      this.followTo = null;
+      if (work !== this.wanted()) this.select(work, cx);
     });
   }
 
@@ -225,6 +271,47 @@ export default class Muwi extends View {
     this.load(cx);
   }
 
+  /**
+   * 터미널 → 그 터미널에서 지금 도는 세션이 붙어 있는 작업 (계획이 없으면 undefined).
+   * 세션이 시작될 때 터미널에 붙인 이름표가 있으면 그것을, 없으면 그 터미널에서 가장 최근에 본 세션을 쓴다
+   */
+  links() {
+    const sessions = this.data?.sessions ?? [];
+    const map = new Map();
+    for (const s of sessions) if (!map.has(s.terminal)) map.set(s.terminal, s.work); // 최근 것이 먼저 온다
+    if (checking()) return map;
+    for (const t of terminals() ?? []) {
+      const key = t.labels?.[LABEL_SESSION];
+      if (!key) continue;
+      map.set(t.address, sessions.find((x) => x.key === key)?.work);
+    }
+    return map;
+  }
+
+  /**
+   * 키보드가 있는 터미널이 바뀌었거나 그 터미널의 세션이 새 작업에 붙었으면 그 작업을 보여 준다.
+   * 같은 터미널에 머무는 동안에는 사람이 고른 작업을 덮어쓰지 않는다
+   */
+  follow(links) {
+    if (this.pinned() || !this.data || checking()) return;
+    const term = focused()?.terminal ?? null;
+    if (!term) return; // 그래프 칸 같은 mod 칸에 키보드가 있다
+    const work = links.get(term);
+    const known = Boolean(work) && (this.data.works ?? []).some((w) => w.work === work);
+    const key = `${term}|${known ? work : ""}`;
+    if (key === this.followKey) return;
+    this.followKey = key;
+    this.planless = !known && agents().some((a) => a.address === term);
+    if (known && work !== this.wanted()) this.followTo = work;
+  }
+
+  /** 그 터미널로 간다. pane에 있으면 그 pane으로, pane 없이 떠 있으면 그 자리에서 들여다본다 */
+  go(terminal) {
+    if (!terminal || checking()) return;
+    if (panes().some((p) => p.terminal === terminal)) run("pane.focus", { terminal });
+    else if (agents().some((a) => a.address === terminal)) run("terminal.peek", { terminal });
+  }
+
   colors(t) {
     // 나를 기다림은 Herdr가 "사람이 필요함"에 쓰는 색, 막힘은 그와 구별되는 색
     return { todo: t.input, doing: t.working, waiting: t.blocked, blocked: t.ansi5 ?? t.blocked, done: t.done, idle: t.muted, stalled: t.muted };
@@ -235,6 +322,9 @@ export default class Muwi extends View {
     const now = Date.now();
     const variant = this.variant();
     const works = this.data?.works ?? [];
+    const links = this.links();
+    // 키보드가 다른 터미널로 옮겨 갔으면 그 터미널의 작업으로
+    this.follow(links);
     // 다른 칸에서 작업을 바꿨으면 따라간다
     const want = this.wanted();
     const view = this.data?.selected ?? null;
@@ -247,12 +337,18 @@ export default class Muwi extends View {
         }
       });
 
+    // 그래프만 그리는 칸은 목록이 필요 없다
+    const groups = this.data && variant !== "graph" ? this.groups(t, works, links) : [];
+    const listed = groups.length > 0 || works.length > 0;
+
     if (variant === "list") {
-      return root.bg(t.chrome)
-        .child(this.listHead(t, works))
+      // 사이드바를 좁혀 아이콘만 보이게 했을 때 (Herdr의 Agents 칸과 같은 기준)
+      const compact = this.size.width < 160;
+      return root.bg(t.chrome).border_t(1).border_color(t.border)
+        .when(!compact, (el) => el.child(this.listHead(t, works, true)))
         .when(Boolean(this.error), (el) => el.child(this.problem(t)))
-        .when(!this.error && this.data !== null && works.length === 0, (el) => el.child(this.empty(t)))
-        .when(works.length > 0, (el) => el.child(this.list(t, works, view?.work, now, true)));
+        .when(!this.error && this.data !== null && !listed, (el) => el.child(this.empty(t)))
+        .when(listed, (el) => el.child(this.list(t, works, groups, view?.work, now, true, compact)));
     }
 
     const wide = this.size.width >= 1040;
@@ -260,8 +356,8 @@ export default class Muwi extends View {
     const body = h_flex().flex_1().min_h(0)
       .when(showList, (el) => el.child(
         v_flex().w(236).flex_none().h_full().min_h(0).bg(t.chrome).border_r(1).border_color(t.border)
-          .child(this.listHead(t, works))
-          .child(this.list(t, works, view?.work, now, true))))
+          .child(this.listHead(t, works, false))
+          .child(this.list(t, works, groups, view?.work, now, true, false))))
       .child(v_flex().flex_1().min_w(0).h_full().min_h(0)
         .when(!showList && variant === "full" && works.length > 1 && !this.pinned(), (el) => el.child(this.chips(t, works, view?.work)))
         .child(view ? this.canvas(t, view, now) : div().flex_1())
@@ -270,8 +366,10 @@ export default class Muwi extends View {
       .when(Boolean(view) && wide, (el) => el.child(
         div().w(300).flex_none().h_full().min_h(0).border_l(1).border_color(t.border).bg(t.surface).child(this.detail(t, view, now))));
 
+    const banner = this.banner(t, variant);
     return root.bg(t.canvas)
       .child(this.head(t, view, works, now))
+      .when(Boolean(banner), (el) => el.child(banner))
       .when(Boolean(this.error), (el) => el.child(this.problem(t)))
       .when(!this.error && this.data !== null && works.length === 0, (el) => el.child(this.empty(t)))
       .when(!this.error && this.data === null, (el) => el.child(div().p(16).text_color(t.dim).child("불러오는 중…")))
@@ -293,18 +391,21 @@ export default class Muwi extends View {
         .child(h_flex().gap(8).items_center()
           .child(div().min_w(0).truncate().text_size(13).font_semibold().child(view ? (view.title ?? view.work) : "작업 그래프"))
           .when(Boolean(view), (el) => el.child(this.pill(t, STATE_NAME[view.state] ?? view.state, c[view.state] ?? t.muted))))
-        .child(div().truncate().text_size(10.5).text_color(t.dim).child(
-          view ? [`${view.work} · ${view.counts.done}/${view.counts.total} 끝 · ${ago(view.updatedAt, now)}`,
-            view.helpers?.sessions ? `새 세션 ${view.helpers.sessions}` : null,
-            view.helpers?.subagents ? `서브에이전트 ${view.helpers.subagents}` : null].filter(Boolean).join(" · ") : `${works.length}개 작업`)))
+        .child(div().truncate().text_size(10.5).text_color(view && this.planless ? t.accent : t.dim).child(
+          // 지금 보는 터미널의 세션은 계획 없이 일한다. 그래프는 마지막으로 본 작업 그대로 둔다
+          view && this.planless ? `지금 칸의 세션은 계획 없이 진행 중이에요 · 마지막으로 본 작업(${view.work})을 보여 줘요`
+            : view ? [`${view.work} · ${view.counts.done}/${view.counts.total} 끝 · ${ago(view.updatedAt, now)}`,
+              view.helpers?.sessions ? `새 세션 ${view.helpers.sessions}` : null,
+              view.helpers?.subagents ? `서브에이전트 ${view.helpers.subagents}` : null].filter(Boolean).join(" · ") : `${works.length}개 작업`)))
       .when(this.size.width >= 860, (el) => el.child(h_flex().flex_none().gap(12)
         .child(legend("작업 중", c.doing)).child(legend("나를 기다림", c.waiting)).child(legend("막힘", c.blocked)).child(legend("끝", c.done))));
   }
 
-  listHead(t, works) {
+  listHead(t, works, sidebar) {
     const waiting = works.filter((w) => w.state === "waiting").length;
     const running = works.filter((w) => w.state === "doing").length;
-    return h_flex().px(14).h(36).flex_none().items_center().gap(6)
+    // 사이드바에서는 Herdr의 Agents 칸 머리와 같은 자리에 맞춘다
+    return h_flex().px(sidebar ? 16 : 14).h(sidebar ? 41 : 36).when(sidebar, (el) => el.pt(14).pb(5)).flex_none().items_center().gap(6)
       .child(div().flex_1().text_size(11.5).font_medium().text_color(t.dim).child("작업"))
       .when(running > 0, (el) => el.child(h_flex().gap(3).items_center().text_size(10.5).text_color(t.working)
         .child(div().frames(SPIN, 90)).child(String(running))))
@@ -326,47 +427,235 @@ export default class Muwi extends View {
       .child(div().text_color(t.dim).text_size(11).child("에이전트에게 일을 시키면, 에이전트가 짠 계획이 여기에 그려져요."));
   }
 
-  workMark(t, w, c) {
+  workMark(t, w, c, ask = false) {
+    // 그 작업을 하는 세션이 입력을 기다린다 (권한 확인 같은 것). 사람이 가 봐야 한다
+    if (ask) return div().w(14).flex_none().text_color(c.waiting).font_semibold().child("!");
     if (w.state === "doing") return div().w(14).flex_none().text_color(c.doing).frames(SPIN, 90);
     const mark = { waiting: "⏸", blocked: "✗", stalled: "◌", done: "✓", idle: "○" }[w.state] ?? "•";
     return div().w(14).flex_none().text_color(c[w.state] ?? t.muted).child(mark);
   }
 
   /**
-   * 작업 목록: 제목 / 지금 눈여겨볼 노드 한 줄.
-   * 끝났거나 멈춘 채로 오래된 작업(past)은 맨 아래에 "지난 작업 N개"로 접어 둔다. 지우지는 않는다
+   * 작업 목록의 묶음. 급한 순서: 나를 기다림 → 막힘 → 작업 중 → 멈춤 → 노드 사이 → 계획 없는 세션 → 끝.
+   * 계획 없이 일하는 세션(작업에 붙지 않은 에이전트)도 넣는다. 그래서 Herdr의 Agents 칸이 없어도 모든 세션이 보인다.
+   * 세션이 입력을 기다리면(권한 확인 같은 것) 그 작업이나 세션을 "나를 기다림"으로 올린다
    */
-  list(t, works, selected, now, fill) {
+  groups(t, works, links) {
+    const c = this.colors(t);
+    const current = works.filter((w) => !w.past);
+    const open = new Set(current.filter((w) => w.state !== "done").map((w) => w.work));
+    const byWork = new Map();
+    const free = [];
+    for (const a of checking() ? [] : agents()) {
+      const work = links.get(a.address);
+      if (work && open.has(work)) byWork.set(work, [...(byWork.get(work) ?? []), a]);
+      else free.push(a);
+    }
+    const bucket = { need: [], blocked: [], doing: [], stalled: [], idle: [], free: [], done: [] };
+    for (const w of current) {
+      const mine = byWork.get(w.work) ?? [];
+      const item = { kind: "work", w, agents: mine, ask: mine.some((a) => a.status === "blocked") };
+      if (w.state === "waiting" || item.ask) bucket.need.push(item);
+      else (bucket[w.state] ?? bucket.idle).push(item);
+    }
+    const rank = (a) => AGENT_RANK[a.status] ?? 0;
+    for (const a of free.sort((x, y) => rank(y) - rank(x) || (y.seq ?? 0) - (x.seq ?? 0))) {
+      (a.status === "blocked" ? bucket.need : bucket.free).push({ kind: "agent", a });
+    }
+    return [
+      { id: "need", label: STATE_NAME.waiting, color: c.waiting, items: bucket.need },
+      { id: "blocked", label: STATE_NAME.blocked, color: c.blocked, items: bucket.blocked },
+      { id: "doing", label: STATE_NAME.doing, color: c.doing, items: bucket.doing },
+      { id: "stalled", label: STATE_NAME.stalled, color: t.muted, items: bucket.stalled },
+      { id: "idle", label: STATE_NAME.idle, color: t.dim, items: bucket.idle },
+      { id: "free", label: "계획 없는 세션", color: t.dim, items: bucket.free },
+      { id: "done", label: STATE_NAME.done, color: c.done, items: bucket.done },
+    ].filter((g) => g.items.length > 0);
+  }
+
+  /**
+   * 작업 목록: 묶음 머리와 줄들. 끝났거나 멈춘 채로 오래된 작업(past)은 맨 아래에 "지난 작업 N개"로 접어 둔다. 지우지는 않는다.
+   * compact: 사이드바를 좁혀 아이콘만 보일 때
+   */
+  list(t, works, groups, selected, now, fill, compact) {
     const c = this.colors(t);
     const box = fill ? v_flex().flex_1().min_h(0) : v_flex().flex_none();
-    const row = (w) => {
-      const on = w.work === selected;
-      const first = w.active.find((n) => n.status === "waiting" && !n.closed) ?? w.active.find((n) => n.status === "blocked" && !n.closed) ?? w.active[0];
-      const line = w.state === "done" ? "모든 노드가 끝났어요"
-        : first ? `${first.title}${first.closed ? " · 세션이 닫힘" : first.note ? ` · ${first.note}` : ""}` : `${w.counts.done}/${w.counts.total} 끝`;
-      return h_flex().id(`work-${w.work}`).px(8).py(6).gap(8).items_center().rounded(7)
-        .bg(on ? t.selected : t.chrome).hover((s) => s.bg(on ? t.selected : t.hover)).cursor_pointer()
-        .on_click((_e, cx) => this.select(w.work, cx))
-        .child(this.workMark(t, w, c))
-        .child(v_flex().flex_1().min_w(0).gap(1)
-          .child(div().truncate().text_size(12).text_color(on ? t.foreground : t.muted).when(on, (el) => el.font_medium()).child(w.title ?? w.work))
-          .child(h_flex().gap(6).text_size(10.5)
-            .child(div().flex_1().min_w(0).truncate().text_color(c[w.state] ?? t.dim).child(line))
-            .child(div().flex_none().text_color(t.dim).child(ago(w.updatedAt, now)))));
-    };
-    const current = works.filter((w) => !w.past);
+    const row = (item) => (item.kind === "work" ? this.workRow(t, c, item, selected, now, compact) : this.agentRow(t, item.a, compact));
     const past = works.filter((w) => w.past);
     // 접어 둔 작업을 보고 있으면 펼쳐 둔다
     const open = this.showPast || past.some((w) => w.work === selected);
-    return box.id("works").overflow_y_scrollbar().px(8).pb(8).gap(2)
-      .children(current.map(row))
-      .when(past.length > 0, (el) => el
-        .child(h_flex().id("past-toggle").px(8).py(6).gap(8).items_center().rounded(7).cursor_pointer()
+    return box.id("works").overflow_y_scrollbar().px(compact ? 4 : 8).pb(8).gap(1)
+      .children(groups.flatMap((g) => [
+        ...(compact ? [] : [this.groupHead(t, g)]),
+        ...(this.folded.has(g.id) && !compact ? [] : g.items.map(row)),
+      ]))
+      .when(past.length > 0 && !compact, (el) => el
+        .child(h_flex().id("past-toggle").px(8).py(6).mt(4).gap(8).items_center().rounded(7).cursor_pointer()
           .hover((s) => s.bg(t.hover))
           .on_click((_e, cx) => { this.showPast = !open; cx.notify(); })
           .child(div().w(14).flex_none().text_size(10).text_color(t.dim).child(open ? "▾" : "▸"))
           .child(div().flex_1().text_size(11).text_color(t.dim).child(`지난 작업 ${past.length}개`)))
-        .when(open, (el2) => el2.children(past.map(row))));
+        .when(open, (el2) => el2.children(past.map((w) => row({ kind: "work", w, agents: [], ask: false })))));
+  }
+
+  /** 묶음 머리. 누르면 접는다 */
+  groupHead(t, g) {
+    const open = !this.folded.has(g.id);
+    return h_flex().id(`sec-${g.id}`).px(8).pt(8).h(28).flex_none().gap(6).items_center().text_size(11).font_medium().cursor_pointer()
+      .hover((s) => s.text_color(t.foreground))
+      .on_click((_e, cx) => { open ? this.folded.add(g.id) : this.folded.delete(g.id); cx.notify(); })
+      .child(div().truncate().text_color(g.color).child(g.label))
+      .child(div().text_color(t.dim).child(String(g.items.length)))
+      .child(div().flex_1())
+      .when(!open, (el) => el.child(div().text_size(10).text_color(t.dim).child("▸")));
+  }
+
+  /**
+   * 작업으로 갈 때 열 터미널: 지금 그 작업에 붙어 있는 세션 중 입력을 기다리는 것 → 일하는 것.
+   * 그 작업을 하는 세션이 없으면(끝났거나 세션이 닫힘) 옮겨 가지 않는다. 그 터미널은 지금 다른 일을 하고 있을 수 있다
+   */
+  targetOf(item) {
+    const best = [...item.agents].sort((x, y) => (AGENT_RANK[y.status] ?? 0) - (AGENT_RANK[x.status] ?? 0))[0];
+    return best?.address ?? null;
+  }
+
+  /** 작업 한 줄: 제목 / 지금 눈여겨볼 노드. 누르면 그 작업의 그래프를 보여 주고 그 세션의 터미널로 간다 */
+  workRow(t, c, item, selected, now, compact) {
+    const w = item.w;
+    const on = w.work === selected;
+    const click = (_e, cx) => {
+      this.select(w.work, cx);
+      const target = this.targetOf(item);
+      // 옮겨 간 터미널이 이 작업을 하고 있으니 따라가기가 다시 바꿀 것이 없다
+      if (target) this.followKey = `${target}|${w.work}`;
+      this.go(target);
+    };
+    if (compact) {
+      return h_flex().id(`work-${w.work}`).h(26).flex_none().items_center().justify_center().rounded(6)
+        .bg(on ? t.selected : t.chrome).hover((s) => s.bg(on ? t.selected : t.hover)).cursor_pointer()
+        .on_click(click)
+        .child(this.workMark(t, w, c, item.ask));
+    }
+    const first = w.active.find((n) => n.status === "waiting" && !n.closed) ?? w.active.find((n) => n.status === "blocked" && !n.closed) ?? w.active[0];
+    const line = item.ask ? "세션이 입력을 기다림" : w.state === "done" ? "모든 노드가 끝났어요"
+      : first ? `${first.title}${first.closed ? " · 세션이 닫힘" : first.note ? ` · ${first.note}` : ""}` : `${w.counts.done}/${w.counts.total} 끝`;
+    return h_flex().id(`work-${w.work}`).px(8).py(6).gap(8).items_center().rounded(7)
+      .bg(on ? t.selected : t.chrome).hover((s) => s.bg(on ? t.selected : t.hover)).cursor_pointer()
+      .on_click(click)
+      .child(this.workMark(t, w, c, item.ask))
+      .child(v_flex().flex_1().min_w(0).gap(1)
+        .child(div().truncate().text_size(12).text_color(on ? t.foreground : t.muted).when(on, (el) => el.font_medium()).child(w.title ?? w.work))
+        .child(h_flex().gap(6).text_size(10.5)
+          .child(div().flex_1().min_w(0).truncate().text_color(item.ask ? c.waiting : c[w.state] ?? t.dim).child(line))
+          .child(div().flex_none().text_color(t.dim).child(ago(w.updatedAt, now)))));
+  }
+
+  /** 계획 없이 일하는 세션 한 줄 (Herdr의 Agents 칸과 같은 모양). 누르면 그 터미널로 간다 */
+  agentRow(t, a, compact) {
+    const click = () => run("pane.focus", { pane: a.pane });
+    if (compact) {
+      return h_flex().id(`ag-${a.address}`).h(26).flex_none().items_center().justify_center().rounded(6)
+        .bg(a.focused ? t.selected : t.chrome).hover((s) => s.bg(a.focused ? t.selected : t.hover)).cursor_pointer()
+        .on_click(click)
+        .child(this.agentStatus(t, a));
+    }
+    const pic = programIcon(a.program, 14, t.foreground);
+    const name = a.space_name || a.tab_name || a.address;
+    const title = clean(a.title);
+    const more = title && title !== name && title !== a.program?.name ? title : null;
+    const quiet = a.status === "idle" && !a.focused;
+    return h_flex().id(`ag-${a.address}`).px(8).h(30).flex_none().gap(8).items_center().rounded(7)
+      .bg(a.focused ? t.selected : t.chrome).hover((s) => s.bg(a.focused ? t.selected : t.hover)).cursor_pointer()
+      .on_click(click)
+      .child(h_flex().w(14).flex_none().items_center().justify_center().when(Boolean(pic), (el) => el.child(pic)))
+      .child(h_flex().flex_1().min_w(0).gap(5).items_center().text_size(12)
+        .child(div().min_w(0).max_w(more ? 110 : 220).truncate().text_color(quiet ? t.muted : t.foreground).child(name))
+        .when(Boolean(more), (el) => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`· ${more}`))))
+      .child(this.agentStatus(t, a));
+  }
+
+  /** 세션 상태 표시 (Herdr의 Agents 칸과 같은 모양): 일하는 중은 도는 원, 입력을 기다리면 !, 쉬는 중은 빈 원 */
+  agentStatus(t, a) {
+    if (a.status === "working") return svg("mods/workspace-chrome/spinner.svg").size(12).mx(1).flex_none().text_color(t.working).spin(900);
+    if (a.status === "blocked") {
+      return div().size(14).flex_none().rounded(4).bg(tint(t.blocked, 0.15)).text_size(10.5).font_bold().text_color(t.blocked)
+        .flex().items_center().justify_center().child("!");
+    }
+    if (a.status === "idle") return div().size(7).mx(3).flex_none().rounded(4).border(1.5).border_color(t.idle ?? t.dim);
+    return div().size(7).mx(3).flex_none().rounded(4).bg(a.status === "done" ? t.done ?? t.dim : t.dim);
+  }
+
+  /**
+   * 그래프 칸 위쪽의 한 줄 안내.
+   *   터미널 옆에 따로 연 칸(full)인데 화면에 muwi 칸이 없으면: 사이드바와 터미널 아래에 고정하자고 (muwi config layout off면 묻지 않는다)
+   *   muwi layout으로 만든 화면인데 Herdr가 업데이트됐으면: 새 모양에 맞추자고
+   */
+  banner(t, variant) {
+    if (checking() || !this.data || this.bannerClosed) return null;
+    const tree = shownLayout();
+    const has = anyNode(tree, (n) => n?.content?.mod === "muwi");
+    let text = null, act = null, later = null;
+    if (!has && variant === "full" && this.data.suggest) {
+      text = "사이드바의 Agents 자리에 작업 목록을 두고, 그래프를 터미널 아래에 고정할 수 있어요. 지금 레이아웃은 그대로 남아요.";
+      act = { label: "바꾸기", run: (cx) => this.applyLayout(cx, true) };
+      later = { label: "묻지 않기", run: (cx) => this.stopAsking(cx) };
+    } else if (has && /^muwi(-\d+)?$/.test(String(shared("layout") ?? "")) && SHIPPED.includes(tree?.cloned_from?.name)) {
+      const was = tree?.cloned_from?.version;
+      const now = updates()?.app?.version;
+      if (was && now && was !== now) {
+        text = `Herdr가 업데이트됐어요 (${was} → ${now}). muwi 화면을 새 모양에 맞출 수 있어요.`;
+        act = { label: "맞추기", run: (cx) => this.applyLayout(cx, false) };
+        later = { label: "나중에", run: (cx) => { this.bannerClosed = true; cx.notify(); } };
+      }
+    }
+    if (!text) return null;
+    const button = (id, b, primary) => h_flex().id(id).h(24).px(10).flex_none().items_center().rounded(6)
+      .bg(primary ? t.accent : t.raised).border_1().border_color(primary ? t.accent : t.border)
+      .text_size(11).font_medium().text_color(primary ? t.background : t.muted).cursor_pointer()
+      .when(!primary, (el) => el.hover((s) => s.bg(t.hover).text_color(t.foreground)))
+      .on_click((_e, cx) => b.run(cx))
+      .child(b.label);
+    return h_flex().flex_none().px(14).py(7).gap(10).items_center().bg(t.surface).border_b(1).border_color(t.border)
+      .child(div().flex_1().min_w(0).text_size(11.5).text_color(this.bannerNote && !this.applying ? t.blocked : t.foreground).child(this.bannerNote ?? text))
+      .when(!this.applying, (el) => el.child(button("banner-act", act, true)).child(button("banner-later", later, false)));
+  }
+
+  /** muwi layout을 실행한다. 터미널 옆에 따로 연 칸이면 바꾼 뒤 그 칸을 닫는다 (같은 그래프가 두 번 보이지 않게) */
+  applyLayout(cx, closeMe) {
+    if (this.applying) return;
+    this.applying = true;
+    this.bannerNote = "바꾸는 중…";
+    const me = closeMe ? panes().find((p) => p.mod === "muwi" && p.focused)?.pane ?? null : null;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      try {
+        const r = await exec(`${home()}/.local/bin/muwi`, ["layout"], { timeout: 60000 });
+        if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim() || `muwi layout이 ${r.code}로 끝났어요`);
+        this.applying = false;
+        this.bannerNote = null;
+        this.bannerClosed = true;
+        cx.notify();
+        if (me) run("pane.close", { pane: me });
+      } catch (e) {
+        this.applying = false;
+        this.bannerNote = String(e?.message ?? e);
+        cx.notify();
+      }
+    });
+  }
+
+  /** 다시 묻지 않는다 (muwi config layout off) */
+  stopAsking(cx) {
+    this.bannerClosed = true;
+    if (this.data) this.data.suggest = false;
+    cx.notify();
+    cx.spawn(async () => {
+      try {
+        await exec(`${home()}/.local/bin/muwi`, ["config", "layout", "off"], { timeout: 20000 });
+      } catch {
+        // 적지 못해도 이 칸에서는 다시 묻지 않는다
+      }
+    });
   }
 
   /** 좁을 때는 목록 대신 한 줄로 */
