@@ -411,9 +411,16 @@ export default class Muwi extends View {
     this.planless = !known && agent;
     this.planlessSince = shared(PICKED) ?? 0;
     if (known) {
-      // 전에 본 작업이면 기억해 둔 그래프를 바로 보여 준다. 새로 읽는 것은 타이머가 곧바로 한다
-      this.showCached(work);
-      this.followTo = work;
+      const showing = this.data?.selected?.work;
+      if (showing !== work) {
+        // 다른 작업으로 간다: 고른 노드는 그 작업의 것이 아니다 (같은 id의 노드가 있어도 다른 노드다)
+        this.node = null;
+        this.tab = "work";
+        // 전에 본 작업이면 기억해 둔 그래프를 바로 보여 준다. 새로 읽는 것은 타이머가 곧바로 한다
+        this.showCached(work);
+      }
+      // 같은 작업을 하는 다른 터미널로 옮겼을 뿐이면 다시 읽을 것이 없다
+      if (showing !== work || work !== this.wanted()) this.followTo = work;
     }
   }
 
