@@ -5,7 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import {
   hookCommandFor, installBlock, installHooks, instructionText, mergeHooks, readInstall, refreshSetup, removeBlock, removeHooks,
-  removeSetup, runSetup, uninstallBlock, uninstallHooks, upsertBlock,
+  olderThan, removeSetup, runSetup, uninstallBlock, uninstallHooks, upsertBlock,
 } from '../src/setup.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -169,4 +169,11 @@ test('업데이트로 설치 위치나 버전이 바뀌면, setup을 한 적이 
   assert.equal(refreshSetup({ root: next, version: '0.2.0', dir: h.records, env: h.env }), true);
   assert.match(fs.readFileSync(path.join(h.dir, '.local', 'bin', 'muwi'), 'utf8'), new RegExp(`"${next}/bin/muwi"`));
   assert.equal(readInstall(h.records)!.version, '0.2.0');
+  // 업데이트 전부터 열려 있던 세션(옛 버전)이 새로 시작해도 새 설치를 되돌리지 않는다
+  assert.equal(refreshSetup({ root: ROOT, version: '0.1.0', dir: h.records, env: h.env }), false);
+  assert.equal(readInstall(h.records)!.version, '0.2.0');
+  assert.match(fs.readFileSync(path.join(h.dir, '.local', 'bin', 'muwi'), 'utf8'), new RegExp(`"${next}/bin/muwi"`));
+  assert.equal(olderThan('0.9.0', '0.10.0'), true);
+  assert.equal(olderThan('0.10.0', '0.9.0'), false);
+  assert.equal(olderThan('0.5.0', '0.5.0'), false);
 });
