@@ -599,13 +599,20 @@ export default class Muwi extends View {
       text = "사이드바의 Agents 자리에 작업 목록을 두고, 그래프를 터미널 아래에 고정할 수 있어요. 지금 레이아웃은 그대로 남아요.";
       act = { label: "바꾸기", run: (cx) => this.applyLayout(cx, true) };
       later = { label: "묻지 않기", run: (cx) => this.stopAsking(cx) };
-    } else if (has && /^muwi(-\d+)?$/.test(String(shared("layout") ?? "")) && SHIPPED.includes(tree?.cloned_from?.name)) {
+    } else if (has && /^muwi(-\d+)?$/.test(String(shared("layout") ?? ""))) {
+      // muwi layout으로 만든 화면이다. 다시 맞출 일이 있는지 본다
       const was = tree?.cloned_from?.version;
       const now = updates()?.app?.version;
-      if (was && now && was !== now) {
+      const later0 = { label: "나중에", run: (cx) => { this.bannerClosed = true; cx.notify(); } };
+      if (SHIPPED.includes(tree?.cloned_from?.name) && was && now && was !== now) {
         text = `Herdr가 업데이트됐어요 (${was} → ${now}). muwi 화면을 새 모양에 맞출 수 있어요.`;
         act = { label: "맞추기", run: (cx) => this.applyLayout(cx, false) };
-        later = { label: "나중에", run: (cx) => { this.bannerClosed = true; cx.notify(); } };
+        later = later0;
+      } else if (anyNode(tree, (n) => n?.id === "muwi-graph") && !anyNode(tree, (n) => n?.id === "muwi-split")) {
+        // 옛 배치: 그래프 칸 높이를 바꿀 수 없다
+        text = "muwi 화면 배치가 나아졌어요. 다시 맞추면 터미널과 그래프 사이 경계를 끌어서 그래프 높이를 바꿀 수 있어요.";
+        act = { label: "맞추기", run: (cx) => this.applyLayout(cx, false) };
+        later = later0;
       }
     }
     if (!text) return null;
@@ -742,21 +749,45 @@ export default class Muwi extends View {
     const s = this.canvasSize;
     const L = view.layout;
     if (!s || !L.width) return;
-    // 그래프가 화면에 다 들어오면 가운데에, 아니면 지금 일어나는 곳으로
-    // 글자가 읽히지 않을 만큼 줄이지는 않는다. 넘치면 원래 크기로 두고 지금 일어나는 곳을 보여 준다
+    // 그래프가 칸에 다 들어오면 가운데에. 터미널 아래처럼 낮은 칸은 글자가 읽히는 만큼(0.7배)까지 줄여서 담는다
+    const floor = this.variant() === "graph" ? 0.7 : 0.9;
     const fit = Math.min(1, s.width / L.width, s.height / L.height);
-    if (fit >= 0.9) {
+    if (fit >= floor) {
       this.zoom = fit;
       this.pan = { x: (s.width - L.width * fit) / 2, y: Math.max(0, (s.height - L.height * fit) / 2) };
       return;
     }
-    this.zoom = 1;
-    const live = view.nodes.filter((n) => n.status === "doing" || n.status === "waiting" || n.status === "blocked").map((n) => n.id);
-    const boxes = L.nodes.filter((p) => (live.length ? live.includes(p.id) : true));
+    // 다 담기지 않으면 높이를 읽히는 만큼만 줄이고, 볼 노드를 가운데에 둔다
+    const z = Math.max(floor, Math.min(1, s.height / L.height));
+    this.zoom = z;
+    const ids = this.focusIds(view);
+    const boxes = L.nodes.filter((p) => ids.includes(p.id));
+    if (!boxes.length) return;
     const x1 = Math.min(...boxes.map((p) => p.x)), x2 = Math.max(...boxes.map((p) => p.x + p.w));
     const y1 = Math.min(...boxes.map((p) => p.y)), y2 = Math.max(...boxes.map((p) => p.y + p.h));
     const clamp = (v, size, full) => (full <= size ? (size - full) / 2 : Math.min(0, Math.max(size - full, v)));
-    this.pan = { x: clamp(s.width / 2 - (x1 + x2) / 2, s.width, L.width), y: clamp(s.height / 2 - (y1 + y2) / 2, s.height, L.height) };
+    this.pan = {
+      x: clamp(s.width / 2 - ((x1 + x2) / 2) * z, s.width, L.width * z),
+      y: clamp(s.height / 2 - ((y1 + y2) / 2) * z, s.height, L.height * z),
+    };
+  }
+
+  /**
+   * 그래프가 칸에 다 담기지 않을 때 보여 줄 노드:
+   * 지금 일어나는 노드 → (시작 전이면) 처음 노드 → (다 끝났으면) 흐름의 끝 노드 → 다음에 할 노드
+   */
+  focusIds(view) {
+    const live = view.nodes.filter((n) => n.status === "doing" || n.status === "waiting" || n.status === "blocked").map((n) => n.id);
+    if (live.length) return live;
+    const done = new Set(view.nodes.filter((n) => n.status === "done").map((n) => n.id));
+    if (done.size === 0) return view.nodes.filter((n) => !(n.after ?? []).length).map((n) => n.id);
+    if (done.size === view.nodes.length) {
+      const before = new Set(view.nodes.flatMap((n) => n.after ?? []));
+      return view.nodes.filter((n) => !before.has(n.id)).map((n) => n.id);
+    }
+    // 노드 사이: 앞 노드가 다 끝났는데 아직 시작하지 않은 노드
+    const next = view.nodes.filter((n) => n.status === "todo" && (n.after ?? []).every((a) => done.has(a))).map((n) => n.id);
+    return next.length ? next : view.nodes.map((n) => n.id);
   }
 
   fit(view) {
@@ -1000,7 +1031,10 @@ export default class Muwi extends View {
               // pane이 있으면 그 pane으로 가고, pane 없이 떠 있는 세션이면 그 자리에서 들여다본다
               .on_click(() => run(panes().some((p) => p.terminal === terminal) ? "pane.focus" : "terminal.peek", { terminal }))
               .child("터미널로 가기")))))
-        .when(Boolean(plannedText), (el) => el.child(line(n.offPlan ? `${plannedText} · 계획과 다르게 했어요` : plannedText, n.offPlan ? t.blocked : t.dim)))))
+        .when(Boolean(plannedText), (el) => el.child(line(
+          n.offPlan ? `${plannedText} · 계획과 다르게 했어요`
+            : n.runUnknown ? `${plannedText} · 이 세션에서 훅이 돌지 않아 계획대로 했는지 확인하지 못했어요` : plannedText,
+          n.offPlan ? t.blocked : t.dim)))))
       .child(v_flex().gap(4).child(label(tries.length > 1 ? "회차별 기록" : "읽은 skill"))
         .when(n.attempts === 0, (el) => el.child(line("아직 시작하지 않았어요", t.dim)))
         .children(tries.length > 1
