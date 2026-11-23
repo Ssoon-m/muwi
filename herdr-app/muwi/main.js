@@ -13,6 +13,8 @@ import {
 } from "herdr";
 
 const SELECTED = "muwi.selected";
+/** 사람이(또는 따라가기가) 작업을 고른 때. 다른 칸이 계획 없는 세션의 빈 화면을 풀 때 본다 */
+const PICKED = "muwi.picked";
 const PLACE_NAME = { bottom: "아래", top: "위", right: "오른쪽" };
 /** 오른쪽 기록 칸의 가장 좁은 너비 */
 const DETAIL_MIN = 220;
@@ -194,6 +196,8 @@ export default class Muwi extends View {
     this.followTo = null;
     /** 키보드가 있는 터미널의 세션이 계획 없이 일하는 중이다 */
     this.planless = false;
+    /** 계획 없는 세션을 보게 된 때의 PICKED. 그 뒤 누가 작업을 고르면 빈 화면을 푼다 */
+    this.planlessSince = 0;
     /** 화면 바꾸기 안내 */
     this.applying = false;
     this.bannerNote = null;
@@ -338,10 +342,15 @@ export default class Muwi extends View {
 
   select(work, cx) {
     this.selected = work;
+    // 사람이 작업을 골랐다 (또는 따라간 터미널에 작업이 있다). 계획 없는 세션의 빈 화면 대신 그 작업을 보여 준다
+    this.planless = false;
     this.node = null;
     this.tab = "work";
     this.focusKey = null;
-    if (!this.pinned()) setShared(SELECTED, work);
+    if (!this.pinned()) {
+      setShared(SELECTED, work);
+      setShared(PICKED, Date.now());
+    }
     this.load(cx);
   }
 
@@ -376,6 +385,7 @@ export default class Muwi extends View {
     if (key === this.followKey) return;
     this.followKey = key;
     this.planless = !known && agents().some((a) => a.address === term);
+    this.planlessSince = shared(PICKED) ?? 0;
     if (known && work !== this.wanted()) this.followTo = work;
   }
 
@@ -401,8 +411,13 @@ export default class Muwi extends View {
     this.follow(links);
     // 다른 칸에서 작업을 바꿨으면 따라간다
     const want = this.wanted();
-    const view = this.data?.selected ?? null;
-    if (!checking() && want && view && view.work !== want && !this.loading) this.stale = true;
+    const loaded = this.data?.selected ?? null;
+    // 다른 칸(사이드바 목록)에서 작업을 골랐으면 빈 화면을 풀고 그 작업을 보여 준다
+    if (this.planless && (shared(PICKED) ?? 0) !== this.planlessSince) this.planless = false;
+    // 키보드가 있는 세션이 계획 없이 일한다: 다른 작업의 그래프를 띄우면 그 세션이 그 일을 하는 것처럼 보이므로 비워서 보여 준다.
+    // 목록에서 작업을 고르면 다시 그 작업을 보여 준다
+    const view = this.planless ? null : loaded;
+    if (!checking() && want && loaded && loaded.work !== want && !this.loading) this.stale = true;
     const root = v_flex().id("root").size_full().min_h(0).text_color(t.foreground).text_size(12)
       .on_size_change((size, cx) => {
         if (Math.abs(size.width - this.size.width) > 1 || Math.abs(size.height - this.size.height) > 1) {
@@ -450,7 +465,7 @@ export default class Muwi extends View {
           .child(this.list(t, works, groups, view?.work, now, true, false))))
       .child(v_flex().flex_1().min_w(0).h_full().min_h(0)
         .when(!showList && variant === "full" && works.length > 1 && !this.pinned(), (el) => el.child(this.chips(t, works, view?.work)))
-        .child(view ? this.canvas(t, view, now) : div().flex_1())
+        .child(view ? this.canvas(t, view, now) : this.planless && works.length > 0 ? this.planlessNote(t) : div().flex_1())
         .when(Boolean(view) && !wide, (el) => el.child(
           div().flex_none().h(this.drawer ? 36 + drawerH : 36).border_t(1).border_color(t.border).bg(t.surface)
             .child(this.detailPane(t, view, now, true)))))
@@ -490,15 +505,15 @@ export default class Muwi extends View {
     return h_flex().id("head").flex_none().h(44).px(16).gap(10).items_center().border_b(1).border_color(t.border).bg(t.chrome)
       .child(v_flex().flex_1().min_w(0).gap(1)
         .child(h_flex().gap(8).items_center()
-          .child(div().min_w(0).truncate().text_size(13).font_semibold().child(view ? (view.title ?? view.work) : "작업 그래프"))
+          .child(div().min_w(0).truncate().text_size(13).font_semibold().child(view ? (view.title ?? view.work) : this.planless ? "계획 없는 세션" : "작업 그래프"))
           .when(Boolean(view), (el) => el.child(this.pill(t, STATE_NAME[view.state] ?? view.state, c[view.state] ?? t.muted))))
-        .child(div().truncate().text_size(10.5).text_color(view && this.planless ? t.accent : t.dim).child(
-          // 지금 보는 터미널의 세션은 계획 없이 일한다. 그래프는 마지막으로 본 작업 그대로 둔다
-          view && this.planless ? `지금 칸의 세션은 계획 없이 진행 중이에요 · 마지막으로 본 작업(${view.work})을 보여 줘요`
+        .child(div().truncate().text_size(10.5).text_color(t.dim).child(
+          // 지금 보는 터미널의 세션은 계획 없이 일한다
+          !view && this.planless ? "지금 칸의 세션은 계획 없이 진행 중이에요"
             : view ? [`${view.work} · ${view.counts.done}/${view.counts.total} 끝 · ${ago(view.updatedAt, now)}`,
               view.helpers?.sessions ? `새 세션 ${view.helpers.sessions}` : null,
               view.helpers?.subagents ? `서브에이전트 ${view.helpers.subagents}` : null].filter(Boolean).join(" · ") : `${works.length}개 작업`)))
-      .when(this.size.width >= 860, (el) => el.child(h_flex().flex_none().gap(12)
+      .when(Boolean(view) && this.size.width >= 860, (el) => el.child(h_flex().flex_none().gap(12)
         .child(legend("작업 중", c.doing)).child(legend("나를 기다림", c.waiting)).child(legend("막힘", c.blocked)).child(legend("끝", c.done))))
       .when(Boolean(place), (el) => el.child(place));
   }
@@ -578,6 +593,14 @@ export default class Muwi extends View {
       .child(div().text_color(t.blocked).font_semibold().child("기록을 읽지 못했어요"))
       .child(div().text_color(t.muted).child(this.error ?? ""))
       .child(div().text_color(t.dim).child("Claude Code 세션에서 muwi setup을 실행하면 ~/.local/bin/muwi가 생겨요 (Windows는 muwi.cmd)."));
+  }
+
+  /** 키보드가 있는 세션이 계획 없이 일할 때 그래프 자리 */
+  planlessNote(t) {
+    return v_flex().flex_1().min_h(0).items_center().justify_center().gap(6).p(16)
+      .child(div().text_size(13).text_color(t.muted).child("그래프 없음"))
+      .child(div().text_size(11).text_color(t.dim).child("지금 칸의 세션은 계획 없이 일하고 있어요. 질문에 답하거나 한 번에 끝나는 일이에요."))
+      .child(div().text_size(11).text_color(t.dim).child("여러 단계로 하는 일을 시키면 계획이 여기에 그려져요. 다른 작업은 목록에서 고르세요."));
   }
 
   empty(t) {
