@@ -213,6 +213,8 @@ export default class Muwi extends View {
     this.moving = false;
     /** 그래프를 위→아래로 그렸는가 (마지막으로 읽은 것) */
     this.loadedDown = null;
+    /** 마지막으로 읽을 때 넘긴 그래프 칸 크기. 칸이 크게 바뀌면 그 크기에 맞춰 다시 배치한다 */
+    this.loadedFit = null;
     /** 읽어 둔 작업의 그래프 (작업 → 마지막으로 읽은 것). 탭을 옮기면 이것을 바로 보여 주고 새로 읽는 것은 뒤에서 한다 */
     this.views = new Map();
     /** 오른쪽 기록 칸의 너비. 경계를 끌어서 바꾸고, 바꾼 너비를 기억한다 */
@@ -313,6 +315,10 @@ export default class Muwi extends View {
         // 세로로 긴 칸이면 위→아래로 그린다
         const down = this.wantsDown();
         if (down) args.push("--down");
+        // 그래프 칸 크기를 넘긴다. 한 줄로는 너무 작아지는 긴 그래프를 칸 비율에 맞춰 여러 줄로 접는다
+        const s = this.canvasSize;
+        const fit = s && this.variant() !== "list" ? { w: Math.round(s.width), h: Math.round(s.height) } : null;
+        if (fit) args.push("--fit", `${fit.w}x${fit.h}`);
         const r = await runMuwi(args, { timeout: 20000 });
         if (r.code !== 0) throw new Error(r.stderr.trim() || `muwi가 ${r.code}로 끝났어요`);
         const data = JSON.parse(r.stdout);
@@ -330,6 +336,7 @@ export default class Muwi extends View {
         }
         this.error = null;
         this.loadedDown = down;
+        this.loadedFit = fit;
         if (this.node && !data.selected?.nodes.some((n) => n.id === this.node)) {
           this.node = null;
           this.tab = "work";
@@ -1247,6 +1254,9 @@ export default class Muwi extends View {
           this.focusKey = null; // 크기가 바뀌면 다시 맞춘다
           // 칸이 가로로 길다가 세로로 길어졌으면(또는 반대) 흐름 방향을 바꿔 다시 읽는다
           if (this.loadedDown !== null && this.wantsDown() !== this.loadedDown) this.stale = true;
+          // 칸 크기를 모른 채 읽었거나 크기가 크게 바뀌었으면, 그 크기에 맞춰 다시 배치한다 (긴 그래프를 접는 줄 수가 달라진다)
+          const f = this.loadedFit;
+          if (this.data?.selected && (!f || Math.abs(size.width - f.w) > f.w * 0.15 || Math.abs(size.height - f.h) > f.h * 0.15)) this.stale = true;
           cx.notify();
         }
       })

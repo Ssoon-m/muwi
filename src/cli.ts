@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { LABEL_NODE, LABEL_WORK, hc, herdrApp, terminalName, type Ran } from './herdr.ts';
-import { layoutGraph, layoutProblems, type Flow } from './layout.ts';
+import { layoutGraph, layoutProblems, type Fit, type Flow } from './layout.ts';
 import { ROOT, handleHook } from './hook.ts';
 import { markNode } from './node.ts';
 import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
@@ -91,7 +91,7 @@ process.stdout.on('error', (e: NodeJS.ErrnoException) => {
   throw e;
 });
 
-const VALUED = new Set(['work', 'request', 'title', 'why', 'by', 'file', 'after', 'before', 'result', 'run', 'show', 'name', 'agent', 'cwd', 'graph']);
+const VALUED = new Set(['work', 'request', 'title', 'why', 'by', 'file', 'after', 'before', 'result', 'run', 'show', 'name', 'agent', 'cwd', 'graph', 'fit']);
 
 function parseArgs(argv: string[]) {
   const pos: string[] = [];
@@ -545,8 +545,8 @@ function printShow(v: WorkView) {
   }
 }
 
-async function withLayout(v: WorkView, flow: Flow = 'right') {
-  const layout = await layoutGraph({ nodes: v.nodes, edges: v.edges }, undefined, flow);
+async function withLayout(v: WorkView, flow: Flow = 'right', fit?: Fit) {
+  const layout = await layoutGraph({ nodes: v.nodes, edges: v.edges }, undefined, flow, fit);
   return { ...v, layout, flow, layoutProblems: layoutProblems(layout, flow) };
 }
 
@@ -584,7 +584,10 @@ async function cmdBoard(a: Args, dir: string) {
     const v = loadView(dir, pick);
     // 그래프 칸이 세로로 길면 위→아래로 그린다 (--down)
     // 닫힌 세션을 이어 하는 버튼에 쓸 것(폴더가 있는가, Claude 대화를 다시 열 수 있는가)도 함께 넘긴다
-    if (v) selected = { ...(await withLayout(v, a.flags.down ? 'down' : 'right')), ...resumeFacts(v) };
+    // --fit WxH: 그래프 칸의 크기. 한 줄로는 너무 작아지는 긴 그래프를 칸 비율에 맞춰 여러 줄로 접는다
+    const m = /^(\d+)x(\d+)$/.exec(str(a, 'fit') ?? '');
+    const fit = m ? { w: Number(m[1]), h: Number(m[2]) } : undefined;
+    if (v) selected = { ...(await withLayout(v, a.flags.down ? 'down' : 'right', fit)), ...resumeFacts(v) };
   }
   // 그래프 칸이 Herdr 터미널과 작업을 잇는 데 쓴다 (지금 보는 탭의 작업 따라가기, 계획 없는 세션 가려내기)
   const sessions = recentSessions(dir, Date.now() - PAST_DAYS * 86_400_000);
