@@ -798,11 +798,25 @@ export default class Muwi extends View {
     this.pan = { x: (s.width - L.width * this.zoom) / 2, y: Math.max(0, (s.height - L.height * this.zoom) / 2) };
   }
 
-  zoomBy(f, point) {
+  zoomBy(f, point, L) {
     const next = Math.max(0.3, Math.min(1.6, this.zoom * f));
     const wx = (point.x - this.pan.x) / this.zoom, wy = (point.y - this.pan.y) / this.zoom;
     this.zoom = next;
     this.pan = { x: point.x - wx * next, y: point.y - wy * next };
+    this.clampPan(L);
+  }
+
+  /**
+   * 그래프가 칸 밖으로 밀려나지 않게, 옮길 수 있는 범위를 그래프 크기로 막는다.
+   * 그래프가 칸보다 작은 쪽은 옮기지 않고 가운데에 둔다. 큰 쪽은 그래프 끝이 칸 끝에 닿을 때까지만 옮긴다
+   */
+  clampPan(L) {
+    const s = this.canvasSize;
+    if (!s || !L?.width) return;
+    const z = this.zoom;
+    const edge = 12;
+    const axis = (v, size, full) => (full + edge * 2 <= size ? (size - full) / 2 : Math.min(edge, Math.max(size - full - edge, v)));
+    this.pan = { x: axis(this.pan.x, s.width, L.width * z), y: axis(this.pan.y, s.height, L.height * z) };
   }
 
   canvas(t, view, _now) {
@@ -891,8 +905,8 @@ export default class Muwi extends View {
     const controls = h_flex().absolute().right(12).bottom(12).gap(6)
       .child(button("c-now", "◎ 지금", () => { this.centerOn(view); }))
       .child(button("c-fit", "⤢ 전체", () => { this.fit(view); }))
-      .child(button("c-out", "−", () => { this.zoomBy(1 / 1.2, { x: cw / 2, y: ch / 2 }); }))
-      .child(button("c-in", "+", () => { this.zoomBy(1.2, { x: cw / 2, y: ch / 2 }); }));
+      .child(button("c-out", "−", () => { this.zoomBy(1 / 1.2, { x: cw / 2, y: ch / 2 }, L); }))
+      .child(button("c-in", "+", () => { this.zoomBy(1.2, { x: cw / 2, y: ch / 2 }, L); }));
 
     const layer = paths.map((q) => window.paint_path(q.path, q.color).absolute().left(0).top(0).w(cw).h(ch));
     return div().id("canvas").relative().flex_1().min_h(0).overflow_hidden().bg(t.canvas)
@@ -910,6 +924,7 @@ export default class Muwi extends View {
       .on_mouse_move((e, cx) => {
         if (!this.press) return;
         this.pan = { x: this.press.px + e.position.x - this.press.x, y: this.press.py + e.position.y - this.press.y };
+        this.clampPan(L);
         cx.notify();
       })
       .on_mouse_up("left", (_e, cx) => { this.press = null; cx.notify(); })
@@ -917,9 +932,10 @@ export default class Muwi extends View {
       .on_scroll_wheel((e, cx) => {
         if (e.modifiers.platform || e.modifiers.control) {
           const local = e.local_position ?? { x: cw / 2, y: ch / 2 };
-          this.zoomBy(Math.exp(Math.max(-60, Math.min(60, -e.delta.y)) * 0.004), local);
+          this.zoomBy(Math.exp(Math.max(-60, Math.min(60, -e.delta.y)) * 0.004), local, L);
         } else {
           this.pan = { x: this.pan.x + e.delta.x, y: this.pan.y + e.delta.y };
+          this.clampPan(L);
         }
         cx.notify();
       })
