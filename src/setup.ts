@@ -13,8 +13,12 @@ import { nowIso, readJson, writeJson } from './store.ts';
 export const HOOK_MARK = 'MUWI_HOOK=1';
 const OURS = /(^|\s)MUWI_HOOK=1(\s|$)/;
 
-/** 설정 파일에 넣을 훅 명령 */
-export const hookCommandFor = (root: string) => `${HOOK_MARK} sh "${path.join(root, 'hooks', 'hook.sh')}"`;
+/** Git Bash가 읽을 경로: Windows에서는 C:\\… 대신 C:/… (Claude Code도 ${CLAUDE_PLUGIN_ROOT}를 이 모양으로 넘긴다) */
+const shPath = (p: string, platform: NodeJS.Platform) => (platform === 'win32' ? p.replace(/\\/g, '/') : p);
+
+/** muwi setup --claude가 settings.json에 넣는 훅 명령. Windows의 Claude Code는 이 명령을 Git Bash로 실행한다 */
+export const hookCommandFor = (root: string, platform: NodeJS.Platform = process.platform) =>
+  `${HOOK_MARK} sh "${shPath(path.join(root, 'hooks', 'hook.sh'), platform)}"`;
 
 type HookGroup = { matcher?: string; hooks?: { type?: string; command?: string; onFailure?: string }[] };
 type Settings = { hooks?: Record<string, HookGroup[]> } & Record<string, unknown>;
@@ -198,9 +202,7 @@ const CMD_MARK = 'rem Created by muwi setup.';
  * setup을 실행한 Node는 다른 곳에서 못 찾을 때만 쓴다.
  */
 function wrapper(root: string, platform: NodeJS.Platform): string {
-  // Git Bash는 C:\\… 대신 C:/…를 잘 읽는다
-  const posix = (p: string) => (platform === 'win32' ? p.replace(/\\/g, '/') : p);
-  return `#!/bin/sh\n${WRAPPER_MARK}. 고치지 말고 muwi setup을 다시 실행해요.\nMUWI_SETUP_NODE="${posix(process.execPath)}" exec "${posix(path.join(root, 'bin', 'muwi'))}" "$@"\n`;
+  return `#!/bin/sh\n${WRAPPER_MARK}. 고치지 말고 muwi setup을 다시 실행해요.\nMUWI_SETUP_NODE="${shPath(process.execPath, platform)}" exec "${shPath(path.join(root, 'bin', 'muwi'), platform)}" "$@"\n`;
 }
 
 /**
@@ -313,7 +315,7 @@ export function runSetup(o: SetupOptions): Install {
   if (o.claude || before?.claude) {
     const settings = path.join(p.claude, 'settings.json');
     const to = path.join(p.claude, 'skills', 'muwi');
-    installHooks(settings, hookCommandFor(o.root));
+    installHooks(settings, hookCommandFor(o.root, platform));
     fs.rmSync(to, { recursive: true, force: true });
     copyDir(skill, to);
     install.claude = { settings, skill: to };

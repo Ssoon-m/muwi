@@ -36,6 +36,14 @@ jobs:
           printf '%s' "$edit" | sh "$root/hooks/hook.sh" nudge
           # Git Bash의 muwi 명령
           sh "$root/bin/muwi" --version
+          # 플러그인 없이 설치(setup --claude)하면 settings.json에 넣는 훅 명령도, 적힌 그대로 Git Bash로 실행해 본다
+          export CLAUDE_CONFIG_DIR="$RUNNER_TEMP/claude-config"
+          node "$root/src/cli.ts" setup --claude
+          cmd=$(node -e 'const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); console.log(s.hooks.SessionStart[0].hooks[0].command)' "$CLAUDE_CONFIG_DIR/settings.json")
+          echo "$cmd"
+          out=$(printf '%s' "$start" | bash -c "$cmd")
+          case "$out" in *hookSpecificOutput*muwi*) ;; *) echo "setup --claude의 훅 명령이 지침을 돌려주지 않았어요"; exit 1 ;; esac
+          node "$root/src/cli.ts" setup --remove
 
       - name: muwi.cmd (PowerShell)
         if: runner.os == 'Windows'

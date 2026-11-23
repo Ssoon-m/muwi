@@ -237,3 +237,8 @@ test('설치 기록은 setup.json에 적는다: install.json만 보는 옛 훅(0
   assert.equal(fs.existsSync(legacy), false);
   assert.equal(readInstall(h.records), null);
 });
+
+test('Windows의 훅 명령(setup --claude)은 경로를 슬래시로 적는다: Git Bash가 읽는다', () => {
+  assert.equal(hookCommandFor('C:\\Users\\me\\muwi', 'win32'), 'MUWI_HOOK=1 sh "C:/Users/me/muwi/hooks/hook.sh"');
+  assert.equal(hookCommandFor('/Users/me/muwi', 'darwin'), 'MUWI_HOOK=1 sh "/Users/me/muwi/hooks/hook.sh"');
+});
