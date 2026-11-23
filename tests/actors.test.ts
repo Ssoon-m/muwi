@@ -363,7 +363,10 @@ test('muwi run: 세션을 띄우고 노드와 터미널을 이어 적는다. 계
   assert.deepEqual(calls.split('\n').filter(l => l.includes('pane.focus')), ['app [do] [pane.focus] [{"pane":"pUSER"}]']);
   assert.ok(calls.includes(`[--cwd] [${cwd}]`) || calls.includes(`[--cwd] [${fs.realpathSync(cwd)}]`));
   const spawn = readEvents(dir, 'shop-1').find(e => e.type === 'spawn')!;
-  assert.deepEqual({ ...spawn, at: '' }, { at: '', session: 'lead', type: 'spawn', node: 'impl', terminal: 't7', name: 'impl', show: 'pane', task: '목록 화면에 링크를 추가해줘' });
+  // 띄운 폴더도 남긴다 (새 세션이 기록 전에 닫혀도 어디서 이어 할지 알려 주려고)
+  const { cwd: where, ...rest } = spawn as typeof spawn & { cwd?: string };
+  assert.ok(where === cwd || where === fs.realpathSync(cwd), where);
+  assert.deepEqual({ ...rest, at: '' }, { at: '', session: 'lead', type: 'spawn', node: 'impl', terminal: 't7', name: 'impl', show: 'pane', task: '목록 화면에 링크를 추가해줘' });
   const shown = muwi(['show', 'shop-1']).out;
   assert.match(shown, /impl +화면 구현 +← read +\(새 세션 t7 뜨는 중\)\n +맡긴 말 \(t7\): 목록 화면에 링크를 추가해줘/);
   assert.match(shown, /review +리뷰 +← impl +\(예정: 서브에이전트\)/);
