@@ -10,7 +10,9 @@ export type Point = [number, number];
 export type Box = { x: number; y: number; w: number; h: number };
 export type LayoutNode = Box & { id: string };
 export type LayoutEdge = { key: string; from: string; to: string; points: Point[] };
-export type Layout = { width: number; height: number; nodes: LayoutNode[]; edges: LayoutEdge[] };
+export type Layout = { width: number; height: number; nodes: LayoutNode[]; edges: LayoutEdge[]; /** 칸 비율에 맞춰 여러 줄로 접었다 */ wrapped?: boolean };
+/** 그래프를 그릴 칸의 크기 (그래프 칸이 알려 준다) */
+export type Fit = { w: number; h: number };
 export type Graph = { nodes: { id: string }[]; edges: { from: string; to: string }[] };
 /** 흐름의 방향: 왼쪽→오른쪽(right) 또는 위→아래(down) */
 export type Flow = 'right' | 'down';
@@ -38,14 +40,33 @@ const OPTIONS = {
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
-export async function layoutGraph(g: Graph, size = SIZE, flow: Flow = 'right'): Promise<Layout> {
+/**
+ * 한 줄로 그리면 칸에 이 배율보다 작게 들어갈 때만 여러 줄로 접는다. 그보다 크면 글자가 읽히므로 한 줄 그대로 둔다
+ */
+const WRAP_BELOW = 0.85;
+
+/**
+ * 계획을 그래프로 배치한다. fit(그릴 칸의 크기)을 주면, 한 줄로는 칸에 너무 작게 들어가는 긴 그래프를
+ * 칸 비율에 맞춰 여러 줄로 접는다 (ELK의 graph wrapping). 접어도 더 크게 보이지 않으면 한 줄 그대로 둔다
+ */
+export async function layoutGraph(g: Graph, size = SIZE, flow: Flow = 'right', fit?: Fit): Promise<Layout> {
+  const flat = await place(g, size, flow);
+  if (!fit || fit.w <= 0 || fit.h <= 0 || !flat.nodes.length) return flat;
+  const zoom = (l: Layout) => Math.min(1, fit.w / l.width, fit.h / l.height);
+  if (zoom(flat) >= WRAP_BELOW) return flat;
+  // 여러 갈래가 있어도 접을 수 있게 MULTI_EDGE로 자른다 (SINGLE_EDGE는 선이 하나뿐인 곳에서만 자른다)
+  const wrapped = await place(g, size, flow, { 'elk.layered.wrapping.strategy': 'MULTI_EDGE', 'elk.aspectRatio': String(fit.w / fit.h) });
+  return zoom(wrapped) > zoom(flat) + 0.05 ? { ...wrapped, wrapped: true } : flat;
+}
+
+async function place(g: Graph, size: { cardW: number; cardH: number }, flow: Flow, extra: Record<string, string> = {}): Promise<Layout> {
   if (!g.nodes.length) return { width: 0, height: 0, nodes: [], edges: [] };
   const ELK = require('./vendor/elk.bundled.cjs');
   const ids = new Set(g.nodes.map(n => n.id));
   const lines = g.edges.filter(e => ids.has(e.from) && ids.has(e.to)).map(e => ({ key: `${e.from}|${e.to}`, from: e.from, to: e.to }));
   const out = await new ELK().layout({
     id: 'plan',
-    layoutOptions: flow === 'down' ? { ...OPTIONS, 'elk.direction': 'DOWN', 'elk.layered.spacing.nodeNodeBetweenLayers': '40' } : OPTIONS,
+    layoutOptions: { ...(flow === 'down' ? { ...OPTIONS, 'elk.direction': 'DOWN', 'elk.layered.spacing.nodeNodeBetweenLayers': '40' } : OPTIONS), ...extra },
     children: g.nodes.map(n => ({ id: n.id, width: size.cardW, height: size.cardH })),
     edges: lines.map(l => ({ id: l.key, sources: [l.from], targets: [l.to] })),
   });
