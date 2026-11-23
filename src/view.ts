@@ -91,7 +91,16 @@ export type Change = { at: string; by: 'ai' | 'human'; why?: string; first: bool
 /** stalled: 끝나지 않은 노드가 있는데 그 노드를 하던 세션이 모두 닫혔다 */
 export type WorkState = 'waiting' | 'blocked' | 'doing' | 'stalled' | 'done' | 'idle';
 
-export type SessionInfo = { label: string; tool: string; terminal?: string; herdrPane?: string; /** 이 세션이 마지막으로 무언가를 적은 시각 */ seenAt?: string };
+export type SessionInfo = {
+  label: string;
+  tool: string;
+  terminal?: string;
+  herdrPane?: string;
+  /** 이 세션이 마지막으로 무언가를 적은 시각 */
+  seenAt?: string;
+  /** 이 세션이 일하던 폴더. 세션이 닫혔을 때 이어서 하는 방법을 보여 주는 데 쓴다 */
+  cwd?: string;
+};
 
 export type WorkView = {
   work: string;
@@ -372,7 +381,14 @@ export function sessionsOf(dir: string, events: Event[]): Record<string, Session
     const key = e.session;
     if (!key || out[key]) continue;
     const s = readSession(dir, key);
-    out[key] = { label: sessionLabel(s, key), tool: s?.tool ?? 'unknown', ...(s?.terminal ? { terminal: s.terminal } : {}), ...(s?.herdrPane ? { herdrPane: s.herdrPane } : {}), ...(s?.seenAt ? { seenAt: s.seenAt } : {}) };
+    out[key] = {
+      label: sessionLabel(s, key),
+      tool: s?.tool ?? 'unknown',
+      ...(s?.terminal ? { terminal: s.terminal } : {}),
+      ...(s?.herdrPane ? { herdrPane: s.herdrPane } : {}),
+      ...(s?.seenAt ? { seenAt: s.seenAt } : {}),
+      ...(s?.cwd ? { cwd: s.cwd } : {}),
+    };
   }
   return out;
 }

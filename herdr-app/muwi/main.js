@@ -110,6 +110,10 @@ function roundPath(b, pts, r) {
   return b.line_to(lx, ly);
 }
 
+/** Claude 세션 id 모양. 이 모양이면 claude --resume <id>로 그 대화를 다시 열 수 있다 */
+const CLAUDE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SAMPLE_CLOSED = "0f0e0d0c-0b0a-4909-8807-060504030201";
+
 /** herdr-app check가 그래프를 그리는 코드까지 확인할 수 있게 하는 작은 견본 */
 const SAMPLE = (() => {
   const node = (id, title, status, x, extra = {}) => ({
@@ -128,7 +132,7 @@ const SAMPLE = (() => {
     node("read", "티켓·기획 읽기", "done", 28, { note: "요구사항 2건", skills: [{ skill: "spec-reader", state: "read", count: 1, via: "tool" }] }),
     node("impl", "구현", "doing", 308, { session: "s1", attempts: 3, who, tries, skills: tries[2].skills, run: "session", show: "pane", offPlan: true,
       spawn: { at: "2026-01-01T00:00:00.000Z", terminal: "t9", task: "견본으로 맡긴 말" }, spawns: [{ at: "2026-01-01T00:00:00.000Z", terminal: "t9", task: "견본으로 맡긴 말" }] }),
-    node("pr", "PR 올리기", "waiting", 588, { note: "PR 올릴까요?", seen: false, closed: true, session: "s1", flags: [{ at: "2026-01-01T00:00:00.000Z", text: "견본" }] }),
+    node("pr", "PR 올리기", "waiting", 588, { note: "PR 올릴까요?", seen: false, closed: true, session: SAMPLE_CLOSED, flags: [{ at: "2026-01-01T00:00:00.000Z", text: "견본" }] }),
   ];
   const work = {
     work: "sample", title: "견본 작업", request: "견본", state: "waiting", updatedAt: "2026-01-01T00:00:00.000Z",
@@ -147,7 +151,7 @@ const SAMPLE = (() => {
       ...work, nodes, edges: [], outside: [], compacts: [], flags: [], lead: "s1", helpers: { sessions: 1, subagents: 2 },
       gone: [{ at: "2026-01-01T00:00:00.000Z", id: "lint", title: "lint", status: "todo", why: "견본" }],
       changes: [{ at: "2026-01-01T00:00:00.000Z", by: "human", why: "견본", first: false, added: ["pr"], removed: [], changed: [] }],
-      sessions: { s1: { label: "t1", tool: "claude", terminal: "t1" } },
+      sessions: { s1: { label: "t1", tool: "claude", terminal: "t1" }, [SAMPLE_CLOSED]: { label: "t2", tool: "claude", terminal: "t2", cwd: "/tmp/sample repo" } },
       layout: {
         width: 840, height: 118,
         nodes: nodes.map((n, i) => ({ id: n.id, x: 28 + i * 280, y: 28, w: 224, h: 62 })),
@@ -602,6 +606,50 @@ export default class Muwi extends View {
       .child(div().text_color(t.blocked).font_semibold().child("기록을 읽지 못했어요"))
       .child(div().text_color(t.muted).child(this.error ?? ""))
       .child(div().text_color(t.dim).child("Claude Code 세션에서 muwi setup을 실행하면 ~/.local/bin/muwi가 생겨요 (Windows는 muwi.cmd)."));
+  }
+
+  /**
+   * 하던 세션의 터미널이 닫힌 노드를 이어서 하는 방법. 그 세션에 맞춘 예시를 복사할 수 있게 보여 준다:
+   * 새 대화에서 할 말(작업·노드 이름)과 그 세션이 일하던 폴더, Claude 세션이면 그 대화를 그대로 다시 여는 명령
+   */
+  resumeHints(t, view, n) {
+    const key = n.session ?? null;
+    const s = key ? view.sessions?.[key] : null;
+    const folder = s?.cwd ?? view.cwd ?? null;
+    const tool = s?.tool === "codex" ? "codex" : "claude";
+    const note = (text) => div().text_size(11).text_color(t.dim).child(text);
+    const rows = [];
+    if (n.status !== "done") {
+      rows.push(note(`${folder ? `${this.shortPath(folder)}에서 ` : ""}새 대화(${tool})를 열고 이렇게 말하세요`));
+      rows.push(this.copyRow(t, `say-${n.id}`, `${view.work} 작업의 ${n.id} 노드 이어서 해줘`));
+    }
+    if (s?.tool === "claude" && CLAUDE_ID.test(key)) {
+      // 폴더에 공백이나 한글이 있으면 따옴표로 감싼다
+      const q = (p) => (/^[A-Za-z0-9_./~:\\-]+$/.test(p) ? p : `'${p.replace(/'/g, "'\\''")}'`);
+      rows.push(note(n.status === "done" ? "터미널에서 실행하면 그 대화가 그대로 열려요" : "하던 대화를 그대로 다시 열려면 터미널에서"));
+      rows.push(this.copyRow(t, `resume-${n.id}`, `${folder ? `cd ${q(folder)} && ` : ""}claude --resume ${key}`));
+    }
+    return rows;
+  }
+
+  /** 복사할 수 있는 한 줄 (할 말이나 명령). 누르면 클립보드에 넣고 알린다 */
+  copyRow(t, id, text) {
+    return h_flex().gap(6).items_start()
+      .child(div().flex_1().min_w(0).px(7).py(4).rounded(5).bg(t.raised).border_1().border_color(t.border)
+        .text_size(11).text_color(t.foreground).child(text))
+      .child(h_flex().id(`copy-${id}`).h(24).px(8).flex_none().items_center().rounded(5).bg(t.raised).border_1().border_color(t.border)
+        .text_size(10.5).text_color(t.muted).cursor_pointer().hover((st) => st.bg(t.hover).text_color(t.foreground))
+        .on_click((_e, cx) => {
+          cx.write_to_clipboard(text);
+          notify({ title: "복사했어요", body: text, level: "success", timeout: 2500 });
+        })
+        .child("복사"));
+  }
+
+  /** 홈 폴더는 ~로 줄여 보여 준다 */
+  shortPath(p) {
+    const h = checking() ? "" : home();
+    return h && p.startsWith(h) ? `~${p.slice(h.length)}` : p;
   }
 
   /** 키보드가 있는 세션이 계획 없이 일할 때 그래프 자리 */
@@ -1229,7 +1277,10 @@ export default class Muwi extends View {
         .when(view.outside.length > 0, (el) => el.child(v_flex().gap(3).child(label("노드 밖에서 읽은 skill"))
           .child(line([...new Set(view.outside.map((s) => s.skill))].join(", ")))))
         .when(loose.length > 0, (el) => el.child(v_flex().gap(3).child(label("문제 표시"))
-          .children(loose.map((f) => line(`⚑ ${f.text}`, t.blocked)))));
+          .children(loose.map((f) => line(`⚑ ${f.text}`, t.blocked)))))
+        .when(view.state === "stalled", (el) => el.child(v_flex().gap(5).child(label("이어서 하려면"))
+          .child(div().text_size(11).text_color(t.dim).child(`하던 세션이 모두 닫혔어요. ${view.cwd ? `${this.shortPath(view.cwd)}에서 ` : ""}새 대화를 열고 이렇게 말하세요`))
+          .child(this.copyRow(t, "say-work", `${view.work} 작업 이어서 해줘`))));
     }
 
     const color = n.closed ? t.muted : c[n.status];
@@ -1281,6 +1332,8 @@ export default class Muwi extends View {
     };
     const tries = n.tries ?? [];
     const running = n.status === "doing" && !n.closed;
+    // 하던 세션의 터미널이 닫혔으면 그 세션에 맞춰 이어 하는 방법을 보여 준다
+    const resume = n.closed || (terminal && !this.alive(terminal)) ? this.resumeHints(t, view, n) : [];
     const times = [
       n.startedAt ? `${clock(n.startedAt)} 시작` : null,
       n.spentMs > 0 ? `${dur(this.spent(n.spentMs, running, now))} 작업` : null,
@@ -1293,7 +1346,7 @@ export default class Muwi extends View {
           .child(this.pill(t, n.closed ? `멈춤 · ${STATUS_NAME[n.status]}이던 중` : STATUS_NAME[n.status], n.status === "todo" ? t.muted : color))
           .child(div().min_w(0).truncate().text_size(10.5).text_color(t.dim).child(n.id))))
       .when(Boolean(n.closed), (el) => el.child(v_flex().gap(3).child(label("세션이 닫힘"))
-        .child(line("이 노드를 하던 세션이 닫혔어요. 일이 끝났는지는 알 수 없어요. 이어서 하려면 새 대화에서 이 작업을 이어 달라고 하면 돼요."))))
+        .child(line("이 노드를 하던 세션이 닫혔어요. 일이 끝났는지는 알 수 없어요. 이어서 하는 방법은 아래에 있어요."))))
       .when(Boolean(n.note), (el) => el.child(v_flex().gap(3)
         .child(label({ waiting: "기다리는 것", blocked: "막힌 이유", done: "결과" }[n.status] ?? "메모"))
         .child(line(n.note, n.status === "done" ? t.foreground : color))))
@@ -1308,11 +1361,12 @@ export default class Muwi extends View {
             // pane이 있으면 그 pane으로 가고, pane 없이 떠 있는 세션이면 그 자리에서 들여다본다
             .on_click(() => this.go(terminal))
             .child("터미널로 가기"))))
-        .when(Boolean(whoText && terminal) && !this.alive(terminal), (el) => el.child(line(n.closed ? "터미널이 닫혔어요" : "터미널이 닫혔어요. 이어서 하려면 새 대화에서 이 작업을 이어 달라고 하면 돼요.", t.dim)))
+        .when(Boolean(whoText && terminal) && !this.alive(terminal), (el) => el.child(line("터미널이 닫혔어요", t.dim)))
         .when(Boolean(plannedText), (el) => el.child(line(
           n.offPlan ? `${plannedText} · 계획과 다르게 했어요`
             : n.runUnknown ? `${plannedText} · 이 세션에서 훅이 돌지 않아 계획대로 했는지 확인하지 못했어요` : plannedText,
           n.offPlan ? t.blocked : t.dim)))))
+      .when(resume.length > 0, (el) => el.child(v_flex().gap(5).child(label(n.status === "done" ? "그 대화를 다시 열려면" : "이어서 하려면")).children(resume)))
       .child(v_flex().gap(4).child(label(tries.length > 1 ? "회차별 기록" : "읽은 skill"))
         .when(n.attempts === 0, (el) => el.child(line("아직 시작하지 않았어요", t.dim)))
         .children(tries.length > 1
