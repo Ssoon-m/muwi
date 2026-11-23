@@ -124,6 +124,9 @@ const st = JSON.parse(fs.readFileSync(${JSON.stringify(stateFile)}, 'utf8'));
 const layouts = ${JSON.stringify(path.join(app, 'layouts'))};
 const save = () => fs.writeFileSync(${JSON.stringify(stateFile)}, JSON.stringify(st));
 const [first, cmd, raw] = process.argv.slice(2);
+// 진짜 앱처럼 레이아웃마다 사람이 고른 것(테마, 칸 크기)을 layouts/.state/<이름>.json에 둔다:
+// 복제하면 따라가고, layout.set을 하면 지워지고, 파일을 직접 고치면 남는다
+const clicks = (name) => path.join(layouts, '.state', name + '.json');
 if (!st.up) { console.error('Herdr app is not running'); process.exit(1); }
 if (first === '--version') { console.log('herdr-app ' + st.version); process.exit(0); }
 if (first === 'status') { console.log(JSON.stringify({ layout: st.layout, errors: [] })); process.exit(0); }
@@ -134,18 +137,29 @@ if (first === 'do' && cmd === 'layout.clone') {
   const tree = JSON.parse(fs.readFileSync(path.join(layouts, a.name + '.json'), 'utf8'));
   tree.cloned_from = { name: a.name, version: st.version };
   fs.writeFileSync(to, JSON.stringify(tree, null, 2));
+  if (fs.existsSync(clicks(a.name))) fs.copyFileSync(clicks(a.name), clicks(a.as));
+  st.clones = (st.clones || 0) + 1;
   st.layout = a.as; save(); console.log('{"ok":true}'); process.exit(0);
 }
 if (first === 'do' && cmd === 'layout.set') {
   // 보이는 레이아웃의 나무를 바꾼다. 앱처럼 키 순서를 바꿔 다시 쓴다
   const sort = (v) => Array.isArray(v) ? v.map(sort) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().reverse().map(k => [k, sort(v[k])])) : v;
   fs.writeFileSync(path.join(layouts, st.layout + '.json'), JSON.stringify(sort(a.layout), null, 2));
+  fs.rmSync(clicks(st.layout), { force: true });
   st.sets = (st.sets || 0) + 1; save(); console.log('{"ok":true}'); process.exit(0);
 }
 if (first === 'do' && cmd === 'layout.resize') { st.resized = a; save(); console.log('{"ok":true}'); process.exit(0); }
 if (first === 'do' && cmd === 'layout.switch') {
   if (!fs.existsSync(path.join(layouts, a.name + '.json'))) { console.error('no layout'); process.exit(1); }
+  st.switches = (st.switches || 0) + 1;
   st.layout = a.name; save(); console.log('{"ok":true}'); process.exit(0);
+}
+if (first === 'do' && cmd === 'app.theme') {
+  // 보이는 레이아웃에 테마를 고른다 (그 테마의 밝기 쪽 절반)
+  fs.mkdirSync(path.dirname(clicks(st.layout)), { recursive: true });
+  const old = fs.existsSync(clicks(st.layout)) ? JSON.parse(fs.readFileSync(clicks(st.layout), 'utf8')) : { nodes: {} };
+  old.theme = { light: 'paper', dark: 'graphite', ...old.theme, [a.name === 'paper' ? 'light' : 'dark']: a.name };
+  fs.writeFileSync(clicks(st.layout), JSON.stringify(old)); console.log('{"ok":true}'); process.exit(0);
 }
 console.error('unknown command'); process.exit(1);
 `);
@@ -156,7 +170,14 @@ console.error('unknown command'); process.exit(1);
     const file = path.join(app, 'layouts', `${name}.json`);
     return fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, 'utf8')) as LayoutNode) : null;
   };
-  return { home, app, env, records, state, set: (patch: object) => write({ ...state(), ...patch }), layout };
+  /** 사람이 지금 레이아웃에서 테마를 고른다 (Herdr의 테마 메뉴) */
+  const pickTheme = (name: string) => assert.equal(spawnSync(process.execPath, [bin, 'do', 'app.theme', JSON.stringify({ name })]).status, 0);
+  /** 그 레이아웃에서 고른 테마 (없으면 undefined) */
+  const themeOf = (name: string) => {
+    const file = path.join(app, 'layouts', '.state', `${name}.json`);
+    return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')).theme : undefined;
+  };
+  return { home, app, env, records, state, set: (patch: object) => write({ ...state(), ...patch }), layout, pickTheme, themeOf };
 }
 
 test('muwi layout: 지금 레이아웃을 복제해 muwi 칸을 넣고 바꾼다. 다시 하면 그대로 두고, 되돌리면 복제본을 지운다', () => {
@@ -165,9 +186,13 @@ test('muwi layout: 지금 레이아웃을 복제해 muwi 칸을 넣고 바꾼다
     (({ app, shown, muwi, canList, canGraph }) => ({ app, shown, muwi, canList, canGraph }))(screenState(h.records, h.env)),
     { app: true, shown: 'main', muwi: false, canList: true, canGraph: true },
   );
+  // 원래 레이아웃에서 고른 테마는 복제본에도 그대로 남는다 (복제 뒤 파일을 직접 고치고 layout.set은 쓰지 않는다)
+  h.pickTheme('atom-one-dark');
   const applied = applyLayout(h.records, h.env);
   assert.deepEqual(applied, { name: 'muwi', base: 'main', list: true, graph: true, graphAt: 'bottom' });
   assert.equal(h.state().layout, 'muwi');
+  assert.equal(h.state().sets, undefined);
+  assert.deepEqual(h.themeOf('muwi'), { light: 'paper', dark: 'atom-one-dark' });
   const clone = h.layout('muwi')!;
   assert.ok(hasMuwi(clone));
   assert.deepEqual(clone.cloned_from, { name: 'main', version: '0.1.16' });
@@ -185,9 +210,11 @@ test('muwi layout: 지금 레이아웃을 복제해 muwi 칸을 넣고 바꾼다
   assert.deepEqual(removeLayout(h.records, h.env), { deleted: false, none: true });
 });
 
-test('muwi layout: Herdr가 업데이트되면 새 모양으로 다시 복제한다. 손으로 고친 복제본은 지우지 않는다', () => {
+test('muwi layout: Herdr가 업데이트되면 복제본을 그 자리에서 새 모양으로 고친다. 손으로 고친 복제본은 지우지 않는다', () => {
   const h = fakeApp();
   applyLayout(h.records, h.env);
+  // muwi 레이아웃에서 테마를 골랐다
+  h.pickTheme('atom-one-dark');
   h.set({ version: '0.1.17' });
   const s = screenState(h.records, h.env);
   assert.equal(s.outdated, true);
@@ -196,6 +223,11 @@ test('muwi layout: Herdr가 업데이트되면 새 모양으로 다시 복제한
   assert.equal(again.refreshed, true);
   assert.deepEqual(h.layout('muwi')!.cloned_from, { name: 'main', version: '0.1.17' });
   assert.equal(readLayoutRecord(h.records)!.version, '0.1.17');
+  assert.equal(screenState(h.records, h.env).outdated, false);
+  // 지우고 다시 복제하지 않는다: 레이아웃을 바꾸지 않고(번쩍이지 않고), 고른 테마도 남는다
+  assert.deepEqual([h.state().clones, h.state().switches, h.state().sets], [1, undefined, undefined]);
+  assert.equal(h.state().layout, 'muwi');
+  assert.deepEqual(h.themeOf('muwi'), { light: 'paper', dark: 'atom-one-dark' });
 
   // 사람이 복제본을 고쳤다: 업데이트돼도 다시 만들지 않고, 되돌려도 지우지 않는다
   const file = path.join(h.app, 'layouts', 'muwi.json');
@@ -232,12 +264,14 @@ test('muwi layout --graph: 그래프 자리를 바꾸면 다시 만들고, 고�
   const h = fakeApp();
   assert.equal(applyLayout(h.records, h.env, { graphAt: 'right' }).graphAt, 'right');
   assert.equal(find(h.layout('muwi')!, 'muwi-split')!.type, 'row');
-  // 자리만 바꿀 때는 레이아웃을 바꾸지 않고 그 자리에서 옮긴다 (layout.set). 화면이 번쩍이지 않는다
-  const switches = () => h.state().layout;
+  // 자리만 바꿀 때는 레이아웃을 바꾸지 않고 파일을 그 자리에서 고친다. 화면이 번쩍이지 않고,
+  // layout.set을 쓰지 않으니 그 레이아웃에서 고른 테마와 칸 크기가 지워지지 않는다
+  h.pickTheme('atom-one-dark');
   const moved = applyLayout(h.records, h.env, { graphAt: 'top' });
   assert.deepEqual([moved.moved, moved.graphAt, moved.refreshed], [true, 'top', undefined]);
-  assert.equal(switches(), 'muwi');
-  assert.equal(h.state().sets, 1);
+  assert.equal(h.state().layout, 'muwi');
+  assert.deepEqual([h.state().sets, h.state().switches, h.state().clones], [undefined, undefined, 1]);
+  assert.deepEqual(h.themeOf('muwi'), { light: 'paper', dark: 'atom-one-dark' });
   assert.deepEqual(find(h.layout('muwi')!, 'muwi-split')!.children!.map(c => c.id), ['muwi-graph', 'work-body']);
   assert.equal(find(h.layout('muwi')!, 'muwi-split')!.type, 'column');
   // 가로에서 세로로 바뀌었으니 그 방향의 기본 크기로 맞춘다

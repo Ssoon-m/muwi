@@ -266,6 +266,33 @@ function layoutError(env: NodeJS.ProcessEnv, name: string, since: number): strin
   return null;
 }
 
+/**
+ * 레이아웃 파일을 그 자리에서 고친다. 앱이 바로 다시 읽으므로 레이아웃을 바꾸지 않아도 된다.
+ * layout.set은 쓰지 않는다: 그 레이아웃에서 사람이 고른 것(테마, 칸 크기, 고른 탭. layouts/.state)을 모두 지운다.
+ * 파일을 고치면 고친 칸의 값만 파일을 따르고 나머지는 그대로 남는다.
+ * 앱이 받아들이지 않으면 before(전 내용)로 되돌리고 그 이유를 돌려준다
+ */
+function writeLayout(env: NodeJS.ProcessEnv, name: string, tree: LayoutNode, before?: string): string | null {
+  const file = layoutPath(env, name);
+  const put = (text: string) => {
+    const tmp = `${file}.muwi-tmp`;
+    fs.writeFileSync(tmp, text);
+    fs.renameSync(tmp, file);
+  };
+  const since = Date.now();
+  put(JSON.stringify(tree, null, 2) + '\n');
+  pause(1200);
+  const problem = layoutError(env, name, since);
+  if (problem && before !== undefined) put(before);
+  return problem;
+}
+
+/** 그래프 칸이 가로·세로를 바꿨으면 그 방향의 기본 크기로 맞춘다 */
+function fitGraph(env: NodeJS.ProcessEnv, was: GraphAt, where: GraphAt) {
+  if ((was === 'right') === (where === 'right')) return;
+  herdrApp(['do', 'layout.resize', JSON.stringify({ id: GRAPH_ID, px: where === 'right' ? GRAPH_SIDE_PX : GRAPH_PX })], env);
+}
+
 function freeName(env: NodeJS.ProcessEnv, record: LayoutRecord | null): string {
   const ours = (name: string) => {
     if (record?.name !== name) return false;
@@ -283,8 +310,8 @@ export type Applied = { name: string; base: string; list: boolean; graph: boolea
 
 /**
  * 지금 레이아웃을 복제해 muwi 칸을 넣고 그 레이아웃으로 바꾼다.
- * 이미 muwi 칸이 있으면 그대로 둔다. 우리 복제본이 옛 모양이거나(Herdr 업데이트, muwi 배치 변경)
- * 그래프 자리를 바꾸라고 하면(graphAt) 원래 레이아웃에서 다시 복제한다.
+ * 이미 muwi 칸이 있으면 그대로 둔다. 우리 복제본이 옛 모양이면(Herdr 업데이트, muwi 배치 변경) 원래 레이아웃의
+ * 새 모양으로, 그래프 자리를 바꾸라고 하면(graphAt) 그 자리로, 복제본 파일을 그 자리에서 고친다.
  */
 export function applyLayout(dir: string, env: NodeJS.ProcessEnv = process.env, o: { graphAt?: GraphAt } = {}): Applied {
   const state = screenState(dir, env);
@@ -293,26 +320,21 @@ export function applyLayout(dir: string, env: NodeJS.ProcessEnv = process.env, o
   const was = state.record?.graphAt ?? 'bottom';
   // 자리를 말하지 않으면 전에 고른 자리를 쓴다
   const where = o.graphAt ?? state.record?.graphAt ?? 'bottom';
-  let base = state.shown;
-  let refreshed = false;
-  let moved = false;
+  const base = state.shown;
   // 그래프 자리만 바꾸는 것이면 지금 레이아웃에서 그 칸만 옮긴다. 레이아웃을 바꾸지 않으니 화면이 번쩍이지 않는다
   if (state.muwi && ours && where !== was && !state.outdated && !state.edited) return moveGraph(dir, env, state.record!, where);
   if (state.muwi) {
-    moved = ours && where !== was;
+    const moved = ours && where !== was;
     if (!state.outdated && !moved) {
       if (o.graphAt && !ours) throw new ScreenError(`${state.shown} 레이아웃은 muwi layout이 만든 것이 아니라 그래프 자리를 바꾸지 못해요. 레이아웃 파일에서 muwi 칸을 옮기거나, muwi 칸이 없는 레이아웃에서 muwi layout --graph ${where}을 실행해요.`);
       return { name: state.shown, base: state.record?.base ?? state.shown, list: true, graph: true, graphAt: was, already: true };
     }
-    // Herdr가 업데이트됐거나 muwi의 배치가 바뀌었다. 우리 복제본을 다시 만든다 (사람이 손으로 고쳤으면 그대로 둔다)
+    // Herdr가 업데이트됐거나 muwi의 배치가 바뀌었다. 우리 복제본을 그 자리에서 새 모양으로 고친다 (사람이 손으로 고쳤으면 그대로 둔다)
     if (state.edited) {
       const why = moved ? '그래프 자리를 바꾸려고 했지만' : state.outdatedBy === 'herdr' ? 'Herdr가 업데이트됐지만' : 'muwi 화면 배치가 바뀌었지만';
       throw new ScreenError(`${why} ${state.shown} 레이아웃을 손으로 고친 것 같아 다시 만들지 않았어요. 고친 복제본은 남겨 두고 새로 만들려면 muwi layout --remove 뒤에 muwi layout을 실행해요.`);
     }
-    base = state.record!.base;
-    switchTo(env, base);
-    fs.rmSync(layoutPath(env, state.shown), { force: true });
-    refreshed = !moved;
+    return rebuild(dir, env, state, where);
   }
   const from = readTree(env, base);
   if (!from) throw new ScreenError(`${base} 레이아웃 파일을 읽지 못했어요.`);
@@ -329,15 +351,10 @@ export function applyLayout(dir: string, env: NodeJS.ProcessEnv = process.env, o
   const copy = waitForTree(env, name);
   if (!copy) throw new ScreenError(`복제한 레이아웃을 읽지 못했어요: ${file}`);
 
+  // 복제하면 원래 레이아웃에서 사람이 고른 것(테마, 칸 크기)도 따라온다. 파일을 고쳐도 그것은 남는다
   const placed = placeMuwi(copy.tree, where);
-  const text = JSON.stringify(placed.tree, null, 2) + '\n';
-  const since = Date.now();
-  const tmp = `${file}.muwi-tmp`;
-  fs.writeFileSync(tmp, text);
-  fs.renameSync(tmp, file);
   // 앱이 받아들이지 않았으면 원래대로 돌린다
-  pause(1200);
-  const problem = layoutError(env, name, since);
+  const problem = writeLayout(env, name, placed.tree);
   if (problem) {
     switchTo(env, base);
     fs.rmSync(file, { force: true });
@@ -359,7 +376,43 @@ export function applyLayout(dir: string, env: NodeJS.ProcessEnv = process.env, o
     at: new Date().toISOString(),
   };
   writeJson(recordFile(dir), record);
-  return { name, base, list: placed.list, graph: placed.graph, graphAt: where, ...(refreshed ? { refreshed } : {}), ...(moved ? { moved } : {}) };
+  return { name, base, list: placed.list, graph: placed.graph, graphAt: where };
+}
+
+/**
+ * Herdr가 업데이트됐거나 muwi의 배치가 바뀌었다: 원래 레이아웃의 새 모양으로 우리 복제본을 그 자리에서 다시 쓴다.
+ * 복제본을 지우고 다시 복제하면 이 레이아웃에서 사람이 고른 것(테마, 칸 크기, 고른 탭)이 사라지므로 그러지 않는다.
+ * 레이아웃을 바꾸지 않으니 화면도 번쩍이지 않는다
+ */
+function rebuild(dir: string, env: NodeJS.ProcessEnv, state: Screen, where: GraphAt): Applied {
+  const record = state.record!;
+  const was = record.graphAt ?? 'bottom';
+  const from = readTree(env, record.base);
+  if (!from) throw new ScreenError(`${record.base} 레이아웃 파일을 읽지 못했어요.`);
+  const placed = placeMuwi(from.tree, where);
+  if (!placed.list && !placed.graph) {
+    throw new ScreenError(`${record.base} 레이아웃에 muwi 칸을 넣을 자리가 없어졌어요. muwi layout --remove 뒤에 muwi open으로 터미널 옆에 열어요.`);
+  }
+  const before = readTree(env, record.name);
+  const version = state.version ?? before?.tree.cloned_from?.version ?? record.version;
+  // Herdr가 복제할 때처럼 어디서 복제했는지 적는다 (다음 업데이트를 알아보는 데 쓴다)
+  const tree: LayoutNode = { ...placed.tree, cloned_from: { name: record.base, ...(version ? { version } : {}) } };
+  const problem = writeLayout(env, record.name, tree, before?.text);
+  if (problem) throw new ScreenError(`Herdr 앱이 새 모양을 받아들이지 않아 원래대로 돌렸어요: ${problem}`);
+  fitGraph(env, was, where);
+  const next: LayoutRecord = {
+    ...record,
+    ...(version ? { version } : {}),
+    hash: treeHash(tree),
+    hashKind: 'tree',
+    shape: PLACE_VERSION,
+    list: placed.list,
+    graph: placed.graph,
+    graphAt: where,
+    at: new Date().toISOString(),
+  };
+  writeJson(recordFile(dir), next);
+  return { name: record.name, base: record.base, list: placed.list, graph: placed.graph, graphAt: where, ...(where !== was ? { moved: true } : { refreshed: true }) };
 }
 
 /** 레이아웃 나무에서 muwi가 넣은 묶음(터미널 영역 + 그래프)을 풀어 터미널 영역만 그 자리에 돌려놓는다 */
@@ -382,8 +435,8 @@ export function unplaceGraph(tree: LayoutNode): LayoutNode {
 }
 
 /**
- * 지금 보이는 muwi 레이아웃에서 그래프 칸만 다른 자리로 옮긴다 (layout.set). 레이아웃을 바꾸지 않아 바로 그 자리에 붙는다.
- * 가로·세로가 바뀌면 그 방향의 기본 크기로 맞춘다
+ * 지금 보이는 muwi 레이아웃에서 그래프 칸만 다른 자리로 옮긴다. 레이아웃 파일을 그 자리에서 고쳐서(writeLayout)
+ * 레이아웃을 바꾸지 않고, 사람이 고른 테마와 칸 크기도 지킨다. 가로·세로가 바뀌면 그 방향의 기본 크기로 맞춘다
  */
 function moveGraph(dir: string, env: NodeJS.ProcessEnv, record: LayoutRecord, where: GraphAt): Applied {
   const file = readTree(env, record.name);
@@ -393,12 +446,9 @@ function moveGraph(dir: string, env: NodeJS.ProcessEnv, record: LayoutRecord, wh
   const graph = trailTo(placed.tree, n => n.id === GRAPH_ID)?.at(-1);
   if (!graph) throw new ScreenError('그래프 칸을 옮길 자리를 찾지 못했어요.');
   if (content) graph.content = content; // 사이드바 목록이 있으니 그래프만 그리는 모양 그대로
-  const set = herdrApp(['do', 'layout.set', JSON.stringify({ layout: placed.tree })], env);
-  if (!set.ok) throw new ScreenError(`그래프 칸을 옮기지 못했어요: ${(set.err || set.out).trim()}`);
-  const was = record.graphAt ?? 'bottom';
-  if ((was === 'right') !== (where === 'right')) {
-    herdrApp(['do', 'layout.resize', JSON.stringify({ id: GRAPH_ID, px: where === 'right' ? GRAPH_SIDE_PX : GRAPH_PX })], env);
-  }
+  const problem = writeLayout(env, record.name, placed.tree, file.text);
+  if (problem) throw new ScreenError(`Herdr 앱이 옮긴 레이아웃을 받아들이지 않아 원래대로 돌렸어요: ${problem}`);
+  fitGraph(env, record.graphAt ?? 'bottom', where);
   writeJson(recordFile(dir), { ...record, graphAt: where, hash: treeHash(placed.tree), hashKind: 'tree', at: new Date().toISOString() });
   return { name: record.name, base: record.base, list: record.list, graph: true, graphAt: where, moved: true };
 }
