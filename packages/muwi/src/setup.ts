@@ -85,6 +85,12 @@ function wrapper(root: string, platform: NodeJS.Platform): string {
  * Windows의 PowerShell·cmd에서 쓸 muwi.cmd. setup을 실행한 Node로 cli.ts를 바로 실행한다.
  * 그 Node가 없어졌으면 PATH의 node를 쓴다 (Windows의 Herdr 앱이 띄운 프로그램도 사용자 PATH를 받는다)
  */
+/** 설치된 곳의 명령 파일: npm으로 받은 사본은 .js로 바꾼 cli.js, 저장소에서는 cli.ts */
+const cliFile = (root: string) => {
+  const js = path.join(root, 'src', 'cli.js');
+  return fs.existsSync(js) ? js : path.join(root, 'src', 'cli.ts');
+};
+
 function cmdWrapper(root: string): string {
   return [
     '@echo off',
@@ -92,7 +98,7 @@ function cmdWrapper(root: string): string {
     'setlocal',
     `set "MUWI_NODE=${process.execPath}"`,
     'if not exist "%MUWI_NODE%" set "MUWI_NODE=node"',
-    `"%MUWI_NODE%" "${path.join(root, 'src', 'cli.ts')}" %*`,
+    `"%MUWI_NODE%" "${cliFile(root)}" %*`,
     'exit /b %ERRORLEVEL%',
     '',
   ].join('\r\n');

@@ -4,8 +4,12 @@
   "description": "muwi 모노레포: packages/muwi(코어)와 packages/herdr-muwi(Herdr 앱 화면)",
   "license": "MIT",
   "packageManager": "pnpm@10.33.4",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
-    "test": "pnpm -r --workspace-concurrency=1 test"
+    "test": "pnpm -r --workspace-concurrency=1 test",
+    "build": "node scripts/build.mjs",
+    "check:package": "node scripts/check-package.mjs"
   }
 }
