@@ -200,3 +200,40 @@ test('커넥터 규격: 모든 도구에 커넥터가 있고, 그 도구의 훅�
   assert.equal(adapterOf('pi')!.can.subagents, false);
   assert.deepEqual(gaps({ subagents: true, start: true, skills: true }), []);
 });
+
+test('Gemini CLI: 사건 이름이 달라도 같은 사건으로 바꾸고, 막을 때는 종료 코드 2와 표준 오류로 답한다', () => {
+  const home = tmp('gemini-home');
+  const dir = tmp('gemini-runs');
+  const env = { ...ENV(home), HC_TERMINAL_ID: 't5' } as NodeJS.ProcessEnv;
+  const g = ADAPTERS.gemini;
+  // 서브에이전트를 알려 주는 사건이 없다: --sub로 밝힌 노드만 서브에이전트로 나온다
+  assert.deepEqual(g.can, { subagents: false, start: true, skills: true });
+  // 셸 명령에 세션 id를 넘겨주지 않아서 터미널을 세션으로 본다
+  const edit = g.from({ hook_event_name: 'BeforeTool', session_id: 'g1', tool_name: 'write_file', tool_input: { file_path: FILE } }, 'nudge', env)!;
+  assert.deepEqual([edit.kind, edit.session, edit.native], ['before-edit', 'hc-t5', 'g1']);
+  assert.equal(g.from({ hook_event_name: 'BeforeAgent', session_id: 'g1', prompt: '다음 일' }, 'record', env)!.kind, 'prompt');
+  assert.equal(g.from({ hook_event_name: 'SessionStart', session_id: 'g1', source: 'startup' }, 'record', env)!.kind, 'session-start');
+  const skill = g.from({ hook_event_name: 'AfterTool', session_id: 'g1', tool_name: 'activate_skill', tool_input: { name: 'team-rules' } }, 'record', env) as any;
+  assert.deepEqual([skill.kind, skill.skill], ['skill-read', 'team-rules']);
+  // 계획 없이 고치려 하면 돌려보낸다: 종료 코드 2, 이유는 표준 오류로 (그 글이 에이전트에게 간다)
+  const denied = handleHook({ hook_event_name: 'BeforeTool', session_id: 'g1', tool_name: 'replace', tool_input: { file_path: FILE } }, dir, 'nudge', env, ROOT, 'gemini');
+  assert.equal(denied.code, 2);
+  assert.match(denied.stderr!, /계획이 아직 없어요/);
+  // 설정에 넣고 뺀다: 남의 훅과 다른 설정은 그대로
+  const settings = path.join(home, '.gemini', 'settings.json');
+  fs.mkdirSync(path.dirname(settings), { recursive: true });
+  const theirs = { theme: 'dark', hooks: { BeforeTool: [{ matcher: 'write_file', hooks: [{ type: 'command', command: '/opt/lint.sh' }] }] } };
+  fs.writeFileSync(settings, JSON.stringify(theirs));
+  runSetup({ root: ROOT, version: '0.0.0', dir, env, tools: ['gemini'] });
+  const now = JSON.parse(fs.readFileSync(settings, 'utf8'));
+  assert.equal(now.theme, 'dark');
+  assert.deepEqual(now.hooks.BeforeTool[0], theirs.hooks.BeforeTool[0]);
+  assert.deepEqual(Object.keys(now.hooks).sort(), ['AfterTool', 'BeforeAgent', 'BeforeTool', 'SessionStart']);
+  assert.match(JSON.stringify(now.hooks.BeforeTool), /hooks\/tool\.sh\\?" gemini nudge/);
+  assert.equal(now.hooks.BeforeTool.at(-1).hooks[0].timeout, 10000);
+  // 지침은 Gemini가 늘 읽는 GEMINI.md에, 사용법 skill은 skills 폴더에
+  assert.match(fs.readFileSync(path.join(home, '.gemini', 'GEMINI.md'), 'utf8'), /muwi:start/);
+  assert.ok(fs.existsSync(path.join(home, '.gemini', 'skills', 'muwi', 'SKILL.md')));
+  removeSetup(dir);
+  assert.deepEqual(JSON.parse(fs.readFileSync(settings, 'utf8')), theirs);
+});

@@ -30,6 +30,17 @@ export const qwen = shaped(
   { file: 'settings.json', wrap: 'hooks', matcher: 'regex', extra: { timeout: 10 } },
 );
 
+// ── Gemini CLI: ~/.gemini/settings.json. 사건 이름이 다르다 (BeforeTool, AfterTool, BeforeAgent). 서브에이전트를 알려 주는 사건이 없어서
+//    서브에이전트는 --sub로 밝힌 노드만 표시된다. 막을 때는 종료 코드 2와 표준 오류로 답한다 (그 글이 에이전트에게 간다). timeout은 밀리초다.
+//    셸 명령에는 세션 id를 넘겨주지 않아서 (GEMINI_SESSION_ID는 훅 프로세스에만 있다) 터미널을 세션으로 본다
+export const gemini = shaped(
+  {
+    id: 'gemini', on: { start: 'SessionStart', prompt: 'BeforeAgent', before: 'BeforeTool', after: 'AfterTool' }, deny: 'exit2',
+    tools: { edit: ['write_file', 'replace'], spawn: [], shell: ['run_shell_command'], read: ['read_file'], skill: ['activate_skill'] },
+  },
+  { file: 'settings.json', wrap: 'hooks', matcher: 'regex', extra: { timeout: 10000 } },
+);
+
 // ── Qoder CLI: ~/.qoder/settings.json. Claude Code와 도구 이름까지 같다
 export const qodercli = shaped(
   {
