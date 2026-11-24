@@ -41,7 +41,8 @@ export function fromClaude(payload: any, mode: HookMode, env: NodeJS.ProcessEnv 
   /** 서브에이전트 안에서 일어난 일이면 그 서브에이전트의 id */
   const agent: string | undefined = typeof payload.agent_id === 'string' && payload.agent_id ? payload.agent_id : undefined;
   const cwd = typeof payload.cwd === 'string' ? payload.cwd : undefined;
-  const who = { tool: 'claude' as const, session, ...(agent ? { agent } : {}), ...(cwd ? { cwd } : {}) };
+  const model = typeof payload.model === 'string' && payload.model ? payload.model : undefined;
+  const who = { tool: 'claude' as const, session, ...(agent ? { agent } : {}), ...(cwd ? { cwd } : {}), ...(model ? { model } : {}) };
 
   if (mode === 'guard') {
     return event === 'PreToolUse' && tool === 'Bash' ? { ...who, kind: 'before-command', command: payload.tool_input?.command } : null;

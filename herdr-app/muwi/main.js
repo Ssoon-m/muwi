@@ -1345,6 +1345,12 @@ export default class Muwi extends View {
       dots.push({ x: pts[0][0], y: pts[0][1], color: passed ? color : t.muted });
     }
 
+    // 이 작업에 나온 도구가 둘 이상이면 카드마다 그 노드를 한 도구를 적는다
+    const toolsUsed = new Set(Object.values(view.sessions ?? {}).map((x) => x.tool).filter((x) => x && x !== "unknown"));
+    const madeBy = (n) => {
+      const tool = toolsUsed.size > 1 && n.session ? view.sessions?.[n.session]?.tool : null;
+      return tool && tool !== "unknown" ? String(view.toolNames?.[tool] ?? tool).split(" ")[0] : null;
+    };
     const glows = [], cards = [];
     for (const p of L.nodes) {
       const n = byId[p.id];
@@ -1387,6 +1393,8 @@ export default class Muwi extends View {
             // 다시 한 노드는 눈에 띄게: 여기서 뭔가 걸렸다는 신호다
             .when(n.attempts > 1, (el) => el.child(chip(`${n.attempts}회차`, t.accent, false)))
             .when(Boolean(tag), (el) => el.child(chip(tag.text, t.muted, tag.planned)))
+            // 여러 도구가 같이 한 작업이면 이 노드를 어느 도구가 했는지 (리뷰는 Codex, 구현은 Claude처럼)
+            .when(Boolean(madeBy(n)), (el) => el.child(chip(madeBy(n), t.accent, true)))
             .when(Boolean(n.offPlan), (el) => el.child(chip("≠계획", t.blocked, false)))
             // 앞 노드가 끝나기 전에 시작했다: 그래프 흐름과 다르게 진행 중이라는 표시
             .when(Boolean(n.early), (el) => el.child(chip("순서 앞당김", t.muted, false))))
@@ -1542,7 +1550,9 @@ export default class Muwi extends View {
     const to = this.nodeTerminal(view, n);
     const sessionName = (key) => {
       const i = key ? view.sessions?.[key] : null;
-      return `${i?.label ?? ""}${i?.tool && i.tool !== "unknown" ? ` (${i.tool})` : ""}`;
+      // 어느 도구의 어떤 모델인지 (모델은 그 도구의 훅이 알려 줄 때만)
+      const made = [i?.tool && i.tool !== "unknown" ? (view.toolNames?.[i.tool] ?? i.tool) : null, i?.model].filter(Boolean).join(" · ");
+      return `${i?.label ?? ""}${made ? ` (${made})` : ""}`;
     };
     /** 회차를 누가 했는지 한 줄 */
     const whoOf = (who) => {

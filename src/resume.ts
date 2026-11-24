@@ -22,6 +22,8 @@ export type ResumeFacts = {
   launch: Record<string, string>;
   /** 이 작업을 새 대화로 이어 갈 때 띄울 명령: 계획을 낸 세션의 도구 */
   launcher: string;
+  /** 이 작업에 나오는 도구의 이름 (도구 id → 사람이 읽는 이름) */
+  toolNames: Record<string, string>;
 };
 
 /** 터미널로 대신한 세션 이름 (세션 id를 주지 않는 도구). 이 이름으로는 대화를 다시 열 수 없다 */
@@ -60,5 +62,6 @@ export function resumeFacts(v: Pick<WorkView, 'cwd' | 'sessions' | 'nodes' | 'le
     if (command) resume[key] = command;
   }
   const launcher = (v.lead && launch[v.lead]) || 'claude';
-  return { exists, resumable: Object.keys(resume), resume, launch, launcher };
+  const toolNames = Object.fromEntries(Object.values(v.sessions).map(s => toolById(s.tool)).filter(t => t !== null).map(t => [t!.id, t!.name]));
+  return { exists, resumable: Object.keys(resume), resume, launch, launcher, toolNames };
 }

@@ -107,6 +107,8 @@ export type SessionInfo = {
   seenAt?: string;
   /** 이 세션이 일하던 폴더. 세션이 닫혔을 때 이어서 하는 방법을 보여 주는 데 쓴다 */
   cwd?: string;
+  /** 그 세션이 쓰는 모델 (도구의 훅이 알려 줄 때) */
+  model?: string;
   /** 이 세션이 지금 붙어 있는 작업 */
   work?: string;
   /** Herdr가 알려 준 지금 상태: working(일하는 중), blocked(입력을 기다림), done·idle(멈춰서 다음 말을 기다림). 모르면 없다 */
@@ -436,6 +438,7 @@ export function sessionsOf(dir: string, events: Event[]): Record<string, Session
       ...(s?.herdrPane ? { herdrPane: s.herdrPane } : {}),
       ...(s?.seenAt ? { seenAt: s.seenAt } : {}),
       ...(s?.cwd ? { cwd: s.cwd } : {}),
+      ...(s?.model ? { model: s.model } : {}),
       ...(s?.work ? { work: s.work } : {}),
     };
   }

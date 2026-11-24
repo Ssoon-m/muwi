@@ -11,6 +11,8 @@ export type Session = {
   key: string;
   /** 그 세션의 도구 (integrations/tools.ts의 id). 모르면 unknown */
   tool: string;
+  /** 그 세션이 쓰는 모델 (훅이 알려 줄 때). 도중에 바꾸면 마지막 것 */
+  model?: string;
   cwd?: string;
   /** Herdr 앱의 터미널 주소 ($HC_TERMINAL_ID). 그래프에서 세션 상태를 보고 그 터미널로 갈 때 쓴다 */
   terminal?: string;
