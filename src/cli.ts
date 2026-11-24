@@ -11,7 +11,7 @@ import { markNode } from './node.ts';
 import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
 import { attach, markSettled, readSession, recentSessions, sessionKey, sessionLabel, touchSession } from './session.ts';
 import { resumeFacts } from './resume.ts';
-import { checkMod, installedTools, newestPlugin, olderThan, refreshSetup, removeSetup, runSetup } from './setup.ts';
+import { checkMod, installedTools, newestPlugin, olderThan, readInstall, refreshSetup, removeSetup, runSetup } from './setup.ts';
 import { adapterOf } from './integrations/index.ts';
 import { TOOLS, toolById } from './integrations/tools.ts';
 import { GRAPH_AT, ScreenError, applyLayout, ensurePreview, removeLayout, screenState, type GraphAt, type Screen } from './screen.ts';
@@ -65,7 +65,8 @@ const HELP = `사용법: muwi <명령>
 
   설치와 설정
   muwi setup                         터미널용 muwi 명령과 Herdr 앱 그래프 칸을 넣는다
-  muwi setup --tool <도구>[,<도구>]   그 AI 도구에 muwi 통합(지침·사용법 skill·훅)을 넣는다. muwi setup --tools로 아는 도구를 본다
+  muwi setup --tools                 아는 AI 도구와, 깔렸는지, muwi 통합을 넣었는지 본다
+  muwi setup --tool <도구>[,<도구>]   그 AI 도구에 muwi 통합(지침·사용법 skill·훅)을 넣는다
   muwi setup --all                   이 컴퓨터에 깔린 도구 전부에 넣는다 (Claude Code는 플러그인이 넣어 주므로 뺀다)
   muwi setup --claude                플러그인 없이 쓸 때: Claude Code 훅과 사용법 skill도 넣는다
   muwi setup --remove                setup으로 넣은 것을 뺀다 (muwi layout으로 바꾼 화면도 되돌린다)
@@ -498,7 +499,10 @@ function printShow(v: WorkView) {
   out(`${v.work}${v.title ? ` · ${v.title}` : ''} · ${STATE_NAME[v.state]}${between ? ` · ${between}` : ''}${v.unread ? ' · 아직 안 봄' : ''} (${v.counts.done}/${v.counts.total} 끝)`);
   if (v.request) out(`요청: ${v.request}`);
   if (v.helpers.sessions || v.helpers.subagents) {
-    const lead = v.lead ? v.sessions[v.lead]?.label ?? sessionLabel(null, v.lead) : '';
+    const who = v.lead ? v.sessions[v.lead] : undefined;
+    // 어느 도구의 어떤 모델이 계획을 냈는지 (훅이 알려 준 만큼)
+    const made = [toolById(who?.tool)?.name, who?.model].filter(Boolean).join(' · ');
+    const lead = v.lead ? `${who?.label ?? sessionLabel(null, v.lead)}${made ? ` (${made})` : ''}` : '';
     out(`같이 한 쪽: ${[lead ? `계획을 낸 세션 ${lead}` : '', v.helpers.sessions ? `새 세션 ${v.helpers.sessions}` : '', v.helpers.subagents ? `서브에이전트 ${v.helpers.subagents}` : ''].filter(Boolean).join(' · ')}`);
   }
   out('');
@@ -670,6 +674,17 @@ function cmdSetup(a: Args, dir: string) {
     // 화면을 바꿔 뒀으면 먼저 되돌린다. 그래프 칸을 빼면 그 레이아웃의 칸이 비기 때문이다
     if (fs.existsSync(`${dir}/layout.json`)) layoutRemoved(guardScreen(() => removeLayout(dir)));
     return removeSetup(dir, out);
+  }
+  if (a.flags.tools) {
+    // 아는 도구와, 이 컴퓨터에 깔렸는지, muwi 통합을 넣었는지
+    const have = new Set(installedTools().map(t => t.id));
+    const done = readInstall(dir)?.tools ?? {};
+    for (const t of TOOLS) {
+      const state = done[t.id] ? '통합 넣음' : t.id === 'claude' && !have.has(t.id) ? '없음' : have.has(t.id) ? '깔려 있음' : '없음';
+      out(`${t.id.padEnd(16)} ${t.name.padEnd(18)} ${state}${adapterOf(t.id) ? '' : '  (훅 없이 지침과 기록만)'}`);
+    }
+    out('넣기: muwi setup --tool <도구>[,<도구>] 또는 muwi setup --all. Claude Code는 플러그인이 넣어 줘요.');
+    return;
   }
   // --tool codex,cursor처럼 고르거나, --all로 이 컴퓨터에 깔린 도구 전부에 넣는다. --claude, --codex는 옛 이름
   const picked = (str(a, 'tool') ?? '').split(',').map(x => x.trim()).filter(Boolean);
