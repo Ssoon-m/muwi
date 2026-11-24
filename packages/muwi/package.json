@@ -1,0 +1,14 @@
+{
+  "name": "muwi",
+  "version": "0.6.0",
+  "description": "AI가 스스로 짠 작업 플로우를 기록하고 그래프로 보여 준다",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "bin": { "muwi": "bin/muwi" },
+  "engines": { "node": ">=24" },
+  "repository": { "type": "git", "url": "git+https://github.com/Ssoon-m/muwi.git" },
+  "scripts": {
+    "test": "node --test \"tests/*.test.ts\""
+  }
+}

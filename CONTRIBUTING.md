@@ -4,15 +4,16 @@ muwi의 코드를 고치고 확인하는 방법, 폴더 구성, 지켜야 할 �
 
 ## 개발 환경 준비하기
 
-Node 24 이상이 필요합니다. TypeScript를 Node로 바로 실행하기 때문에 빌드 단계와 의존 패키지가 없습니다.
+Node 24 이상과 pnpm이 필요합니다. 패키지는 `packages/` 아래에 있고 pnpm workspace로 묶여 있습니다. TypeScript를 Node로 바로 실행하기 때문에 개발할 때는 빌드 단계가 없습니다.
 
 ```sh
 git clone https://github.com/Ssoon-m/muwi.git
 cd muwi
-npm test                                  # 테스트
-claude plugin validate .                  # 플러그인 형식 확인
-herdr-app check herdr-app/muwi            # 그래프 칸 확인 (Herdr 앱이 있을 때)
-claude --plugin-dir .                     # 설치하지 않고 이 폴더를 플러그인으로 불러 쓰기
+pnpm install
+pnpm test                                             # 모든 패키지의 테스트
+claude plugin validate .                              # 플러그인 형식 확인
+herdr-app check packages/muwi/herdr-app/muwi          # 그래프 칸 확인 (Herdr 앱이 있을 때)
+claude --plugin-dir .                                 # 설치하지 않고 이 폴더를 플러그인으로 불러 쓰기
 ```
 
 두 가지를 조심하세요.
@@ -25,21 +26,21 @@ claude --plugin-dir .                     # 설치하지 않고 이 폴더를 �
 | 경로 | 내용 |
 | --- | --- |
 | `.claude-plugin/` | Claude Code 플러그인 정보와 마켓 정보 |
-| `bin/muwi` | 명령. `src/cli.ts`를 Node로 실행합니다 |
-| `src/find-node.sh` | 셸 설정 없이 실행될 때 로그인 셸에 물어 Node 24 이상을 찾고 캐시합니다 (명령과 훅이 함께 씁니다) |
-| `src/cli.ts` | 명령 처리 |
-| `src/store.ts`, `src/plan.ts` | 기록 파일 읽고 쓰기, 계획 형식 확인과 비교 |
-| `src/node.ts` | 노드 상태 기록 (명령과 훅이 함께 씁니다) |
-| `src/session.ts`, `src/hook.ts` | 세션 정보, 훅 입력 처리 |
-| `src/herdr.ts`, `src/live.ts` | Herdr 호출 (`hc`, `herdr-app`), 세션이 닫혔는지 확인 |
-| `src/view.ts` | 계획과 사건 기록을 합쳐 화면에 보여 줄 형태로 만들기 |
-| `src/layout.ts`, `src/vendor/` | 그래프 배치 (elkjs) |
-| `src/setup.ts` | `muwi setup` |
-| `src/screen.ts` | `muwi layout`: Herdr 레이아웃을 복제해 muwi 칸을 넣고 빼기 |
-| `hooks/` | 플러그인 훅(`hooks.json`, `hook.sh`)과 세션 지침(`instructions.md`) |
-| `skills/muwi/` | 사용법 skill: 계획 적는 방법, 맡기는 방법, 기록 진단 절차 |
-| `herdr-app/muwi/` | Herdr 앱의 그래프 칸 |
-| `tests/` | 테스트 |
+| `packages/muwi/bin/muwi` | 명령. `packages/muwi/src/cli.ts`를 Node로 실행합니다 |
+| `packages/muwi/src/find-node.sh` | 셸 설정 없이 실행될 때 로그인 셸에 물어 Node 24 이상을 찾고 캐시합니다 (명령과 훅이 함께 씁니다) |
+| `packages/muwi/src/cli.ts` | 명령 처리 |
+| `packages/muwi/src/store.ts`, `packages/muwi/src/plan.ts` | 기록 파일 읽고 쓰기, 계획 형식 확인과 비교 |
+| `packages/muwi/src/node.ts` | 노드 상태 기록 (명령과 훅이 함께 씁니다) |
+| `packages/muwi/src/session.ts`, `packages/muwi/src/hook.ts` | 세션 정보, 훅 입력 처리 |
+| `packages/muwi/src/herdr.ts`, `packages/muwi/src/live.ts` | Herdr 호출 (`hc`, `herdr-app`), 세션이 닫혔는지 확인 |
+| `packages/muwi/src/view.ts` | 계획과 사건 기록을 합쳐 화면에 보여 줄 형태로 만들기 |
+| `packages/muwi/src/layout.ts`, `packages/muwi/src/vendor/` | 그래프 배치 (elkjs) |
+| `packages/muwi/src/setup.ts` | `muwi setup` |
+| `packages/muwi/src/screen.ts` | `muwi layout`: Herdr 레이아웃을 복제해 muwi 칸을 넣고 빼기 |
+| `packages/muwi/hooks/` | 훅 스크립트(`hook.sh`, `tool.sh`)와 세션 지침(`instructions.md`). 플러그인의 훅 목록은 저장소 뿌리의 `hooks/hooks.json` |
+| `packages/muwi/skills/muwi/` | 사용법 skill: 계획 적는 방법, 맡기는 방법, 기록 진단 절차 |
+| `packages/muwi/herdr-app/muwi/` | Herdr 앱의 그래프 칸 |
+| `packages/muwi/tests/` | 테스트 |
 | `docs/` | 문서 |
 
 ## 설계 원칙
