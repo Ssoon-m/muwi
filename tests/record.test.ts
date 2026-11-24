@@ -233,27 +233,22 @@ test('SKILL.md 경로에서 skill 이름을 꺼낸다', () => {
   assert.equal(skillFromPath(undefined), null);
 });
 
-test('셸 명령은 막지 않는다: push·PR 명령에도 아무 답을 하지 않는다 (승인은 muwi의 일이 아니다)', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-command-'));
-  for (const command of ['git push', 'gh pr create --title x --body y', 'ls']) {
-    assert.deepEqual(handleHook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command } }, dir, 'command', ENV), {});
-  }
-  // 옛 설정에 guard가 켜져 있어도 읽지 않는다
-  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ nudge: true, guard: true, layout: false }));
-  assert.deepEqual(readConfig(dir), { layout: false });
-  assert.deepEqual(handleHook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git push' } }, dir, 'command', ENV), {});
-});
-
-test('muwi는 AI가 하려는 일을 막지 않는다: 계획이 없는 세션이 파일을 고치거나 서브에이전트를 띄워도 아무 답을 하지 않는다', () => {
+test('muwi는 AI가 하려는 일을 막지 않는다: 셸 명령, 파일 수정, 서브에이전트 띄우기에 아무 답도 하지 않는다', () => {
   const t = setup([{ id: 'impl' }]);
+  // push·PR 같은 명령: 승인은 muwi의 일이 아니다
+  for (const command of ['git push', 'gh pr create --title x --body y', 'ls']) {
+    assert.deepEqual(handleHook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command } }, t.dir, 'command', ENV), {});
+  }
+  // 계획이 없는 세션의 파일 수정과 서브에이전트 띄우기: 계획을 적을지는 AI가 정한다
   const edit = { session_id: 'fresh', hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: '/repo/src/app.ts' } };
   const spawn = { session_id: 'fresh', hook_event_name: 'PreToolUse', tool_name: 'Agent', tool_input: { subagent_type: 'reviewer' } };
   for (const payload of [edit, spawn]) assert.deepEqual(handleHook(payload, t.dir, 'record', ENV), {});
   // 사람이 말할 때의 입력(0.5.x의 훅 설정이 보낸다)에도 답하지 않는다
   assert.deepEqual(handleHook({ session_id: 'fresh', hook_event_name: 'UserPromptSubmit', prompt: '…' }, t.dir, 'record', ENV), {});
-  // 옛 설정의 nudge 값은 읽지 않는다
-  fs.writeFileSync(path.join(t.dir, 'config.json'), JSON.stringify({ nudge: true, layout: false }));
+  // 0.5.x의 설정에 guard와 nudge가 켜져 있어도 읽지 않는다
+  fs.writeFileSync(path.join(t.dir, 'config.json'), JSON.stringify({ nudge: true, guard: true, layout: false }));
   assert.deepEqual(readConfig(t.dir), { layout: false });
+  assert.deepEqual(handleHook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git push' } }, t.dir, 'command', ENV), {});
 });
 
 function newerRoot(version = '9.9.9') {
