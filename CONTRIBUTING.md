@@ -34,7 +34,7 @@ claude --plugin-dir .                                 # 설치하지 않고 이 
 | `packages/muwi/src/session.ts`, `packages/muwi/src/hook.ts` | 세션 정보, 훅 입력 처리 |
 | `packages/muwi/src/herdr.ts`, `packages/muwi/src/live.ts` | Herdr 호출 (`hc`, `herdr-app`), 세션이 닫혔는지 확인 |
 | `packages/muwi/src/view.ts` | 계획과 사건 기록을 합쳐 화면에 보여 줄 형태로 만들기 |
-| `packages/muwi/src/layout.ts`, `packages/muwi/src/vendor/` | 그래프 배치 (elkjs) |
+| `packages/herdr-muwi/src/layout.ts` | 그래프 배치 (elkjs, 의존 패키지) |
 | `packages/muwi/src/setup.ts` | `muwi setup` |
 | `packages/muwi/src/screen.ts` | `muwi layout`: Herdr 레이아웃을 복제해 muwi 칸을 넣고 빼기 |
 | `packages/muwi/hooks/` | 훅 스크립트(`hook.sh`, `tool.sh`)와 세션 지침(`instructions.md`). 플러그인의 훅 목록은 저장소 뿌리의 `hooks/hooks.json` |

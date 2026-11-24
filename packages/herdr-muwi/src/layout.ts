@@ -64,7 +64,8 @@ export async function layoutGraph(g: Graph, size = SIZE, flow: Flow = 'right', f
 
 async function place(g: Graph, size: { cardW: number; cardH: number }, flow: Flow, extra: Record<string, string> = {}): Promise<Layout> {
   if (!g.nodes.length) return { width: 0, height: 0, nodes: [], edges: [] };
-  const ELK = require('./vendor/elk.bundled.cjs');
+  // elkjs의 한 파일짜리 판 (워커 없이 이 프로세스에서 계산한다)
+  const ELK = require('elkjs/lib/elk.bundled.js');
   const ids = new Set(g.nodes.map(n => n.id));
   const lines = g.edges.filter(e => ids.has(e.from) && ids.has(e.to)).map(e => ({ key: `${e.from}|${e.to}`, from: e.from, to: e.to }));
   const out = await new ELK().layout({

@@ -140,4 +140,4 @@ AI가 기록에서 원인을 찾습니다. 예를 들어 브랜치를 만든 노
 
 ## 라이선스
 
-[MIT](LICENSE). 그래프 배치에 쓰는 `src/vendor/elk.bundled.cjs`는 [elkjs](https://github.com/kieler/elkjs) 0.12.1의 배포 파일 원본이고 EPL-2.0입니다 (`src/vendor/elkjs-LICENSE.md`).
+[MIT](LICENSE). herdr-muwi가 그래프 배치에 쓰는 [elkjs](https://github.com/kieler/elkjs)는 의존 패키지로 받고, 라이선스는 EPL-2.0입니다.

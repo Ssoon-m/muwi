@@ -10,8 +10,20 @@ importers:
 
   packages/herdr-muwi:
     dependencies:
+      elkjs:
+        specifier: 0.12.1
+        version: 0.12.1
       muwi:
         specifier: workspace:*
         version: link:../muwi
 
   packages/muwi: {}
+
+packages:
+
+  elkjs@0.12.1:
+    resolution: {integrity: sha512-IhMYKHE4S2vtx0QrhBP3lYOIKDeIiJXBrdq9MGYkuB8ZHqhrBnHNfSUndjXFewrX1CPK8chwq+2NA0K0hliYuw==}
+
+snapshots:
+
+  elkjs@0.12.1: {}
