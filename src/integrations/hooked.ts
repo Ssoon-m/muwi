@@ -7,7 +7,7 @@ import path from 'node:path';
 import type { Happened, Reply } from '../events.ts';
 import { backup, writeText } from './files.ts';
 import { HOOK_MARK, installEntries, uninstallEntries } from './settings-hooks.ts';
-import { flatShaped, fromShaped, shaped, shapedEntries, toShaped, toolCommand, type Shape } from './shaped.ts';
+import { flatShaped, fromShaped, plugged, shaped, shapedEntries, toShaped, toolCommand, type Shape } from './shaped.ts';
 import type { Adapter, HookResult } from './types.ts';
 
 /** Claude Code와 같은 사건 이름 */
@@ -234,6 +234,15 @@ export const antigravity: Adapter = {
   to: (h, r) => toShaped(AGY, h, r),
   empty: '{}',
 };
+
+// ── 플러그인(확장) 파일로 붙는 도구들. 훅 설정이 없고, 그 도구가 플러그인 폴더의 파일을 읽어 들인다.
+//    플러그인 파일은 muwi 설치 위치의 integrations/<도구>/에 있다
+export const opencode = plugged('opencode', { to: 'plugins', files: ['muwi.js'] });
+export const kilo = plugged('kilo', { to: 'plugin', files: ['muwi.js'] });
+export const pi = plugged('pi', { to: 'extensions', files: ['muwi.ts'] });
+export const omp = plugged('omp', { to: 'extensions', files: ['muwi.ts'] });
+// Hermes는 플러그인을 켜 줘야 읽는다 (hermes plugins enable muwi)
+export const hermes = plugged('hermes', { to: path.join('plugins', 'muwi'), files: ['__init__.py', 'plugin.yaml'] });
 
 /** 우리 훅 명령의 표시 (시험과 점검에서 쓴다) */
 export const MARK = HOOK_MARK;
