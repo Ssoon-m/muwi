@@ -76,7 +76,7 @@ test('띄우기: 맡은 작업과 노드는 env로 감싸 넘기고, 이름은 H
   const runs = fake.calls().split('\n').filter(l => l.startsWith('hc [run]'));
   assert.equal(runs.length, 2);
   const wrap = process.platform === 'win32' ? '' : ' [env] [MUWI_RUN=impl-1] [MUWI_RUN_WORK=w] [MUWI_RUN_NODE=impl]';
-  assert.equal(runs[0], `hc [run] [--bg] [--json] [--name] [impl-ui] [--cwd] [/repo] [--]${wrap} [claude] [해줘]`);
+  assert.equal(runs[0], `hc [run] [--bg] [--json] [--outlive-parent] [--name] [impl-ui] [--cwd] [/repo] [--]${wrap} [claude] [해줘]`);
   assert.throws(() => herdr.launch!({ cwd: '/repo', name: 'x', argv: ['claude'], env: {} }, fakeHerdr({ runFails: 2 }).env), /name taken/);
   // Windows에는 env 명령이 없다. 그때는 감싸지 않는다 (코어가 그 터미널의 표로 맡은 노드를 안다)
   assert.deepEqual(withEnv(['claude'], { A: '1' }, 'win32'), ['claude']);

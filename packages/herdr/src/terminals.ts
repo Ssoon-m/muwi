@@ -42,7 +42,8 @@ const herdr: Terminals = {
     const base = terminalName(o.name);
     let last = '';
     for (const name of [base, `${base.slice(0, 27)}-${Date.now().toString(36).slice(-4)}`]) {
-      const r = hc(['run', '--bg', '--json', '--name', name, '--cwd', o.cwd, '--', ...withEnv(o.argv, o.env)], env);
+      // 맡긴 세션이 끝나도(--outlive-parent) 띄운 세션은 남는다. 끝난 뒤에도 이어 시키거나 다시 볼 수 있게
+      const r = hc(['run', '--bg', '--json', '--outlive-parent', '--name', name, '--cwd', o.cwd, '--', ...withEnv(o.argv, o.env)], env);
       if (!r.ok) {
         last = (r.err || r.out || 'hc 명령이 없어요').trim();
         continue;

@@ -102,6 +102,21 @@ function onlyAllowedTs(pkg) {
   assert.equal(fs.existsSync(wrapper), false);
 }
 
+// ---- @muwi/herdr만 깔았을 때: 코어는 그 안에 따라 들어오고, setup이 Herdr 터미널 연결의 경로를 적어 둔다 (보기는 없다)
+{
+  const { pkg, bin } = installAlone('herdr', '@muwi/herdr', herdrTermTgz);
+  const { home, env } = envFor('herdr');
+  const run = runner(env);
+  onlyAllowedTs(pkg);
+  assert.equal(run(bin, ['--version']).trim(), version);
+  assert.doesNotMatch(run(bin, ['--help']), /muwi layout/);
+  run(bin, ['setup']);
+  const setup = JSON.parse(fs.readFileSync(path.join(home, '.muwi', 'setup.json'), 'utf8'));
+  assert.equal(setup.terminals, path.join(fs.realpathSync(pkg), 'src', 'terminals.js'));
+  assert.equal(setup.views, undefined);
+  run(bin, ['setup', '--remove']);
+}
+
 // ---- @muwi/herdr-app만 깔았을 때: 코어와 Herdr 터미널 연결(@muwi/herdr)은 그 안에 따라 들어오고, 보기가 더하는 명령과 그래프 배치(elkjs)까지 돈다
 {
   const { pkg: herdr, bin } = installAlone('herdr-app', '@muwi/herdr-app', herdrTgz);
@@ -147,4 +162,4 @@ function onlyAllowedTs(pkg) {
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });
-console.log(`패키지 확인: @muwi/core·@muwi/herdr-app ${version}을 하나씩 npm i -g로 깔아서 (@muwi/herdr는 @muwi/herdr-app에 따라 들어온다), npm이 건 muwi로 명령, 그래프 배치, setup, 훅, Claude Code 커넥터가 돈다`);
+console.log(`패키지 확인: @muwi/core·@muwi/herdr·@muwi/herdr-app ${version}을 하나씩 npm i -g로 깔아서, npm이 건 muwi로 명령, 그래프 배치, setup, 훅, Claude Code 커넥터가 돈다`);

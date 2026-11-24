@@ -319,3 +319,72 @@ test('muwi resume: 닫힌 세션이 하던 노드를 새 대화로 이어 한다
   assert.match(launch.argv[1], /shop-1 작업의 impl 노드 이어서 해줘/);
   assert.equal(launch.env.MUWI_RUN_NODE, 'impl');
 });
+
+test('다시 연 세션(--resume)은 닫힌 것으로 남지 않는다. 셸에서 잠깐 돌린 다른 세션이 끝나도 바깥 세션은 닫히지 않는다', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-live-'));
+  const hook = (session: string, payload: Record<string, unknown>, env: NodeJS.ProcessEnv) => handleHook({ session_id: session, ...payload }, dir, 'record', env, ROOT);
+  at(0); hook('S', { hook_event_name: 'SessionStart', source: 'startup' }, inTerminal('t2'));
+  at(1); hook('S', { hook_event_name: 'SessionEnd', reason: 'exit' }, inTerminal('t2'));
+  assert.ok(sessionStates(dir, ['S'], ENV).closed.has('S'));
+  // 같은 대화를 다른 터미널에서 다시 열었다
+  at(2); hook('S', { hook_event_name: 'SessionStart', source: 'resume' }, inTerminal('t3'));
+  const s = sessionStates(dir, ['S'], live([{ terminal: 't3', agent: 'working' }]));
+  assert.deepEqual([s.closed.has('S'), s.status.get('S')], [false, 'working']);
+  // 그 세션이 셸에서 claude -p를 돌렸다: 같은 터미널에서 더 늦게 시작했지만 끝났으므로 바깥 세션을 닫지 않는다
+  at(3); hook('nested', { hook_event_name: 'SessionStart', source: 'startup' }, inTerminal('t3'));
+  at(4); hook('nested', { hook_event_name: 'SessionEnd', reason: 'other' }, inTerminal('t3'));
+  assert.equal(sessionStates(dir, ['S'], live([{ terminal: 't3', agent: 'working' }])).closed.has('S'), false);
+});
+
+test('뜬 세션은 muwi run이 띄운 기록을 적기 전에 시작해도 맡은 노드에 붙는다. 붙으면 그 터미널의 표는 지운다', () => {
+  const { dir, muwi } = bench();
+  const env = { MUWI_RUN: 'impl-early', MUWI_RUN_WORK: 'shop-1', MUWI_RUN_NODE: 'impl', MUWI_RUN_MODEL: 'gpt-x', TEST_PLACE: 't9' } as NodeJS.ProcessEnv;
+  fs.mkdirSync(path.join(dir, '.spawns'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.spawns', 't9.json'), JSON.stringify({ id: 'impl-early', work: 'shop-1', node: 'impl' }));
+  const start = handleHook({ session_id: 'early', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', env, ROOT);
+  assert.match(JSON.parse(start.stdout!).hookSpecificOutput.additionalContext, /노드 `impl`\(화면 구현\)를 맡아서 떴다/);
+  const node = JSON.parse(muwi(['show', 'shop-1', '--json']).out).nodes.find((n: any) => n.id === 'impl');
+  assert.deepEqual([node.status, node.who.session, node.who.model], ['doing', 'early', 'gpt-x']);
+  assert.equal(fs.existsSync(path.join(dir, '.spawns', 't9.json')), false);
+});
+
+test('muwi resume·run 직후의 wait는 새 세션이 붙기 전에 앞 세션이 닫혀 있다는 것으로 돌아오지 않는다. 살아 있는 세션은 resume하지 않는다', () => {
+  const { dir, muwi, did } = bench();
+  // 앞 세션이 노드를 하다가 닫혔다
+  assert.equal(muwi(['node', 'impl', 'start', '--work', 'shop-1'], { MUWI_SESSION: 'gone-1', TEST_PLACE: 't5' }).code, 0);
+  touchSession(dir, 'gone-1', { terminal: 't5' }, ENV);
+  const alive = { FAKE_TERMINALS_LIVE: JSON.stringify([{ terminal: 't5', agent: 'working' }]) };
+  assert.match(muwi(['resume', 'impl', '--work', 'shop-1'], alive).err, /impl를 하던 세션이 아직 살아 있어요 \(t5\)/);
+  const dead = { FAKE_TERMINALS_LIVE: '[]' };
+  assert.equal(muwi(['resume', 'impl', '--work', 'shop-1', '--new'], dead).code, 0);
+  assert.match(muwi(['wait', 'impl', '--work', 'shop-1', '--timeout', '0.2'], dead).out, /아직 하는 중이에요/);
+  // 새 세션이 붙은 뒤 그 세션이 닫히면 알린다 (두 번 잇달아 보였을 때)
+  const launched = did().filter(c => c.do === 'launch').at(-1)!;
+  handleHook({ session_id: 'again', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', { ...launched.env, TEST_PLACE: 't7' }, ROOT);
+  assert.match(muwi(['wait', 'impl', '--work', 'shop-1', '--timeout', '2'], dead).out, /^impl: 세션이 닫힘\n$/);
+});
+
+test('peek·tell은 그 노드를 지금 하는 세션의 터미널로 간다. 자기 터미널에는 보내지 않는다. tidy는 에이전트가 돌지 않는 터미널을 닫지 않는다', () => {
+  const { dir, muwi, did } = bench();
+  assert.equal(muwi(['run', 'impl', '구현해줘']).code, 0);
+  const env = { ...did()[0].env, TEST_PLACE: 't7' } as NodeJS.ProcessEnv;
+  at(1); handleHook({ session_id: 'child', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', env, ROOT);
+  // 그 대화를 다른 터미널(t9)에서 다시 열었다
+  at(2); handleHook({ session_id: 'child', hook_event_name: 'SessionStart', source: 'resume' }, dir, 'record', inTerminal('t9'), ROOT);
+  assert.match(muwi(['tell', 'impl', '테스트도']).out, /보냈어요 → t9/);
+  assert.equal(muwi(['peek', 'impl']).out, 't9의 화면\n둘째 줄\n');
+  assert.match(muwi(['tell', 'impl', '…'], { TEST_PLACE: 't9' }).err, /impl를 맡은 세션은 이 터미널이에요/);
+  // 맡은 세션이 끝내고 나갔는데 그 터미널에 셸이 남았다
+  assert.equal(muwi(['node', 'impl', 'done', '끝', '--work', 'shop-1'], { MUWI_SESSION: 'child', TEST_PLACE: 't9' }).code, 0);
+  at(3); handleHook({ session_id: 'child', hook_event_name: 'SessionEnd', reason: 'exit' }, dir, 'record', inTerminal('t9'), ROOT);
+  assert.match(muwi(['tidy', 'shop-1'], { FAKE_TERMINALS_LIVE: JSON.stringify([{ terminal: 't7', agent: 'none' }]) }).out, /에이전트가 돌지 않는 터미널이라 닫지 않았어요 \(t7\)/);
+});
+
+test('muwi board: 보기가 터미널과 대화를 잇도록 터미널마다 지금 그 터미널을 쓰는 세션(owners)을 알려 준다', () => {
+  const { dir, muwi } = bench();
+  at(0); touchSession(dir, 'old', {}, inTerminal('t4'));
+  at(1); touchSession(dir, 'new', {}, inTerminal('t4'));
+  at(2); touchSession(dir, 'ended', { endedAt: new Date(T0 + 3 * 60_000).toISOString() }, inTerminal('t4'));
+  // 계획을 낸 세션(lead)은 t2에서 돈다
+  assert.deepEqual(JSON.parse(muwi(['board']).out).owners, { t2: 'lead', t4: 'new' });
+});

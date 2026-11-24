@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { RUN_ENV, spawnFile } from './events.ts';
 import { Fail, join, needPlan, out, resolveWork, str, type Args } from './kit.ts';
-import { ownerOfTerminal } from './live.ts';
+import { ownerOfTerminal, sessionStates } from './live.ts';
 import { hasTerminals, terminals, type Spot, type Terminals } from './plugins.ts';
 import { resumeFacts } from './resume.ts';
 import { readSession, sessionKey } from './session.ts';
@@ -41,10 +41,21 @@ function nodeOf(v: WorkView, id: string): NodeView {
   return n;
 }
 
-/** 그 노드를 맡은 세션이 도는 터미널: 가장 최근에 띄운 새 세션, 없으면 그 노드를 마지막으로 한 세션의 터미널 */
-function terminalOfNode(v: WorkView, n: NodeView): string | null {
-  if (n.spawn?.terminal) return n.spawn.terminal;
-  return (n.session && v.sessions[n.session]?.terminal) || null;
+/** 붙은 세션이 있는 spawn의 이름표들 (join 기록) */
+function joinedSpawns(dir: string, work: string): Set<string> {
+  return new Set(readEvents(dir, work).filter((e): e is Event & { type: 'join' } => e.type === 'join').map(e => e.spawn));
+}
+
+/** 가장 최근에 띄운 새 세션이 아직 노드에 붙지 않았다 (뜨는 중이거나 폴더 신뢰 확인에서 멈췄다) */
+const pending = (n: NodeView, joined: Set<string>) => Boolean(n.spawn?.id && !joined.has(n.spawn.id));
+
+/**
+ * 그 노드를 맡은 세션이 도는 터미널. 가장 최근에 띄운 새 세션이 아직 붙지 않았으면 그 터미널,
+ * 아니면 그 노드를 마지막으로 한 세션의 터미널 (다시 연 대화나 이어받은 세션이 다른 터미널에 있을 수 있다), 그것도 모르면 띄운 터미널
+ */
+function terminalOfNode(v: WorkView, n: NodeView, joined: Set<string>): string | null {
+  if (pending(n, joined)) return n.spawn!.terminal;
+  return (n.session && v.sessions[n.session]?.terminal) || n.spawn?.terminal || null;
 }
 
 const SPOT: Record<ShowIn, (down: boolean) => Spot> = { pane: down => (down ? 'below' : 'beside'), tab: () => 'tab' };
@@ -70,17 +81,27 @@ function programFor(a: Args, dir: string, brief: string): { argv: string[]; inAr
  * 새 터미널을 띄우고 맡긴 노드를 알려 준다. 맡은 작업과 노드는 환경 변수로 넘기고(뜬 세션의 훅이 읽는다),
  * 환경 변수를 넘기지 못하는 연결을 위해 그 터미널의 표(.spawns)에도 남긴다
  */
-function launchFor(dir: string, o: { work: string; node: string; name: string; cwd: string; argv: string[]; inArgs: boolean; brief: string; show?: ShowIn; down?: boolean }) {
+function launchFor(dir: string, o: { work: string; node: string; name: string; cwd: string; argv: string[]; inArgs: boolean; brief: string; task: string; model?: string; show?: ShowIn; down?: boolean }) {
   const launch = need('launch', '새 세션을 띄우려면');
   const id = `${o.node}-${crypto.randomBytes(4).toString('hex')}`;
+  const env: Record<string, string> = { [RUN_ENV.id]: id, [RUN_ENV.work]: o.work, [RUN_ENV.node]: o.node, ...(o.model ? { [RUN_ENV.model]: o.model } : {}) };
   let started: ReturnType<typeof launch>;
   try {
-    started = launch({ cwd: o.cwd, name: o.name, argv: o.argv, env: { [RUN_ENV.id]: id, [RUN_ENV.work]: o.work, [RUN_ENV.node]: o.node } }, process.env);
+    started = launch({ cwd: o.cwd, name: o.name, argv: o.argv, env }, process.env);
   } catch (e: any) {
     throw new Fail(`새 세션을 띄우지 못했어요: ${String(e?.message ?? e).trim()}`);
   }
   const terminal = started.terminal;
-  writeJson(spawnFile(dir, terminal), { id, work: o.work, node: o.node });
+  const name = started.name ?? o.name;
+  writeJson(spawnFile(dir, terminal), { id, work: o.work, node: o.node, ...(o.model ? { model: o.model } : {}) });
+  // 띄운 것을 바로 적는다 (말을 보내고 칸에 놓는 동안 뜬 세션이 먼저 일을 시작할 수 있다).
+  // 맡긴 말도 남긴다. 나중에 "맡긴 쪽이 무엇을 모르고 일했나"를 볼 수 있게
+  // 띄운 폴더도 남긴다. 새 세션이 기록을 남기기 전에 닫혀도 어디서 이어 하면 되는지 알려 줄 수 있게 (worktree에 띄웠을 때)
+  const from = here();
+  appendEvent(dir, o.work, {
+    type: 'spawn', id, node: o.node, terminal, ...(from ? { from } : {}), name, ...(o.show ? { show: o.show } : {}),
+    task: o.task.slice(0, 2000), cwd: o.cwd, ...(o.model ? { model: o.model } : {}),
+  }, sessionKey());
   // 첫 말을 명령으로 받지 못하는 도구는 뜬 뒤에 말로 보낸다
   let sent = started.delivered !== false;
   if (!o.inArgs) sent = terminals().send?.(terminal, o.brief, process.env) ?? false;
@@ -93,7 +114,7 @@ function launchFor(dir: string, o: { work: string; node: string; name: string; c
       placed = r.ok ? o.show : `${o.show}에 놓지 못했어요 (${(r.error ?? '').split('\n')[0]})`;
     }
   }
-  return { id, terminal, name: started.name ?? o.name, sent, placed };
+  return { id, terminal, name, sent, placed };
 }
 
 /** muwi run <노드> "<맡길 일>": 노드를 새 세션에 맡긴다 */
@@ -112,25 +133,24 @@ export function cmdRun(a: Args, dir: string) {
   const cwd = path.resolve(str(a, 'cwd') ?? process.cwd());
   const brief = `${task.trim()}\n\n(muwi) 작업 ${work}의 노드 ${id}(${node.title})를 맡았어요. 시작은 자동으로 적혀요. 끝나면 muwi node ${id} done "<결과 한 줄>"을 적고, muwi tell "<결과나 막힌 점>"으로 알려요.`;
   const program = programFor(a, dir, brief);
-  const r = launchFor(dir, { work, node: id, name: str(a, 'name') ?? id, cwd, argv: program.argv, inArgs: program.inArgs, brief, show, down: Boolean(a.flags.down) });
-  // 맡긴 말도 남긴다. 나중에 "맡긴 쪽이 무엇을 모르고 일했나"를 볼 수 있게
-  // 띄운 폴더도 남긴다. 새 세션이 기록을 남기기 전에 닫혀도 어디서 이어 하면 되는지 알려 줄 수 있게 (worktree에 띄웠을 때)
-  appendEvent(dir, work, {
-    type: 'spawn', id: r.id, node: id, terminal: r.terminal, from: lead, name: r.name, ...(show ? { show } : {}),
-    task: task.trim().slice(0, 2000), cwd, ...(program.model ? { model: program.model } : {}),
-  }, sessionKey());
+  const r = launchFor(dir, { work, node: id, name: str(a, 'name') ?? id, cwd, argv: program.argv, inArgs: program.inArgs, brief, task: task.trim(), model: program.model, show, down: Boolean(a.flags.down) });
   join(dir, work);
   out(`새 세션을 띄웠어요: ${r.name} (${r.terminal}) → 노드 ${id}${r.placed ? ` · ${r.placed}` : ''}`);
   if (!r.sent) out(`맡길 일이 아직 전달되지 않았어요. muwi peek ${id}로 화면을 보고(폴더 신뢰 확인이 떠 있을 수 있어요) 사람에게 풀어 달라고 한 뒤 muwi tell ${id} "<맡길 일>"로 다시 보내요.`);
   out(`기다리려면 muwi wait ${id}, 화면을 보려면 muwi peek ${id}, 말을 걸려면 muwi tell ${id} "…"`);
 }
 
-/** 기다리던 노드에 일어난 일. 아직 아무 일도 없으면 null */
-function settled(n: NodeView): string | null {
-  if (n.closed) return '세션이 닫힘';
+/**
+ * 기다리던 노드에 일어난 일. 아직 아무 일도 없으면 null.
+ * soft: 세션이 닫혔거나 멈췄다는 것 (적힌 상태가 아니라 세션을 보고 안 것). 새로 띄운 세션이 아직 붙지 않았으면
+ * 그 노드의 세션은 앞 세션이라 보지 않는다 (muwi resume·run 직후에 앞 세션이 닫혀 있어도 기다린다)
+ */
+function settled(n: NodeView, joined: Set<string>): { what: string; soft: boolean } | null {
   const what: Partial<Record<NodeStatus, string>> = { done: '끝', waiting: '사람을 기다림', blocked: '막힘' };
-  if (what[n.status]) return `${what[n.status]}${n.note ? `: ${n.note}` : ''}`;
-  if (n.quiet) return n.quiet === 'asking' ? '세션이 입력을 기다림' : '세션이 멈춤';
+  if (what[n.status]) return { what: `${what[n.status]}${n.note ? `: ${n.note}` : ''}`, soft: false };
+  if (pending(n, joined)) return null;
+  if (n.closed) return { what: '세션이 닫힘', soft: true };
+  if (n.quiet) return { what: n.quiet === 'asking' ? '세션이 입력을 기다림' : '세션이 멈춤', soft: true };
   return null;
 }
 
@@ -149,23 +169,32 @@ export async function cmdWait(a: Args, dir: string) {
   for (const id of ids) nodeOf(first, id);
   const timeout = Number(str(a, 'timeout') ?? 600) * 1000;
   const poll = Number(process.env.MUWI_WAIT_POLL_MS) || 2000;
-  const sign = (n: NodeView) => `${n.status}|${n.note ?? ''}|${n.closed ? 1 : 0}|${n.quiet ?? ''}|${n.attempts}`;
+  const sign = (n: NodeView) => `${n.status}|${n.note ?? ''}|${n.closed ? 1 : 0}|${n.quiet ?? ''}|${n.attempts}|${n.spawn?.id ?? ''}`;
   const before = new Map(first.nodes.map(n => [n.id, sign(n)]));
   const pick = (v: WorkView) => ids.map(id => v.nodes.find(n => n.id === id)).filter((n): n is NodeView => Boolean(n));
   // 기다리는 노드가 모두 이미 무언가 일어난 상태면 바로 알린다
-  const already = pick(first).map(n => ({ n, what: settled(n) }));
-  if (already.every(x => x.what)) {
-    for (const { n, what } of already) out(`${n.id}: ${what}`);
+  const already = pick(first).map(n => ({ n, got: settled(n, joinedSpawns(dir, work)) }));
+  if (already.every(x => x.got)) {
+    for (const { n, got } of already) out(`${n.id}: ${got!.what}`);
     return;
   }
+  // 세션이 닫혔거나 멈췄다는 것은 두 번 잇달아 보였을 때만 알린다 (세션이 막 떴을 때 멀티플렉서가 잠깐 상태를 모를 수 있다)
+  const soft = new Map<string, string>();
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
     await sleep(Math.min(poll, Math.max(0, deadline - Date.now())));
     const v = loadView(dir, work);
     if (!v) throw new Fail(`작업이 없어졌어요: ${work}`);
-    const changed = pick(v).filter(n => sign(n) !== before.get(n.id)).map(n => ({ n, what: settled(n) })).filter(x => x.what);
-    if (changed.length) {
-      for (const { n, what } of changed) out(`${n.id}: ${what}`);
+    const joined = joinedSpawns(dir, work);
+    const ready: { id: string; what: string }[] = [];
+    for (const n of pick(v)) {
+      const got = sign(n) !== before.get(n.id) ? settled(n, joined) : null;
+      if (!got) soft.delete(n.id);
+      else if (!got.soft || soft.get(n.id) === got.what) ready.push({ id: n.id, what: got.what });
+      else soft.set(n.id, got.what);
+    }
+    if (ready.length) {
+      for (const r of ready) out(`${r.id}: ${r.what}`);
       return;
     }
   }
@@ -180,7 +209,7 @@ export function cmdPeek(a: Args, dir: string) {
   const work = resolveWork(a, dir, { guess: true });
   const v = loadView(dir, work);
   if (!v) throw new Fail(`작업이 없어요: ${work}`);
-  const terminal = terminalOfNode(v, nodeOf(v, id));
+  const terminal = terminalOfNode(v, nodeOf(v, id), joinedSpawns(dir, work));
   if (!terminal) throw new Fail(`${id}를 맡은 세션의 터미널을 몰라요`);
   const text = read(terminal, process.env);
   if (text == null) throw new Fail(`${terminal}의 화면을 읽지 못했어요 (터미널이 닫혔을 수 있어요)`);
@@ -206,8 +235,9 @@ export function cmdTell(a: Args, dir: string) {
   let message: string;
   if (toNode) {
     node = nodeOf(v, toNode).id;
-    to = terminalOfNode(v, nodeOf(v, toNode));
+    to = terminalOfNode(v, nodeOf(v, toNode), joinedSpawns(dir, work));
     if (!to) throw new Fail(`${toNode}를 맡은 세션의 터미널을 몰라요`);
+    if (to === here()) throw new Fail(`${toNode}를 맡은 세션은 이 터미널이에요. 맡긴 세션에 알리려면 muwi tell "<말>"`);
     message = text;
   } else {
     // 이 세션이 맡은 노드: muwi run으로 떠서 붙은 기록 (join)
@@ -245,11 +275,16 @@ export function cmdTidy(a: Args, dir: string) {
       out(`  ${n.id}: 이미 없어요 (${sp.terminal})`);
       continue;
     }
-    // 주소는 다시 쓰일 수 있다. 그 터미널을 지금 쓰는 세션이 이 노드를 맡았던 세션일 때만 닫는다
+    // 주소는 다시 쓰일 수 있다. 그 터미널을 지금 쓰는 세션이 이 노드를 맡았던 세션일 때만 닫는다.
+    // 에이전트가 돌지 않는 터미널은 닫지 않는다 (맡은 세션이 끝난 뒤 셸이나 다른 프로그램이 남았을 수 있다)
     const owner = ownerOfTerminal(dir, sp.terminal);
     const mine = sp.id ? joinedBy.get(sp.id) : undefined;
     if (owner && owner.key !== mine) {
       out(`  ${n.id}: 다른 대화가 그 터미널을 쓰고 있어 닫지 않았어요 (${sp.terminal})`);
+      continue;
+    }
+    if (live?.find(t => t.terminal === sp.terminal)?.agent === 'none') {
+      out(`  ${n.id}: 에이전트가 돌지 않는 터미널이라 닫지 않았어요 (${sp.terminal}). 다른 프로그램이 쓰고 있을 수 있어요`);
       continue;
     }
     const ok = close(sp.terminal, process.env);
@@ -264,7 +299,7 @@ export function cmdTidy(a: Args, dir: string) {
  */
 export function cmdResume(a: Args, dir: string) {
   const [id] = a.pos;
-  if (!id) throw new Fail('사용법: muwi resume <노드 id> [--show pane|tab] [--down] [--new]');
+  if (!id) throw new Fail('사용법: muwi resume <노드 id> [--show pane|tab] [--down] [--new] [--force]');
   need('launch', '세션을 띄우려면');
   const work = resolveWork(a, dir, { guess: true });
   const v = loadView(dir, work);
@@ -272,8 +307,12 @@ export function cmdResume(a: Args, dir: string) {
   const n = nodeOf(v, id);
   const show = (str(a, 'show') ?? n.show) as ShowIn | undefined;
   if (show !== undefined && !SHOW_IN.includes(show)) throw new Fail(`--show는 ${SHOW_IN.join(' 또는 ')}이에요`);
-  const facts = resumeFacts(v);
   const key = n.session;
+  // 그 노드를 하던 세션이 아직 살아 있으면 하나 더 띄우지 않는다
+  if (key && !n.closed && n.status !== 'done' && !a.flags.force && sessionStates(dir, [key]).status.has(key)) {
+    throw new Fail(`${id}를 하던 세션이 아직 살아 있어요 (${v.sessions[key]?.terminal ?? key}). muwi peek ${id}로 보거나 muwi tell ${id} "…"로 말을 걸어요. 그래도 새로 띄우려면 --force`);
+  }
+  const facts = resumeFacts(v);
   const folder = [key ? v.sessions[key]?.cwd : undefined, n.spawn?.cwd, v.cwd].find(f => f && facts.exists[f]) ?? process.cwd();
   const again = key && !a.flags.new ? facts.resume[key] : undefined;
   if (again) {
@@ -285,7 +324,6 @@ export function cmdResume(a: Args, dir: string) {
   const brief = `${work} 작업의 ${id} 노드 이어서 해줘. muwi show ${work}로 계획과 지금까지의 기록을 먼저 본다.`;
   const template = (key && facts.launch[key]) || facts.launcher;
   const argv = template.map(part => (part === '{prompt}' ? brief : part));
-  const r = launchFor(dir, { work, node: id, name: str(a, 'name') ?? id, cwd: folder, argv, inArgs: template.includes('{prompt}'), brief, show, down: Boolean(a.flags.down) });
-  appendEvent(dir, work, { type: 'spawn', id: r.id, node: id, terminal: r.terminal, ...(here() ? { from: here()! } : {}), name: r.name, ...(show ? { show } : {}), task: brief, cwd: folder }, sessionKey());
+  const r = launchFor(dir, { work, node: id, name: str(a, 'name') ?? id, cwd: folder, argv, inArgs: template.includes('{prompt}'), brief, task: brief, show, down: Boolean(a.flags.down) });
   out(`새 대화로 이어 가요: ${r.name} (${r.terminal}) → 노드 ${id}${r.placed ? ` · ${r.placed}` : ''}`);
 }

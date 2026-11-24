@@ -2,6 +2,7 @@
 //   작업 목록, 고른 작업의 노드와 기록, 그래프 좌표, 이어 하기에 쓸 사실, 최근 세션과 그 터미널, 보기가 더한 값.
 // 보기는 이것만 읽고 그린다. 기록을 바꾸지 않는다.
 import { str, type Args, out } from './kit.ts';
+import { terminalOwners } from './live.ts';
 import { views } from './plugins.ts';
 import { resumeFacts } from './resume.ts';
 import { recentSessions } from './session.ts';
@@ -37,7 +38,9 @@ export async function cmdBoard(a: Args, dir: string) {
   }
   // 보기가 터미널과 작업을 잇는 데 쓴다 (지금 보는 터미널의 작업 따라가기, 계획 없는 세션 가려내기)
   const sessions = recentSessions(dir, Date.now() - PAST_DAYS * 86_400_000);
+  // 터미널마다 지금 그 터미널을 쓰는 세션 (그 터미널에서 가장 늦게 시작해 아직 끝나지 않은 세션)
+  const owners = terminalOwners(dir);
   // 보기가 더한 값 (그 보기만 읽는다)
   const extra = Object.assign({}, ...views().map(v => v.board?.(dir) ?? {}));
-  out(JSON.stringify({ version: BOARD_VERSION, dir, now, ...board, sessions, ...extra, selected }));
+  out(JSON.stringify({ version: BOARD_VERSION, dir, now, ...board, sessions, owners, ...extra, selected }));
 }
