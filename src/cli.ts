@@ -454,7 +454,9 @@ function whoText(v: WorkView, who: Actor): string {
   const own = who.agents.filter(x => x.own);
   const helped = who.agents.filter(x => !x.own);
   if (who.kind === 'subagent') return own.length ? count(own) : `${count(helped)} · 세션 ${label(who.session)}이 시작함`;
-  const base = who.kind === 'session' ? `새 세션 ${label(who.session)}` : `세션 ${label(who.session)}`;
+  // 이 회차를 시작할 때의 모델 (노드마다 적힌 것)
+  const model = who.model ? ` (${who.model})` : '';
+  const base = who.kind === 'session' ? `새 세션 ${label(who.session)}${model}` : `세션 ${label(who.session)}${model}`;
   return [base, own.length ? count(own) : '', helped.length ? `${count(helped)}가 도움` : ''].filter(Boolean).join(' + ');
 }
 
