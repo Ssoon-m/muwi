@@ -17,7 +17,8 @@ import type { PlanNode } from './store.ts';
 import { attach, isSettled, markSettled, readSession, recordSkill, touchSession, unsettle, whereNow, type Session } from './session.ts';
 import { LABEL_SESSION, hc, spawnedFor } from './herdr.ts';
 import { markNode } from './node.ts';
-import { instructionText } from './setup.ts';
+import { instructionText } from './integrations/files.ts';
+import { toolById } from './integrations/tools.ts';
 
 /** muwi가 설치된 곳 (이 파일의 위 폴더) */
 export const ROOT = path.resolve(import.meta.dirname, '..');
@@ -247,7 +248,9 @@ export function handleEvent(h: Happened, dir: string, env: NodeJS.ProcessEnv = p
     if (h.resumed === 'compact' && session.work && readPlan(dir, session.work)) {
       appendEvent(dir, session.work, { type: 'session', what: 'compact' }, key);
     }
-    const text = [guide, adoptSpawn(dir, key, env)].filter(Boolean).join('\n\n');
+    // 늘 읽히는 지침 파일이 있는 도구(AGENTS.md 등)는 지침이 이미 거기 있다. 두 번 넣지 않는다
+    const inFile = Boolean(toolById(h.tool)?.instructions);
+    const text = [inFile ? '' : guide, adoptSpawn(dir, key, env)].filter(Boolean).join('\n\n');
     return text ? { say: text } : {};
   }
 
