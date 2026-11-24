@@ -166,6 +166,7 @@ Herdr 앱의 터미널 안에서만 동작합니다.
 | `MUWI_WORK` | 없음 | 명령이 다룰 작업 이름입니다. `--work`와 같습니다 |
 | `MUWI_SESSION` | Claude Code의 세션 id | 세션 이름을 직접 정합니다 |
 | `MUWI_HOST` | `muwi setup`이 적어 둔 화면 | 화면 모듈의 경로. `@muwi/herdr-app`의 `muwi` 명령이 자기 화면으로 정합니다 |
+| `MUWI_NO_UPDATE_CHECK` | 없음 | `1`이면 새 버전 알림을 끕니다. [업데이트하기](setup.md#업데이트하기) |
 
 ## 내부 명령
 
