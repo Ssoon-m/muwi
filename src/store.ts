@@ -68,7 +68,7 @@ export type EventBody =
    * seen: (시작할 때) 이 세션을 훅이 보고 있었는지. false면 이 회차에서 읽은 skill은 관찰하지 못한 것이다
    */
   /** model: 그 노드를 시작할 때 그 세션이 쓰던 모델 (도구의 훅이 알려 줄 때) */
-  | { type: 'node'; node: string; status: NodeStatus; note?: string; attempt?: number; agent?: string; seen?: boolean; model?: string }
+  | { type: 'node'; node: string; status: NodeStatus; note?: string; attempt?: number; agent?: string; declared?: boolean; seen?: boolean; model?: string }
   /** agent: 서브에이전트가 읽었으면 그 id. node·attempt: 읽을 때 하고 있던 노드 (없으면 어느 노드도 하고 있지 않았다) */
   | ({ type: 'skill'; skill: string; via: 'tool' | 'file'; carried?: boolean; agent?: string } & Where)
   /** 서브에이전트가 시작하고 끝난 것. 훅이 적는다. node·attempt: 뜰 때 그 세션이 하고 있던 노드 (그 노드를 도운 것으로 본다) */

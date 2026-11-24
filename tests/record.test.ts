@@ -3,9 +3,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { handleHook, isScratchPath, skillFromPath } from '../src/hook.ts';
+import { fileGuideHash, guideUpdate, handleHook, isScratchPath, skillFromPath } from '../src/hook.ts';
 import { markNode } from '../src/node.ts';
-import { attach, readSession, recordSkill } from '../src/session.ts';
+import { attach, readSession, recordSkill, touchSession } from '../src/session.ts';
 import { appendEvent, clock, readConfig, readEvents, writeConfig, writePlan, type NodeStatus, type Plan } from '../src/store.ts';
 import { loadBoard, loadView } from '../src/view.ts';
 
@@ -326,24 +326,48 @@ function newerRoot(version = '9.9.9') {
   return root;
 }
 
-test('업데이트: 세션이 시작된 뒤에 지침이 바뀌면, 사람이 다음에 말을 걸 때 새 지침을 한 번 넣는다', () => {
+test('업데이트: 세션이 시작된 뒤에 지침이 바뀌면, 그 세션의 다음 muwi 명령이 새 지침을 한 번 전한다 (어느 도구에서나 된다)', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-guide-'));
   const here = path.resolve(import.meta.dirname, '..');
-  const says = (root: string, session = 's1') => handleHook({ session_id: session, hook_event_name: 'UserPromptSubmit', prompt: '다음 일' }, dir, 'record', ENV, root);
   // 세션이 시작될 때 넣은 지침을 기억한다
   handleHook({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', ENV, here);
   assert.ok(readSession(dir, 's1')!.instructions);
-  // 지침이 그대로면 아무것도 넣지 않는다
-  assert.deepEqual(says(here), {});
+  // 지침이 그대로면 붙일 말이 없다
+  assert.equal(guideUpdate(dir, 's1', ENV, here), null);
   // muwi가 업데이트돼 지침이 바뀌었다
   const root = newerRoot();
-  const next = JSON.parse(says(root).stdout!).hookSpecificOutput;
-  assert.equal(next.hookEventName, 'UserPromptSubmit');
-  assert.match(next.additionalContext, /muwi가 업데이트됐다 \(9\.9\.9\)\. 작업 진행 방식이 바뀌었으니/);
-  assert.match(next.additionalContext, /새로 생긴 규칙/);
-  // 한 번만 넣는다
-  assert.deepEqual(says(root), {});
-  // 지침을 기억하지 못하는 세션(예전 버전에서 시작)은 지금 것을 기억만 하고 넣지 않는다
-  assert.deepEqual(says(root, 'old'), {});
+  // 사람이 말할 때의 훅으로는 넣지 않는다 (말할 때 문맥을 넣을 수 없는 도구가 있다)
+  assert.deepEqual(handleHook({ session_id: 's1', hook_event_name: 'UserPromptSubmit', prompt: '다음 일' }, dir, 'record', ENV, root), {});
+  const text = guideUpdate(dir, 's1', ENV, root)!;
+  assert.match(text, /muwi가 업데이트됐다 \(9\.9\.9\)\. 작업 진행 방식이 바뀌었으니/);
+  assert.match(text, /새로 생긴 규칙/);
+  // 한 번만 전한다
+  assert.equal(guideUpdate(dir, 's1', ENV, root), null);
+  // 처음 보는 세션(지침을 어떻게 받았는지 모른다)은 지금 판을 본 것으로 적기만 한다
+  assert.equal(guideUpdate(dir, 'old', ENV, root), null);
   assert.ok(readSession(dir, 'old')!.instructions);
+});
+
+test('업데이트: 지침 파일로 지침을 받는 도구는 그 파일에 든 판이 그 세션이 본 지침이다 (muwi setup을 다시 하지 않았으면 옛 판)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-guide-file-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-guide-home-'));
+  const here = path.resolve(import.meta.dirname, '..');
+  const env = { ...ENV, HOME: home, CODEX_HOME: path.join(home, '.codex') } as NodeJS.ProcessEnv;
+  const block = fs.readFileSync(path.join(here, 'hooks', 'instructions.md'), 'utf8');
+  fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.codex', 'AGENTS.md'), `# 내 지침\n\n${block}`);
+  assert.ok(fileGuideHash('codex', env));
+  assert.equal(fileGuideHash('claude', env), undefined); // 지침 파일이 없는 도구
+  // 파일의 지침이 지금 판과 같으면 붙일 말이 없다
+  handleHook({ session_id: 'c1', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', env, here, 'codex');
+  assert.equal(readSession(dir, 'c1')!.instructions, fileGuideHash('codex', env));
+  assert.equal(guideUpdate(dir, 'c1', env, here), null);
+  // muwi는 새 판인데 AGENTS.md에는 옛 지침이 남아 있다: 세션이 시작될 때 읽은 것은 옛 지침이므로 새 지침을 전한다
+  const root = newerRoot();
+  handleHook({ session_id: 'c2', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', env, root, 'codex');
+  assert.match(guideUpdate(dir, 'c2', env, root)!, /새로 생긴 규칙/);
+  assert.equal(guideUpdate(dir, 'c2', env, root), null);
+  // 세션 시작 훅이 없는 도구도 같다: 첫 muwi 명령에서 파일의 판과 견준다
+  touchSession(dir, 'c3', { tool: 'codex' }, env);
+  assert.match(guideUpdate(dir, 'c3', env, root)!, /새로 생긴 규칙/);
 });
