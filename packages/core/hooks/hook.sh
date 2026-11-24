@@ -2,7 +2,8 @@
 # Claude Code 훅이 부른다. 입력(JSON)을 읽고, 볼 필요가 있는 것만 muwi hook으로 넘긴다.
 # 대부분의 호출(skill과 상관없는 파일 읽기, 서브에이전트가 아닌 쪽의 명령, 이미 계획을 적은 세션의 파일 수정)은
 # 여기서 끝나서 node를 띄우지 않는다.
-#   hook.sh        세션이 시작되면 지침을 넣고, 읽은 skill과 서브에이전트의 시작·끝을 기록한다
+#   hook.sh        세션이 시작되면 지침을 넣고, 읽은 skill과 서브에이전트의 시작·끝, 세션이 일하는지·말을 끝냈는지·끝났는지를 기록한다
+#                  (사람이 말할 때와 말을 끝냈을 때도 node가 뜬다. 세션 상태를 알 길이 이것뿐인 곳이 있다: live.ts)
 #   hook.sh command  서브에이전트가 muwi로 노드를 시작하면 그 노드를 그 서브에이전트가 한 것으로 잇는다. 명령을 막지 않는다
 #                  (0.5.x의 훅 설정은 guard라고 부른다. push 앞에서 묻기는 0.6.0에서 뺐다)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -41,7 +42,7 @@ case "${1:-}" in
         ;;
     esac
     case "$payload" in
-      *'"SessionStart"'* | *'"SubagentStart"'* | *'"SubagentStop"'* | *'"Skill"'* | *SKILL.md*) ;;
+      *'"SessionStart"'* | *'"SessionEnd"'* | *'"UserPromptSubmit"'* | *'"Stop"'* | *'"SubagentStart"'* | *'"SubagentStop"'* | *'"Skill"'* | *SKILL.md*) ;;
       *) exit 0 ;;
     esac
     ;;

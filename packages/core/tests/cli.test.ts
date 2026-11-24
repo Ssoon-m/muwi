@@ -226,7 +226,7 @@ test('muwi config·version·setup', () => {
   assert.equal(fs.existsSync(wrapper), false);
 });
 
-test('hook.sh: 볼 것만 넘기고, 세션 시작에는 지침을 돌려준다', SH, () => {
+test('hook.sh: 볼 것만 넘기고, 세션 시작에는 지침을 돌려준다. 세션이 일하는지·말을 끝냈는지·끝났는지도 넘긴다', SH, () => {
   const { dir } = bench();
   const script = path.resolve(import.meta.dirname, '../hooks/hook.sh');
   const hook = (payload: object, ...args: string[]) =>
@@ -240,8 +240,14 @@ test('hook.sh: 볼 것만 넘기고, 세션 시작에는 지침을 돌려준다'
   // 계획 없는 세션의 파일 수정에도 답하지 않는다 (0.5.x의 훅 설정이 부르는 nudge 갈래는 조용히 지나간다)
   const edit = { session_id: 's1', hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: '/repo/src/app.ts' } };
   assert.equal(hook(edit, 'nudge'), '');
-  // 사람이 말할 때의 입력은 넘기지 않는다
+  // 사람이 말하면 일하는 중, 말을 끝내면 멈춤, 세션이 끝나면 닫힘으로 적는다 (Claude Code는 이 스크립트로 부른다. 문맥은 넣지 않는다)
+  const session = () => JSON.parse(fs.readFileSync(path.join(dir, '.sessions', 's1.json'), 'utf8'));
   assert.equal(hook({ session_id: 's1', hook_event_name: 'UserPromptSubmit', prompt: '다음 일' }), '');
+  assert.equal(session().turn, 'working');
+  assert.equal(hook({ session_id: 's1', hook_event_name: 'Stop', stop_hook_active: false }), '');
+  assert.equal(session().turn, 'done');
+  assert.equal(hook({ session_id: 's1', hook_event_name: 'SessionEnd', reason: 'exit' }), '');
+  assert.ok(session().endedAt);
 });
 
 test('출력을 받는 쪽이 먼저 닫아도 (muwi show | head) 오류를 쏟지 않는다', SH, () => {
