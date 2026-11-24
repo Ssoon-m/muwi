@@ -122,7 +122,7 @@ function normalizeTool(toolName: unknown, input: any) {
 }
 
 function modeFor(name: string): string | undefined {
-  if (name === "Edit" || name === "Write" || name === "Agent") return "nudge";
+  // Edits and subagent spawns are not reported: muwi never blocks what the agent does.
   return undefined;
 }
 

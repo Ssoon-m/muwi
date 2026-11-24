@@ -39,7 +39,7 @@ function setup(nodes: { id: string; after?: string[]; run?: RunBy }[], work = 'w
     attach(dir, session, work, ENV);
   };
   /** Claude Code가 훅에 넘기는 입력을 흉내 낸다 */
-  const hook = (payload: Record<string, unknown>, mode: 'record' | 'command' | 'nudge' = 'record', session = 'lead', env: NodeJS.ProcessEnv = ENV) =>
+  const hook = (payload: Record<string, unknown>, mode: 'record' | 'command' = 'record', session = 'lead', env: NodeJS.ProcessEnv = ENV) =>
     handleHook({ session_id: session, ...payload }, dir, mode, env, path.resolve(import.meta.dirname, '..'));
   const sub = {
     start: (agent: string, session = 'lead') => hook({ hook_event_name: 'SubagentStart', agent_id: agent, agent_type: 'general-purpose' }, 'record', session),
@@ -302,8 +302,6 @@ test('muwi run으로 뜬 세션은 시작할 때 맡은 작업에 붙고 노드�
   assert.equal(s.of('impl').status, 'doing');
   assert.deepEqual(s.of('impl').who, { kind: 'session', session: 'child', agents: [] });
   assert.equal(s.view().sessions.child.terminal, 't7');
-  // 붙은 세션은 계획 없이 파일을 고친다는 알림을 받지 않는다
-  assert.equal(s.hook({ hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: '/repo/src/a.ts' } }, 'nudge', 'child', env).stdout, undefined);
 
   // 사람을 기다리는 중에 대화가 요약돼 다시 시작해도 상태는 그대로 둔다
   at(5); s.node('impl', 'waiting', 'child');
@@ -315,7 +313,6 @@ test('muwi run으로 뜬 세션은 시작할 때 맡은 작업에 붙고 노드�
   at(7); const later = s.hook({ hook_event_name: 'SessionStart', source: 'clear' }, 'record', 'unrelated', env);
   assert.doesNotMatch(JSON.parse(later.stdout!).hookSpecificOutput.additionalContext, /이 세션이 맡은 노드/);
   assert.equal(readSession(s.dir, 'unrelated')!.work, undefined);
-  assert.ok(JSON.parse(s.hook({ hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: '/repo/src/a.ts' } }, 'nudge', 'unrelated', env).stdout!));
   assert.equal(readEvents(s.dir, s.work).filter(e => e.type === 'join').length, 1);
 });
 
@@ -421,7 +418,7 @@ test('muwi tidy: 끝난 노드를 맡았던 세션만, 라벨이 맞을 때만 �
   assert.match(fake.calls(), /hc \[kill\] \[t7\]\nhc \[rm\] \[t7\]/);
 });
 
-test('hook.sh: 서브에이전트의 시작·끝, 서브에이전트가 실행한 muwi 명령, 사람이 새로 건 말을 넘긴다', SH, () => {
+test('hook.sh: 서브에이전트의 시작·끝과 서브에이전트가 실행한 muwi 명령을 넘긴다', SH, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-hooksh-'));
   const sh = path.resolve(import.meta.dirname, '../hooks/hook.sh');
   const run = (payload: object, mode: string[] = []) =>
@@ -446,12 +443,6 @@ test('hook.sh: 서브에이전트의 시작·끝, 서브에이전트가 실행�
     : e.type);
   assert.deepEqual(events, ['node:main:doing:', 'agent:start:ag9:main', 'node:rev:doing:ag9', 'skill:team-rules:ag9:rev', 'agent:stop:ag9:']);
   assert.equal(readSession(dir, 's1')!.starting!.rev, undefined);
-
-  // 사람이 새로 말을 걸면 "이번 요청은 확인이 끝났다"는 표시가 지워진다
-  const ok = path.join(dir, '.sessions', 's1.ok');
-  assert.ok(fs.existsSync(ok));
-  run({ hook_event_name: 'UserPromptSubmit', session_id: 's1', prompt: '다른 일 해줘' });
-  assert.ok(!fs.existsSync(ok));
 });
 
 test('Node가 낮으면 무엇이 필요한지 알린다 (조용히 실패하지 않는다)', SH, () => {

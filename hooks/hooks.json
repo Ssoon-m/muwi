@@ -1,10 +1,7 @@
 {
-  "description": "muwi: 세션이 시작될 때 지침을 넣고, 읽은 skill과 서브에이전트를 기록하고, 계획 없이 파일을 고치거나 서브에이전트를 띄우려 하면 알린다",
+  "description": "muwi: 세션이 시작될 때 지침을 넣고, 읽은 skill과 서브에이전트를 기록한다. AI가 하려는 일을 막지 않는다",
   "hooks": {
     "SessionStart": [
-      {"hooks": [{"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/hook.sh\"", "onFailure": "continue"}]}
-    ],
-    "UserPromptSubmit": [
       {"hooks": [{"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/hook.sh\"", "onFailure": "continue"}]}
     ],
     "SubagentStart": [
@@ -17,7 +14,6 @@
       {"matcher": "Skill|Read", "hooks": [{"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/hook.sh\"", "onFailure": "continue"}]}
     ],
     "PreToolUse": [
-      {"matcher": "Edit|Write|MultiEdit|NotebookEdit|Agent|Task", "hooks": [{"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/hook.sh\" nudge", "onFailure": "continue"}]},
       {"matcher": "Bash", "hooks": [{"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/hook.sh\" command", "onFailure": "continue"}]}
     ]
   }

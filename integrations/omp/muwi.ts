@@ -161,7 +161,7 @@ function normalizeTool(toolName: unknown, input: any) {
 
 function modeFor(name: string): string | undefined {
   if (name === "Bash") return "command"; // links a node a subagent starts; never blocks
-  if (name === "Edit" || name === "Write" || name === "Agent") return "nudge";
+  // Edits and subagent spawns are not reported: muwi never blocks what the agent does.
   return undefined;
 }
 
@@ -293,20 +293,6 @@ export default function (pi: any) {
       const result = decisionOf(reply);
       if (result.decision === "deny") return { block: true, reason: result.reason || "Blocked by muwi" };
       if (result.context) return { additionalContext: result.context };
-    } catch {}
-  });
-
-  // Subagents started from an eval cell (`agent()`) never pass through the `task` tool.
-  pi.on("before_subagent_spawn", async (event: any, ctx: any) => {
-    try {
-      if (event?.invocationKind !== "eval") return; // `task` spawns were handled in tool_call
-      const type = firstString(event?.agent) ?? "subagent";
-      const reply = await runHook(
-        "nudge",
-        base(ctx, "PreToolUse", { tool_name: "Agent", tool_input: { subagent_type: type } }),
-      );
-      const result = decisionOf(reply);
-      if (result.decision === "deny") return { block: true, reason: result.reason || "Blocked by muwi" };
     } catch {}
   });
 

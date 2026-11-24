@@ -87,7 +87,6 @@ muwi가 남기는 파일의 위치와 형식을 정리했습니다. 기록을 �
 | `work` | 붙어 있는 작업 |
 | `loaded` | 이 세션이 읽은 skill과 처음 읽은 시각 |
 | `hooked` | 훅이 이 세션을 마지막으로 본 시각 |
-| `skipped` | `muwi skip`으로 남긴 이유. 사용자가 다음에 말을 걸면 지워집니다 |
 | `seenAt` | 이 세션이 마지막으로 기록한 시각 |
 
 `muwi` 명령은 환경 변수 `CLAUDE_CODE_SESSION_ID`에서, 훅은 Claude Code가 넘겨주는 `session_id`에서 세션 이름을 얻습니다. 두 값은 같습니다.
@@ -96,6 +95,6 @@ muwi가 남기는 파일의 위치와 형식을 정리했습니다. 기록을 �
 
 | 파일 | 내용 |
 | --- | --- |
-| `config.json` | `nudge`, `layout` 설정 |
+| `config.json` | `layout` 설정 |
 | `setup.json` | `muwi setup`이 설치한 항목과 위치. 0.5.4까지는 `install.json` |
 | `.hook-errors.log` | 훅에서 난 오류. 훅은 실패해도 세션을 멈추지 않고 여기에만 남깁니다 |

@@ -9,7 +9,7 @@ import { layoutFor, layoutProblems, type Fit, type Flow } from './layout.ts';
 import { ROOT, adoptSpawn, guideUpdate, handleHook, sessionInstructions } from './hook.ts';
 import { fromSubagent, markNode } from './node.ts';
 import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
-import { attach, markSettled, readSession, recentSessions, sessionKey, sessionLabel, touchSession } from './session.ts';
+import { attach, readSession, recentSessions, sessionKey, sessionLabel, touchSession } from './session.ts';
 import { resumeFacts } from './resume.ts';
 import { checkMod, installedTools, newestPlugin, olderThan, readInstall, refreshSetup, removeSetup, runSetup } from './setup.ts';
 import { adapterOf } from './integrations/index.ts';
@@ -28,6 +28,7 @@ const HELP = `사용법: muwi <명령>
   muwi plan --work <이름> --request "<시킨 말>" '<계획 JSON>'    새 작업의 계획을 적는다
   muwi plan --why "<바꾼 이유>" '<계획 JSON>'                    계획을 바꾼다 (같은 id의 노드는 상태를 잇는다)
   muwi add <id> "<제목>" [--after a,b] [--before c] --why "…"   노드 하나를 끼워 넣는다 (--run, --show도 받는다)
+                                       자리를 주지 않으면 맨 끝 노드 뒤에 잇는다. 어느 노드와도 잇지 않으려면 --alone
   muwi remove <id> --why "…"                                   노드 하나를 뺀다
       계획 JSON: {"title": "한 줄 설명", "nodes": [{"id": "read", "title": "티켓 읽기"},
                                                   {"id": "impl", "title": "구현", "after": ["read"]}]}
@@ -49,7 +50,6 @@ const HELP = `사용법: muwi <명령>
   muwi node <id> pause                 하던 노드를 잠시 멈춘다 (다른 노드를 먼저 할 때). 다시 start하면 같은 회차로 이어진다
   muwi flag [<id>] "<메모>"             문제 지점을 표시한다
   muwi viewed [--work <작업>]          끝난 작업을 본 것으로 적는다 (새 결과에서 뺀다. 그래프 칸이 그 작업을 보여 줄 때 적는다)
-  muwi skip "<이유>"                   이 세션은 계획 없이 진행한다 (한 곳만 고치는 일, 기록할 작업이 아닐 때)
 
   보기
   muwi status [--all] [--json]         작업 목록 (응답 대기·막힘·새 결과가 위). 오래된 작업은 접어 두고, --all이면 다 보여 준다
@@ -72,7 +72,7 @@ const HELP = `사용법: muwi <명령>
   muwi setup --all                   이 컴퓨터에 깔린 도구 전부에 넣는다 (Claude Code는 플러그인이 넣어 주므로 뺀다)
   muwi setup --claude                플러그인 없이 쓸 때: Claude Code 훅과 사용법 skill도 넣는다
   muwi setup --remove                setup으로 넣은 것을 뺀다 (muwi layout으로 바꾼 화면도 되돌린다)
-  muwi config [nudge|layout on|off]  계획 알림(nudge), 화면 바꾸기 안내(layout)를 켜고 끈다
+  muwi config [layout on|off]        화면 바꾸기 안내(layout)를 켜고 끈다
   muwi --version
 
 작업은 --work <이름>으로 고른다. 없으면 이 세션이 붙어 있는 작업을 쓴다.
@@ -213,6 +213,20 @@ function printPlan(plan: Plan) {
     const mark = n.status === 'todo' && (n.attempt ?? 0) > 0 ? '⏸' : MARK[n.status];
     out(`  ${mark} ${n.id.padEnd(width)}  ${n.title}${n.after.length ? `  ← ${n.after.join(', ')}` : ''}${n.run ? `  [${runTag(n)}]` : ''}`);
   }
+  const alone = loneNodes(plan);
+  if (alone.length) {
+    out(`⚠ 다른 노드와 이어지지 않은 노드가 있어요: ${alone.join(', ')}. 그래프에 선 없이 따로 떨어져 보여요.`);
+    out('  순서가 있으면 계획을 다시 내서 그 노드의 after에 앞 노드를 적어요 (muwi plan --why "…"). 일부러 따로 둔 것이면 그대로 둬요.');
+  }
+}
+
+/**
+ * 계획은 방향 있는 선으로 이어진 그래프다. 선이 있는 계획에서 어느 노드와도 이어지지 않은 노드는 대개 after를 빼먹은 것이다.
+ * 선이 하나도 없는 계획(순서 없이 할 일을 늘어놓은 것)은 그대로 둔다
+ */
+export function loneNodes(plan: Pick<Plan, 'nodes'>): string[] {
+  if (!plan.nodes.some(n => n.after.length)) return [];
+  return plan.nodes.filter(n => !n.after.length && !plan.nodes.some(m => m.after.includes(n.id))).map(n => n.id);
 }
 
 /** 진행 중이었는데 앞에 끝나지 않은 노드가 새로 생겨 잠시 멈춰야 하는 노드 */
@@ -377,16 +391,24 @@ function cmdAdd(a: Args, dir: string) {
   const after = (str(a, 'after') ?? '').split(',').map(s => s.trim()).filter(Boolean);
   const before = str(a, 'before');
   const fresh = { id, title, after, ...(str(a, 'run') ? { run: str(a, 'run') } : {}), ...(str(a, 'show') ? { show: str(a, 'show') } : {}) } as NodeInput;
+  /** 자리를 주지 않아서 맨 끝 노드 뒤에 이었으면 그 노드들 */
+  let tail: string[] = [];
   const { plan, paused } = savePlan(dir, work, old => {
     if (!old) throw new Fail(`작업이 없어요: ${work} (muwi status로 목록을 봐요)`);
     if (old.nodes.some(n => n.id === id)) throw new Fail(`이미 있는 노드예요: ${id}`);
     if (before && !old.nodes.some(n => n.id === before)) throw new Fail(`--before의 ${before}는 없는 노드예요. 있는 노드: ${old.nodes.map(n => n.id).join(', ')}`);
+    // 자리를 주지 않은 노드는 맨 끝 노드(뒤에 아무것도 없는 노드) 뒤에 잇는다. 나중에 넣는 노드는 대개 하던 일 다음에 할 일이다.
+    // 잇지 않으면 그래프에 선 없이 따로 떨어진 노드가 된다. 일부러 그렇게 두려면 --alone
+    if (!after.length && !before && !a.flags.alone) {
+      tail = old.nodes.filter(n => !old.nodes.some(m => m.after.includes(n.id))).map(n => n.id);
+      fresh.after = tail;
+    }
     const { plan: input, problems } = parsePlan(addNode(old, fresh, before));
     if (!input) throw new Fail(`노드를 넣지 못했어요:\n${problems.map(p => `  - ${p}`).join('\n')}`, 2);
     return input;
   }, a);
   join(dir, work);
-  out(`노드를 넣었어요: ${id} (${work}, 노드 ${plan.nodes.length}개)`);
+  out(`노드를 넣었어요: ${id} (${work}, 노드 ${plan.nodes.length}개)${tail.length ? `. 자리를 주지 않아 ${tail.join(', ')} 뒤에 이었어요 (따로 두려면 --alone)` : ''}`);
   pausePlanned(dir, work, paused);
   printPlan(readPlan(dir, work) ?? plan);
 }
@@ -660,7 +682,9 @@ function cmdHook(a: Args, dir: string) {
   try {
     const text = fs.readFileSync(0, 'utf8');
     // guard: 0.5.x까지의 훅 설정이 셸 명령 앞의 훅을 부르던 이름
-    const mode = a.pos[0] === 'command' || a.pos[0] === 'guard' ? 'command' : a.pos[0] === 'nudge' ? 'nudge' : 'record';
+    // 0.5.x의 훅 설정이 부르던 갈래: 계획 없이 고칠 때 알림(nudge)은 0.6.0에서 뺐다
+    if (a.pos[0] === 'nudge') return;
+    const mode = a.pos[0] === 'command' || a.pos[0] === 'guard' ? 'command' : 'record';
     const payload = JSON.parse(text);
     // 입력에 사건 이름을 넣지 않는 도구는 훅 명령이 알려 준다 (--event)
     const named = str(a, 'event');
@@ -799,9 +823,8 @@ function cmdLayout(a: Args, dir: string) {
   out(`되돌리려면 muwi layout --remove (${r.base} 레이아웃으로 돌아가요)`);
 }
 
-const CONFIG_KEYS: (keyof Config)[] = ['nudge', 'layout'];
+const CONFIG_KEYS: (keyof Config)[] = ['layout'];
 const CONFIG_ABOUT: Record<keyof Config, string> = {
-  nudge: '계획을 적지 않은 세션이 파일을 고치거나 서브에이전트를 띄우려 할 때 알린다',
   layout: 'Herdr 앱 화면에 muwi 칸이 없을 때 넣자고 안내한다 (muwi setup, 그래프 칸)',
 };
 
@@ -810,6 +833,9 @@ function cmdConfig(a: Args, dir: string) {
   const config = readConfig(dir);
   if (key === 'guard') {
     throw new Fail('push·PR 앞에서 묻기(guard)는 0.6.0에서 뺐어요. 무엇을 승인받고 할지는 muwi가 정하지 않아요. 그 도구의 권한 설정이나 직접 둔 훅을 쓰세요.');
+  }
+  if (key === 'nudge') {
+    throw new Fail('계획 알림(nudge)은 0.6.0에서 뺐어요. muwi는 계획이 없어도 AI가 하려는 일을 막지 않아요. 계획을 적을지는 AI가 일의 크기를 보고 정해요.');
   }
   if (key !== undefined) {
     if (!CONFIG_KEYS.includes(key as keyof Config) || (value !== 'on' && value !== 'off')) {
@@ -994,14 +1020,12 @@ function cmdTidy(a: Args, dir: string) {
 }
 
 /** 이 세션은 계획 없이 진행한다고 밝힌다. 계획을 적지 않은 세션의 파일 수정을 막던 안내가 그친다 */
-function cmdSkip(a: Args, dir: string) {
-  const reason = a.pos[0]?.trim();
-  if (!reason) throw new Fail('사용법: muwi skip "<왜 계획 없이 진행하는지>"');
-  const key = sessionKey();
-  if (!key) throw new Fail('세션을 알 수 없어요. 이 명령은 에이전트 세션 안에서 실행해요.');
-  touchSession(dir, key, { skipped: { at: nowIso(), reason } });
-  markSettled(dir, key);
-  out(`이 세션은 계획 없이 진행해요: ${reason}`);
+/**
+ * 0.5.x의 명령. 계획 없이 고칠 때의 알림을 넘기려고 있었다. 알림을 뺐으니 적을 것이 없다.
+ * 옛 지침을 받은 세션이 불러도 실패하지 않게 받아 준다
+ */
+function cmdSkip() {
+  out('계획 없이 진행해요. 0.6.0부터는 muwi skip을 적지 않아도 돼요 (muwi는 계획이 없어도 막지 않아요).');
 }
 
 function cmdSession(dir: string) {
@@ -1046,10 +1070,10 @@ function adoptHere(dir: string) {
 }
 
 /** 맡은 세션이 처음 실행할 만한 명령들: 맡은 노드의 진행을 적는 명령 */
-const ADOPTS = new Set(['node', 'start', 'done', 'wait', 'block', 'add', 'remove', 'skip']);
+const ADOPTS = new Set(['node', 'start', 'done', 'wait', 'block', 'add', 'remove']);
 
 /** 지침이 바뀌었을 때 알려 줄 명령들: 세션이 계획과 진행을 적는 명령 */
-const TELLS = new Set(['plan', 'add', 'remove', 'node', 'start', 'done', 'wait', 'block', 'skip', 'run']);
+const TELLS = new Set(['plan', 'add', 'remove', 'node', 'start', 'done', 'wait', 'block', 'run']);
 
 async function run(cmd: string | undefined, a: Args, dir: string) {
   switch (cmd) {
@@ -1070,7 +1094,7 @@ async function run(cmd: string | undefined, a: Args, dir: string) {
     case 'version': case '--version': case '-v': return out(version());
     case 'open': return cmdOpen(a);
     case 'layout': return cmdLayout(a, dir);
-    case 'skip': return cmdSkip(a, dir);
+    case 'skip': return cmdSkip();
     case 'run': return cmdRun(a, dir);
     case 'tidy': return cmdTidy(a, dir);
     case 'session': return cmdSession(dir);
