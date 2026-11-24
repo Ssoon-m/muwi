@@ -85,6 +85,7 @@ export function toClaude(h: Happened, r: Reply): HookResult {
 }
 
 export const claude: Adapter = {
+  can: { subagents: true, start: true, skills: true },
   install(ctx) {
     const settings = path.join(ctx.home, 'settings.json');
     installHooks(settings, hookCommandFor(ctx.root, ctx.platform));

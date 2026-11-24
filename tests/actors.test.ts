@@ -386,6 +386,16 @@ test('muwi run: 놓을 곳과 띄울 명령은 부르는 쪽이 고른다. 정�
   assert.match(fake.calls(), /\[terminal\.keep\] \[\{"terminal":"t7","place":"down"\}\]/);
 });
 
+test('맡긴 세션은 세션 시작을 알려 주지 않는 도구에서도 붙는다: 그 세션의 첫 muwi 명령에서 맡은 노드에 붙는다', () => {
+  const { muwi } = bench();
+  assert.equal(muwi(['run', 'impl', '목록 화면에 링크를 추가해줘']).code, 0);
+  // 맡은 세션(터미널 t7)이 훅 없이 바로 끝을 적는다. --work를 붙이지 않아도 터미널의 이름표로 맡은 작업을 안다
+  const done = muwi(['node', 'impl', 'done', '링크 추가함'], { MUWI_SESSION: 'worker', HC_TERMINAL_ID: 't7' });
+  assert.equal(done.code, 0, done.err);
+  const node = JSON.parse(muwi(['show', 'shop-1', '--json']).out).nodes.find((n: any) => n.id === 'impl');
+  assert.deepEqual([node.status, node.who.kind, node.who.session], ['done', 'session', 'worker']);
+});
+
 test('muwi run: Herdr 밖이거나 없는 노드면 띄우지 않고 이유를 말한다', () => {
   const { fake, muwi } = bench();
   const outside = muwi(['run', 'impl', '구현해줘'], { HC_TERMINAL_ID: '' });
@@ -538,11 +548,13 @@ test('적는 명령은 작업을 짐작하지 않는다. 같은 폴더에 남의
   const { dir, muwi } = bench();
   // 어제의 다른 대화가 남겨 둔 작업 (같은 폴더)
   assert.equal(muwi(['plan', '--work', 'old-100', '--request', 'x', '{"nodes":[{"id":"pr","title":"PR"}]}'], { MUWI_SESSION: 'yesterday' }).code, 0);
-  const r = muwi(['add', 'fix', '리뷰 반영', '--after', 'pr', '--why', '리뷰'], { MUWI_SESSION: 'today' });
+  // 오늘의 대화는 muwi run으로 뜬 세션이 아니다 (터미널에 맡은 노드의 이름표가 없다)
+  const today = { MUWI_SESSION: 'today', HC_TERMINAL_ID: '' };
+  const r = muwi(['add', 'fix', '리뷰 반영', '--after', 'pr', '--why', '리뷰'], today);
   assert.equal(r.code, 1);
   assert.match(r.err, /어느 작업인지 알 수 없어요\. --work <이름>을 붙여요\. 이 폴더의 작업: .*old-100\(진행 중\)/);
   assert.equal(readPlan(dir, 'old-100')!.nodes.length, 1);
-  assert.match(muwi(['node', 'pr', 'start'], { MUWI_SESSION: 'today' }).err, /어느 작업인지 알 수 없어요/);
+  assert.match(muwi(['node', 'pr', 'start'], today).err, /어느 작업인지 알 수 없어요/);
   // 보기만 하는 명령은 짐작해도 된다
   assert.equal(muwi(['show'], { MUWI_SESSION: 'today', MUWI_DIR: dir }).code, 1); // 폴더에 끝나지 않은 작업이 둘이라 고르지 못한다
   assert.match(muwi(['show', 'old-100'], { MUWI_SESSION: 'today' }).out, /old-100/);
@@ -590,7 +602,7 @@ test('muwi show: 다시 한 노드는 회차별로, 훅이 보지 못한 세션�
   const { dir, muwi } = bench();
   const hook = (payload: object) => spawnSync(process.execPath, [CLI, 'hook'], { input: JSON.stringify(payload), encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir } });
   // 훅이 한 번도 돌지 않은 세션
-  assert.equal(muwi(['node', 'read', 'start'], { MUWI_SESSION: 'bare' }).code, 1); // 붙은 작업이 없다
+  assert.equal(muwi(['node', 'read', 'start'], { MUWI_SESSION: 'bare', HC_TERMINAL_ID: '' }).code, 1); // 붙은 작업이 없다
   assert.equal(muwi(['node', 'read', 'start', '--work', 'shop-1'], { MUWI_SESSION: 'bare' }).code, 0);
   assert.equal(muwi(['node', 'read', 'done', '요구사항 2건'], { MUWI_SESSION: 'bare' }).code, 0);
   // 훅이 보고 있는 세션: 처음엔 skill 없이, 다시 할 때는 읽고

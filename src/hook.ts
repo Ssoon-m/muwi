@@ -4,7 +4,7 @@ import { ROOT, handleEvent, type Happened } from './events.ts';
 import { adapterOf } from './integrations/index.ts';
 import type { HookMode, HookResult } from './integrations/types.ts';
 
-export { NUDGE, ROOT, childNote, fileGuideHash, guideUpdate, instructionsHash, isScratchPath, nodeStartIn, nudgeText, sessionInstructions, skillFromPath } from './events.ts';
+export { NUDGE, ROOT, adoptSpawn, childNote, fileGuideHash, guideUpdate, instructionsHash, isScratchPath, nodeStartIn, nudgeText, sessionInstructions, skillFromPath } from './events.ts';
 export type { HookMode, HookResult } from './integrations/types.ts';
 
 /** 훅 하나를 처리한다. seen: 어떤 사건이었는지 부른 쪽에 알려 준다 (설치를 새 위치로 맞출 때를 고르는 데 쓴다) */

@@ -111,7 +111,7 @@ export function childNote(work: string, node: Pick<PlanNode, 'id' | 'title'>): s
 }
 
 /** muwi run으로 뜬 세션이면 맡은 작업에 붙이고 노드를 시작한 것으로 적는다. 그 세션에 알려 줄 말을 돌려준다 */
-function adoptSpawn(dir: string, key: string, env: NodeJS.ProcessEnv): string {
+export function adoptSpawn(dir: string, key: string, env: NodeJS.ProcessEnv): string {
   const terminal = env.HC_TERMINAL_ID;
   if (!terminal) return '';
   const got = spawnedFor(terminal, env);
