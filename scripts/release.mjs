@@ -1,19 +1,20 @@
 #!/usr/bin/env node
-// 릴리스: 두 패키지(@muwi/core, @muwi/herdr-app)를 같은 버전으로 올리고, 버전 커밋과 태그를 push한다.
+// 릴리스: 모든 패키지(@muwi/core, @muwi/herdr, @muwi/herdr-app)를 같은 버전으로 올리고, 버전 커밋과 태그를 push한다.
 // npm에 올리는 것은 태그를 받은 GitHub Actions(.github/workflows/release.yml)가 한다.
 // CHANGELOG는 릴리스할 때 사람이 정리한다. 그 버전의 섹션이 없으면 지난 릴리스 이후 커밋을 패키지별로 보여 주고 멈춘다.
 //   pnpm release 0.7.1             CHANGELOG를 확인하고 버전 커밋과 v0.7.1 태그를 push한다
 //   pnpm release 0.7.1 --dry-run   무엇을 할지만 보여 준다
-//   node scripts/release.mjs verify 0.7.1   (release.yml) 두 패키지 버전과 CHANGELOG 섹션이 맞는지
+//   node scripts/release.mjs verify 0.7.1   (release.yml) 모든 패키지 버전과 CHANGELOG 섹션이 맞는지
 //   node scripts/release.mjs notes 0.7.1    (release.yml) 그 버전의 CHANGELOG 내용. GitHub 릴리스 노트로 쓴다
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-/** 함께 올리는 패키지 (packages/<폴더>). 코어가 먼저다 */
+/** 함께 올리는 패키지 (packages/<폴더>). 기대는 패키지보다 먼저 온다: 코어 → 터미널 연결 → 보기 */
 const PACKAGES = [
   { folder: 'core', name: '@muwi/core' },
+  { folder: 'herdr', name: '@muwi/herdr' },
   { folder: 'herdr-app', name: '@muwi/herdr-app' },
 ];
 const CHANGELOG = path.join(ROOT, 'CHANGELOG.md');
@@ -94,7 +95,7 @@ function missingNotes(version) {
     '',
     groups,
     '',
-    '적는 모양 (패키지별 소제목, 둘 다 해당하면 ### 공통):',
+    '적는 모양 (패키지별 소제목, 여럿에 해당하면 ### 공통):',
     '',
     `## ${version} (${today()})`,
     '',
@@ -119,7 +120,7 @@ function release(version, dryRun) {
   checkVersion(version);
   const current = PACKAGES.map(p => versionOf(p.folder));
   if (new Set(current).size !== 1) {
-    throw new Stop(`두 패키지의 버전이 달라요: ${PACKAGES.map((p, i) => `${p.name} ${current[i]}`).join(', ')}. 같게 맞춘 뒤 실행하세요.`);
+    throw new Stop(`패키지들의 버전이 달라요: ${PACKAGES.map((p, i) => `${p.name} ${current[i]}`).join(', ')}. 같게 맞춘 뒤 실행하세요.`);
   }
   if (!higher(version, current[0])) throw new Stop(`새 버전은 지금 버전보다 높아야 해요 (새 버전: ${version}, 지금: ${current[0]}).`);
 
@@ -158,7 +159,7 @@ function release(version, dryRun) {
   console.log([...plan, '', 'GitHub Actions가 npm에 올리고 GitHub 릴리스를 만들어요: https://github.com/Ssoon-m/muwi/actions/workflows/release.yml'].join('\n'));
 }
 
-/** 태그를 받은 Actions가 부른다: 두 패키지 버전이 태그와 같고, CHANGELOG에 그 섹션이 있는지 */
+/** 태그를 받은 Actions가 부른다: 모든 패키지 버전이 태그와 같고, CHANGELOG에 그 섹션이 있는지 */
 function verify(version) {
   checkVersion(version);
   const wrong = PACKAGES.filter(p => versionOf(p.folder) !== version);

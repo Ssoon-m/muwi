@@ -8,16 +8,26 @@ importers:
 
   .: {}
 
-  packages/core: {}
+  packages/core:
+    dependencies:
+      elkjs:
+        specifier: 0.12.1
+        version: 0.12.1
+
+  packages/herdr:
+    dependencies:
+      '@muwi/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/herdr-app:
     dependencies:
       '@muwi/core':
         specifier: workspace:*
         version: link:../core
-      elkjs:
-        specifier: 0.12.1
-        version: 0.12.1
+      '@muwi/herdr':
+        specifier: workspace:*
+        version: link:../herdr
 
 packages:
 

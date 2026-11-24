@@ -22,15 +22,22 @@ fs.mkdirSync(packs);
 const npm = (args, cwd = tmp) => execFileSync('npm', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], shell: WIN });
 const pack = dir => path.join(packs, npm(['pack', dir, '--pack-destination', packs, '--silent']).trim().split('\n').pop());
 
+/**
+ * 같은 저장소의 다른 muwi 패키지에 기대는 패키지는 같은 버전을 npm에서 받는다. 아직 올리지 않은 판을 확인하므로,
+ * 확인용 사본만 그 의존을 방금 만든 tarball로 바꿔서 만든다
+ */
+function packWith(folder, local) {
+  const check = path.join(tmp, folder);
+  fs.cpSync(build(folder), check, { recursive: true });
+  const manifest = JSON.parse(fs.readFileSync(path.join(check, 'package.json'), 'utf8'));
+  for (const [name, tgz] of Object.entries(local)) if (manifest.dependencies?.[name]) manifest.dependencies[name] = `file:${tgz.split(path.sep).join('/')}`;
+  fs.writeFileSync(path.join(check, 'package.json'), JSON.stringify(manifest, null, 2));
+  return pack(check);
+}
+
 const coreTgz = pack(build('core'));
-// @muwi/herdr-app은 같은 버전의 @muwi/core를 npm에서 받는다. 아직 올리지 않은 판을 확인하므로, 확인용 사본만 그 의존을 방금 만든 tarball로 바꾼다
-const herdrDist = build('herdr-app');
-const herdrCheck = path.join(tmp, 'herdr-app');
-fs.cpSync(herdrDist, herdrCheck, { recursive: true });
-const manifest = JSON.parse(fs.readFileSync(path.join(herdrCheck, 'package.json'), 'utf8'));
-manifest.dependencies['@muwi/core'] = `file:${coreTgz.split(path.sep).join('/')}`;
-fs.writeFileSync(path.join(herdrCheck, 'package.json'), JSON.stringify(manifest, null, 2));
-const herdrTgz = pack(herdrCheck);
+const herdrTermTgz = packWith('herdr', { '@muwi/core': coreTgz });
+const herdrTgz = packWith('herdr-app', { '@muwi/core': coreTgz, '@muwi/herdr': herdrTermTgz });
 
 /** 패키지 하나를 빈 자리(npm prefix)에 npm i -g로 깐다. 그 패키지의 폴더와 npm이 건 명령을 돌려준다. label은 임시 폴더 이름 */
 function installAlone(label, name, tgz) {
@@ -95,26 +102,29 @@ function onlyAllowedTs(pkg) {
   assert.equal(fs.existsSync(wrapper), false);
 }
 
-// ---- @muwi/herdr-app만 깔았을 때: 코어는 @muwi/herdr-app 안에 따라 들어오고, 화면이 더하는 명령과 그래프 배치(elkjs)까지 돈다
+// ---- @muwi/herdr-app만 깔았을 때: 코어와 Herdr 터미널 연결(@muwi/herdr)은 그 안에 따라 들어오고, 보기가 더하는 명령과 그래프 배치(elkjs)까지 돈다
 {
   const { pkg: herdr, bin } = installAlone('herdr-app', '@muwi/herdr-app', herdrTgz);
   const core = path.join(herdr, 'node_modules', '@muwi', 'core');
+  const terminals = path.join(herdr, 'node_modules', '@muwi', 'herdr');
   const { home, env } = envFor('herdr-app');
   const run = runner(env);
   onlyAllowedTs(herdr);
   onlyAllowedTs(core);
+  onlyAllowedTs(terminals);
   assert.equal(run(bin, ['--version']).trim(), version);
-  assert.match(run(bin, ['--help']), /muwi run/);
+  assert.match(run(bin, ['--help']), /muwi layout/);
   const muwi = (...args) => (WIN ? run(process.execPath, [path.join(herdr, 'bin', 'muwi.js'), ...args]) : run(bin, args));
   muwi('plan', '--work', 'w', '--request', '확인', plan);
   muwi('node', 'a', 'start');
   const board = JSON.parse(muwi('board'));
   assert.equal(board.selected.layout.nodes.length, 2);
   assert.deepEqual(board.selected.layoutProblems, []);
-  // setup: 터미널용 명령과 그래프 칸을 넣고 화면의 경로를 적어 둔다. 그 뒤로는 코어의 명령도 Herdr 화면을 쓴다
+  // setup: 터미널용 명령과 그래프 칸을 넣고 연결과 보기의 경로를 적어 둔다. 그 뒤로는 코어의 명령도 둘을 쓴다
   run(bin, ['setup']);
   const setup = JSON.parse(fs.readFileSync(path.join(home, '.muwi', 'setup.json'), 'utf8'));
-  assert.equal(setup.host, path.join(fs.realpathSync(herdr), 'src', 'host.js'));
+  assert.equal(setup.terminals, path.join(fs.realpathSync(terminals), 'src', 'terminals.js'));
+  assert.equal(setup.views[0].path, path.join(fs.realpathSync(herdr), 'src', 'view.js'));
   assert.ok(fs.existsSync(path.join(home, '.config', 'herdr-app', 'mods', 'muwi', 'main.js')));
   const wrapper = path.join(home, '.local', 'bin', WIN ? 'muwi.cmd' : 'muwi');
   assert.equal(JSON.parse(run(wrapper, ['board'])).selected.work, 'w');
@@ -137,4 +147,4 @@ function onlyAllowedTs(pkg) {
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });
-console.log(`패키지 확인: @muwi/core·@muwi/herdr-app ${version}을 하나씩 npm i -g로 깔아서, npm이 건 muwi로 명령, 그래프 배치, setup, 훅, Claude Code 커넥터가 돈다`);
+console.log(`패키지 확인: @muwi/core·@muwi/herdr-app ${version}을 하나씩 npm i -g로 깔아서 (@muwi/herdr는 @muwi/herdr-app에 따라 들어온다), npm이 건 muwi로 명령, 그래프 배치, setup, 훅, Claude Code 커넥터가 돈다`);
