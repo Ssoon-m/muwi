@@ -1,5 +1,5 @@
 // Herdr 화면: 세션이 살아 있는지(hc), 맡긴 노드(터미널 이름표), 새 세션에 맡기기(muwi run·tidy), 세션 상태로 보이는 작업과 노드.
-// hc와 herdr-app은 흉내 낸 스크립트를 쓴다 ($MUWI_HC, $MUWI_HERDR_APP). 기록은 코어(muwi)의 모듈로 만들고 읽는다
+// hc와 herdr-app은 흉내 낸 스크립트를 쓴다 ($MUWI_HC, $MUWI_HERDR_APP). 기록은 코어(@muwi/core)의 모듈로 만들고 읽는다
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -7,24 +7,24 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { handleHook } from 'muwi/hook';
-import { setHost } from 'muwi/host';
-import { SCREEN_COMMANDS } from 'muwi/kit';
-import { markNode } from 'muwi/node';
-import { attach, readSession, touchSession } from 'muwi/session';
-import { modelIn } from 'muwi/connectors/tools';
-import { appendEvent, clock, readEvents, readPlan, writePlan, type NodeStatus, type Plan, type RunBy } from 'muwi/store';
-import { PAST_DAYS, loadBoard, loadView } from 'muwi/view';
+import { handleHook } from '@muwi/core/hook';
+import { setHost } from '@muwi/core/host';
+import { SCREEN_COMMANDS } from '@muwi/core/kit';
+import { markNode } from '@muwi/core/node';
+import { attach, readSession, touchSession } from '@muwi/core/session';
+import { modelIn } from '@muwi/core/connectors/tools';
+import { appendEvent, clock, readEvents, readPlan, writePlan, type NodeStatus, type Plan, type RunBy } from '@muwi/core/store';
+import { PAST_DAYS, loadBoard, loadView } from '@muwi/core/view';
 import herdr from '../src/host.ts';
 import { terminalName } from '../src/hc.ts';
 import { closedSessions } from '../src/live.ts';
 
 // 이 파일의 시험은 Herdr 화면을 쓴다
 setHost(herdr);
-/** herdr-muwi의 muwi 명령: Herdr 화면을 붙인 muwi */
+/** @muwi/herdr-app의 muwi 명령: Herdr 화면을 붙인 muwi */
 const CLI = path.resolve(import.meta.dirname, '../bin/muwi.js');
-/** 코어(muwi)가 깔린 곳: 세션 지침(hooks/instructions.md)이 있다 */
-const CORE = path.dirname(fileURLToPath(import.meta.resolve('muwi/package.json')));
+/** 코어(@muwi/core)가 깔린 곳: 세션 지침(hooks/instructions.md)이 있다 */
+const CORE = path.dirname(fileURLToPath(import.meta.resolve('@muwi/core/package.json')));
 const ENV = {} as NodeJS.ProcessEnv;
 const T0 = Date.parse('2026-11-22T05:00:00.000Z');
 const at = (min: number) => { clock.now = () => new Date(T0 + min * 60_000); };
@@ -413,6 +413,6 @@ test('지난 작업: 끝났거나 멈춘 채로 오래된 작업은 접는다. �
   assert.doesNotMatch(run(['status']).stdout, /지난 작업/);
 });
 
-test('코어가 아는 화면 명령의 이름(코어만 깐 사람에게 herdr-muwi에 있다고 알려 준다)과 Herdr 화면이 더하는 명령이 같다', () => {
+test('코어가 아는 화면 명령의 이름(코어만 깐 사람에게 @muwi/herdr-app에 있다고 알려 준다)과 Herdr 화면이 더하는 명령이 같다', () => {
   assert.deepEqual(Object.keys(herdr.commands ?? {}).sort(), [...SCREEN_COMMANDS].sort());
 });

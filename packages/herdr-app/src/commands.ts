@@ -3,11 +3,11 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { Fail, VALUED, join, needPlan, out, parseArgs, resolveWork, str, type Args } from 'muwi/kit';
-import { readSession, recentSessions, sessionKey } from 'muwi/session';
-import { SHOW_IN, appendEvent, clock, readConfig, type ShowIn } from 'muwi/store';
-import { PAST_DAYS, loadBoard, loadView, type WorkView } from 'muwi/view';
-import { launchCommand, modelIn, toolById } from 'muwi/connectors/tools';
+import { Fail, VALUED, join, needPlan, out, parseArgs, resolveWork, str, type Args } from '@muwi/core/kit';
+import { readSession, recentSessions, sessionKey } from '@muwi/core/session';
+import { SHOW_IN, appendEvent, clock, readConfig, type ShowIn } from '@muwi/core/store';
+import { PAST_DAYS, loadBoard, loadView, type WorkView } from '@muwi/core/view';
+import { launchCommand, modelIn, toolById } from '@muwi/core/connectors/tools';
 import { LABEL_MODEL, LABEL_NODE, LABEL_WORK, hc, herdrApp, terminalName, type Ran } from './hc.ts';
 // 그래프 배치(ELK)는 무거워서 board를 그릴 때만 불러온다 (훅은 이 파일을 자주 불러온다)
 import type { Fit, Flow } from './layout.ts';

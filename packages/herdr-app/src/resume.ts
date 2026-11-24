@@ -5,8 +5,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { launchCommand, resumeCommand, toolById } from 'muwi/connectors/tools';
-import type { WorkView } from 'muwi/view';
+import { launchCommand, resumeCommand, toolById } from '@muwi/core/connectors/tools';
+import type { WorkView } from '@muwi/core/view';
 
 /** Claude Code 세션 id 모양. muwi는 Claude 세션의 id를 세션 이름으로 쓴다 */
 const CLAUDE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

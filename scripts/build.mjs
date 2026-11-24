@@ -3,7 +3,7 @@
 // Node는 node_modules 안의 .ts를 실행하지 않아서(타입 지우기를 하지 않는다) 배포할 때만 .js로 바꾼다. 개발할 때는 .ts를 그대로 실행한다.
 // 타입은 Node에 든 stripTypeScriptTypes로 지운다 (따로 받을 도구가 없다). 타입 자리는 빈칸으로 바뀌어 줄 위치가 그대로다.
 //   node scripts/build.mjs            두 패키지 모두
-//   node scripts/build.mjs muwi       하나만
+//   node scripts/build.mjs core       하나만 (packages/의 폴더 이름)
 import fs from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import path from 'node:path';
@@ -11,10 +11,10 @@ import path from 'node:path';
 process.removeAllListeners('warning'); // stripTypeScriptTypes가 실험 기능이라는 경고
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-/** 패키지마다 그대로 옮길 것 (.ts를 바꾸지 않는다: 도구에 넣는 플러그인 파일처럼 .ts로 남아야 하는 것이 있다) */
+/** 패키지(packages/<폴더>)마다 그대로 옮길 것 (.ts를 바꾸지 않는다: 도구에 넣는 플러그인 파일처럼 .ts로 남아야 하는 것이 있다) */
 const PACKAGES = {
-  muwi: ['bin', 'hooks', 'skills', 'connectors', 'src/find-node.sh'],
-  'herdr-muwi': ['bin', 'app'],
+  core: ['bin', 'hooks', 'skills', 'connectors', 'src/find-node.sh'],
+  'herdr-app': ['bin', 'app'],
 };
 
 /**
@@ -44,7 +44,13 @@ function compile(from, to) {
   }
 }
 
-const version = name => JSON.parse(fs.readFileSync(path.join(ROOT, 'packages', name, 'package.json'), 'utf8')).version;
+const manifestOf = folder => JSON.parse(fs.readFileSync(path.join(ROOT, 'packages', folder, 'package.json'), 'utf8'));
+/** 패키지 이름(@muwi/core)으로 그 패키지의 버전을 찾는다. 폴더 이름(core)과 패키지 이름이 다르다 */
+const versionOf = name => {
+  const folder = Object.keys(PACKAGES).find(f => manifestOf(f).name === name);
+  if (!folder) throw new Error(`저장소에 없는 패키지: ${name}`);
+  return manifestOf(folder).version;
+};
 
 /** 배포용 package.json: 내보내는 경로를 .js로, 같은 저장소의 패키지(workspace:*)는 그 버전으로 */
 function manifest(dir) {
@@ -53,17 +59,17 @@ function manifest(dir) {
   delete pkg.devDependencies;
   if (pkg.exports) pkg.exports = Object.fromEntries(Object.entries(pkg.exports).map(([k, v]) => [k, v.replace(/\.ts$/, '.js')]));
   for (const [name, spec] of Object.entries(pkg.dependencies ?? {})) {
-    if (spec.startsWith('workspace:')) pkg.dependencies[name] = version(name);
+    if (spec.startsWith('workspace:')) pkg.dependencies[name] = versionOf(name);
   }
   return pkg;
 }
 
-export function build(name) {
-  const dir = path.join(ROOT, 'packages', name);
+export function build(folder) {
+  const dir = path.join(ROOT, 'packages', folder);
   const out = path.join(dir, 'dist');
   fs.rmSync(out, { recursive: true, force: true });
   compile(path.join(dir, 'src'), path.join(out, 'src'));
-  for (const item of PACKAGES[name]) copy(path.join(dir, item), path.join(out, item));
+  for (const item of PACKAGES[folder]) copy(path.join(dir, item), path.join(out, item));
   for (const file of ['README.md', 'LICENSE']) {
     const own = path.join(dir, file);
     copy(fs.existsSync(own) ? own : path.join(ROOT, file), path.join(out, file));

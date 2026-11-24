@@ -1,5 +1,5 @@
 {
-  "name": "muwi",
+  "name": "@muwi/core",
   "version": "0.7.0",
   "description": "AI가 스스로 짠 작업 플로우를 기록한다. 어느 AI 도구든 커넥터로 붙는다",
   "license": "MIT",
@@ -10,7 +10,8 @@
     "./package.json": "./package.json"
   },
   "engines": { "node": ">=24" },
-  "repository": { "type": "git", "url": "git+https://github.com/Ssoon-m/muwi.git", "directory": "packages/muwi" },
+  "publishConfig": { "access": "public" },
+  "repository": { "type": "git", "url": "git+https://github.com/Ssoon-m/muwi.git", "directory": "packages/core" },
   "scripts": {
     "test": "node --test \"tests/*.test.ts\""
   }

@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import { layoutPreview } from '../src/preview.ts';
 import { PLACE_VERSION, ScreenError, applyLayout, ensurePreview, hasMuwi, placeMuwi, readLayoutRecord, removeLayout, screenState, treeHash, type LayoutNode } from '../src/screen.ts';
 
-/** herdr-muwi의 muwi 명령: Herdr 화면을 붙인 muwi */
+/** @muwi/herdr-app의 muwi 명령: Herdr 화면을 붙인 muwi */
 const CLI = path.resolve(import.meta.dirname, '../bin/muwi.js');
 
 

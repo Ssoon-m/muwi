@@ -214,7 +214,7 @@ test('다른 자리의 더 새 muwi를 PATH에서 찾는다 (nvm으로 Node를 �
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-newer-'));
   /** npm i -g가 까는 모양: 패키지 폴더와 PATH에 걸리는 명령. 돌려주는 것은 PATH에 넣을 폴더 */
   const npmGlobal = (prefix: string, name: string, version: string, platform: NodeJS.Platform) => {
-    const pkg = path.join(tmp, prefix, ...(platform === 'win32' ? [] : ['lib']), 'node_modules', name);
+    const pkg = path.join(tmp, prefix, ...(platform === 'win32' ? [] : ['lib']), 'node_modules', ...name.split('/'));
     fs.mkdirSync(path.join(pkg, 'bin'), { recursive: true });
     fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name, version }));
     fs.writeFileSync(path.join(pkg, 'bin', 'muwi.js'), '');
@@ -228,14 +228,14 @@ test('다른 자리의 더 새 muwi를 PATH에서 찾는다 (nvm으로 Node를 �
   };
   const PATH = (...dirs: string[]) => ({ PATH: dirs.join(path.delimiter) });
   // Windows: muwi.cmd 옆의 node_modules
-  const w1 = npmGlobal('w-old', 'herdr-muwi', '0.7.0', 'win32');
-  const w2 = npmGlobal('w-new', 'herdr-muwi', '0.7.2', 'win32');
+  const w1 = npmGlobal('w-old', '@muwi/herdr-app', '0.7.0', 'win32');
+  const w2 = npmGlobal('w-new', '@muwi/herdr-app', '0.7.2', 'win32');
   assert.deepEqual(newerElsewhere('0.7.0', PATH(w1, w2), 'win32'), { bin: path.join(w2, 'muwi.cmd'), version: '0.7.2' });
   assert.equal(newerElsewhere('0.7.2', PATH(w1, w2), 'win32'), null);
   if (process.platform === 'win32') return; // 링크는 macOS·Linux에서만 시험한다
   // macOS·Linux: <자리>/bin/muwi가 패키지의 bin/muwi.js로 가는 링크. 우리 래퍼(~/.local/bin/muwi)나 다른 프로그램은 넘어간다
-  const old = npmGlobal('old', 'herdr-muwi', '0.7.0', 'linux');
-  const core = npmGlobal('core', 'muwi', '0.7.1', 'linux');
+  const old = npmGlobal('old', '@muwi/herdr-app', '0.7.0', 'linux');
+  const core = npmGlobal('core', '@muwi/core', '0.7.1', 'linux');
   const other = path.join(tmp, 'other');
   fs.mkdirSync(other);
   fs.writeFileSync(path.join(other, 'muwi'), '#!/bin/sh\n');

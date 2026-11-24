@@ -1,7 +1,7 @@
 {
   "name": "muwi-workspace",
   "private": true,
-  "description": "muwi 모노레포: packages/muwi(코어)와 packages/herdr-muwi(Herdr 앱 화면)",
+  "description": "muwi 모노레포: packages/core(@muwi/core, 코어)와 packages/herdr-app(@muwi/herdr-app, Herdr 앱 화면)",
   "license": "MIT",
   "packageManager": "pnpm@10.33.4",
   "engines": {

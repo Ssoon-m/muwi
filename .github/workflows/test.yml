@@ -35,7 +35,7 @@ jobs:
           root=$(cygpath -m "$GITHUB_WORKSPACE")
           export MUWI_DIR="$RUNNER_TEMP/muwi-records"
           start='{"session_id":"ci-windows","hook_event_name":"SessionStart","source":"startup","cwd":"'"$root"'"}'
-          core="$root/packages/muwi"
+          core="$root/packages/core"
           out=$(printf '%s' "$start" | sh "$core/hooks/hook.sh")
           echo "$out"
           case "$out" in *hookSpecificOutput*muwi*) ;; *) echo "SessionStart 훅이 지침을 돌려주지 않았어요"; exit 1 ;; esac
@@ -55,12 +55,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          node packages/muwi/bin/muwi.js setup
+          node packages/core/bin/muwi.js setup
           if ($LASTEXITCODE -ne 0) { throw "muwi setup failed" }
           $cmd = "$env:USERPROFILE\.local\bin\muwi.cmd"
           $v = & $cmd --version
           if ($LASTEXITCODE -ne 0 -or "$v" -notmatch '^\d+\.\d+\.\d+') { throw "muwi.cmd --version (PowerShell): $v" }
           $v = cmd /d /c "`"$cmd`" --version"
           if ($LASTEXITCODE -ne 0 -or "$v" -notmatch '^\d+\.\d+\.\d+') { throw "muwi.cmd --version (cmd): $v" }
-          node packages/muwi/bin/muwi.js setup --remove
+          node packages/core/bin/muwi.js setup --remove
           if (Test-Path $cmd) { throw "setup --remove left muwi.cmd" }

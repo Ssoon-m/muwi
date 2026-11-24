@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { herdrApp } from './hc.ts';
 import { layoutPreview } from './preview.ts';
-import { readJson, writeJson } from 'muwi/store';
+import { readJson, writeJson } from '@muwi/core/store';
 
 export const LAYOUT_NAME = 'muwi';
 export const GRAPH_ID = 'muwi-graph';

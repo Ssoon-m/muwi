@@ -374,7 +374,7 @@ test('화면 없이: 기록과 보기는 되고, 화면이 더하는 명령은 �
   // Herdr 화면이 더하는 명령
   const run = muwi(['run', 'impl', '구현해줘']);
   assert.equal(run.code, 1);
-  assert.match(run.err, /Herdr 앱 화면과 함께 쓰는 명령이에요\. herdr-muwi로 깔면 생겨요/);
+  assert.match(run.err, /Herdr 앱 화면과 함께 쓰는 명령이에요\. @muwi\/herdr-app으로 깔면 생겨요/);
   assert.doesNotMatch(muwi(['--help']).out, /muwi run/);
   // 설정은 화면이 정한다
   assert.match(muwi(['config']).out, /설정이 없어요/);
