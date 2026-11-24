@@ -670,7 +670,7 @@ export default class Muwi extends View {
           // 대화가 닫혔으면 새 대화가 muwi 기록을 읽고 이어 가게 연다 (그 작업을 하던 폴더에서)
           .when(Boolean(continuable), (el) => el.child(div().id("head-continue").flex_none().text_color(t.accent).cursor_pointer()
             .hover((s) => s.text_color(t.foreground))
-            .on_click((_e, cx) => { this.openTerminal("head-continue", ["claude", `${view.work} 작업 이어서 해줘`], view.cwd, view.work); cx.notify(); })
+            .on_click((_e, cx) => { this.openTerminal("head-continue", [view.launcher || "claude", `${view.work} 작업 이어서 해줘`], view.cwd, view.work); cx.notify(); })
             .child("새 대화로 이어 가기 ›")))))
       .when(Boolean(view) && this.size.width >= 860, (el) => el.child(h_flex().flex_none().gap(12)
         .child(legend("작업 중", c.doing)).child(legend("응답 대기", c.waiting)).child(legend("막힘", c.blocked)).child(legend("끝", c.done))))
@@ -756,7 +756,7 @@ export default class Muwi extends View {
 
   /**
    * 하던 세션의 터미널이 닫힌 노드를 이어서 하는 버튼. 누르면 그 세션이 일하던 폴더에서 새 탭으로 열린다:
-   *   하던 대화 다시 열기: Claude 세션이면 claude --resume <세션 id>. 하던 대화 내용이 그대로 남아 있다
+   *   하던 대화 다시 열기: 그 도구의 이어 가기 명령 (Claude Code면 claude --resume <세션 id>). 하던 대화 내용이 그대로 남아 있다
    *   새 대화로 이어 가기: "<작업> 작업의 <노드> 노드 이어서 해줘"로 새 대화를 연다. muwi 기록(계획·결과)을 읽고 이어 간다
    * 맡긴 세션이 기록을 남기기 전에 닫혔으면 세션 정보가 없으니 그 세션을 띄운 폴더(worktree일 수 있다)에서 새 대화로 연다
    */
@@ -768,11 +768,13 @@ export default class Muwi extends View {
     const want = s?.cwd ?? (unstarted ? n.spawn.cwd : null) ?? null;
     const folder = [want, view.cwd].find((p) => this.folderOk(view, p)) ?? null;
     const moved = want && !this.folderOk(view, want) ? want : null;
-    const tool = s?.tool === "codex" ? "codex" : "claude";
+    // 띄우는 명령과 다시 여는 명령은 muwi가 그 세션의 도구에 맞게 알려 준다 (Claude Code, Codex …)
+    const tool = (key && view.launch?.[key]) || view.launcher || "claude";
+    const again = key ? view.resume?.[key] : null;
     const buttons = [];
-    // 대화 파일이 남아 있고 그 폴더가 그대로일 때만 다시 열 수 있다 (아니면 claude가 "No conversation found"로 끝난다)
-    if (s?.tool === "claude" && CLAUDE_ID.test(key) && (view.resumable ?? []).includes(key) && !moved) {
-      buttons.push(this.openRow(t, `resume-${n.id}`, "하던 대화 다시 열기", "전에 하던 대화 내용이 그대로 남아 있어요", ["claude", "--resume", key], folder, n.id));
+    // 대화가 남아 있고 그 폴더가 그대로일 때만 다시 열 수 있다 (아니면 "No conversation found" 같은 말로 끝난다)
+    if (again && !moved) {
+      buttons.push(this.openRow(t, `resume-${n.id}`, "하던 대화 다시 열기", "전에 하던 대화 내용이 그대로 남아 있어요", again, folder, n.id));
     }
     if (n.status !== "done") {
       buttons.push(this.openRow(t, `continue-${n.id}`, "새 대화로 이어 가기", unstarted ? "muwi 기록(계획·맡긴 말)을 읽고 이어 가요" : "muwi 기록(계획·결과)을 읽고 이어 가요",
@@ -1528,7 +1530,7 @@ export default class Muwi extends View {
           .children(loose.map((f) => line(`⚑ ${f.text}`, t.blocked)))))
         .when(view.state === "stalled", (el) => el.child(v_flex().gap(8).child(label("이어서 하려면"))
           .child(div().text_size(10.5).text_color(t.dim).child(view.between === "gone" ? "이 작업을 맡은 세션이 없어요" : "하던 세션이 모두 닫혔어요"))
-          .child(this.openRow(t, "continue-work", "새 대화로 이어 가기", "muwi 기록(계획·결과)을 읽고 멈춘 노드부터 이어 가요", ["claude", `${view.work} 작업 이어서 해줘`],
+          .child(this.openRow(t, "continue-work", "새 대화로 이어 가기", "muwi 기록(계획·결과)을 읽고 멈춘 노드부터 이어 가요", [view.launcher || "claude", `${view.work} 작업 이어서 해줘`],
             this.folderOk(view, view.cwd) ? view.cwd : null, view.work))
           .when(Boolean(view.cwd), (el2) => el2.child(div().text_size(10.5).text_color(t.dim).child(this.folderOk(view, view.cwd)
             ? `누르면 ${this.shortPath(view.cwd)}에서 새 탭으로 열려요` : `작업 폴더(${this.shortPath(view.cwd)})가 없어져서 기본 폴더에서 새 탭으로 열려요`)))));

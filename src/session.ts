@@ -1,6 +1,7 @@
 // 세션 이름표. "어느 세션이 한 일인가"를 muwi 명령과 훅이 같은 이름으로 적게 한다.
 //   muwi 명령은 환경 변수에서 세션을 읽고, 훅은 Claude Code가 넘겨주는 session_id를 쓴다. 둘은 같은 값이다.
 // 세션마다 파일 하나(<기록 폴더>/.sessions/<세션>.json)에 지금 붙어 있는 작업과 읽은 skill을 적어 둔다.
+import { detectTool } from './integrations/tools.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { appendEvent, nowIso, readEvents, readJson, readPlan, writeJson } from './store.ts';
@@ -8,7 +9,8 @@ import type { Plan, Where } from './store.ts';
 
 export type Session = {
   key: string;
-  tool: 'claude' | 'codex' | 'unknown';
+  /** 그 세션의 도구 (integrations/tools.ts의 id). 모르면 unknown */
+  tool: string;
   cwd?: string;
   /** Herdr 앱의 터미널 주소 ($HC_TERMINAL_ID). 그래프에서 세션 상태를 보고 그 터미널로 갈 때 쓴다 */
   terminal?: string;
@@ -47,11 +49,7 @@ export function sessionKey(env: NodeJS.ProcessEnv = process.env): string | null 
   return null;
 }
 
-export function toolOf(env: NodeJS.ProcessEnv = process.env): Session['tool'] {
-  if (env.CLAUDE_CODE_SESSION_ID || env.CLAUDECODE) return 'claude';
-  if (Object.keys(env).some(k => k.startsWith('CODEX_'))) return 'codex';
-  return 'unknown';
-}
+export const toolOf = (env: NodeJS.ProcessEnv = process.env): Session['tool'] => detectTool(env);
 
 const safe = (key: string) => key.replace(/[^A-Za-z0-9_.-]/g, '_');
 const sessionFile = (dir: string, key: string) => path.join(dir, '.sessions', `${safe(key)}.json`);

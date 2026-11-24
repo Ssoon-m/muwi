@@ -1,14 +1,36 @@
 // Claude Code 통합: Claude Code의 훅 입력을 코어의 공통 사건으로 바꾸고, 코어의 답을 Claude Code가 알아듣는 형식으로 바꾼다.
-// 코어(events.ts)는 Claude Code의 훅 이름·도구 이름을 모른다. 다른 도구는 같은 모양의 통합을 하나 더 두면 된다.
-//   훅 연결은 세 갈래다 (hooks/hooks.json, setup.ts):
+// 코어(events.ts)는 Claude Code의 훅 이름·도구 이름을 모른다.
+//   훅 연결은 세 갈래다 (플러그인의 hooks/hooks.json, 플러그인 없이 쓸 때는 settings.json):
 //     record: SessionStart, UserPromptSubmit, SubagentStart/Stop, PostToolUse(Skill|Read)
 //     nudge:  PreToolUse(Edit|Write|MultiEdit|NotebookEdit|Agent|Task)
 //     guard:  PreToolUse(Bash)
+import path from 'node:path';
 import { skillFromPath, type Happened, type Reply } from '../events.ts';
 import { sessionKey } from '../session.ts';
+import { shPath } from './files.ts';
+import { HOOK_MARK, addHooks, installEntries, uninstallEntries, type HookEntry, type Settings } from './settings-hooks.ts';
+import type { Adapter, HookMode, HookResult } from './types.ts';
 
-export type HookMode = 'record' | 'guard' | 'nudge';
-export type HookResult = { stdout?: string };
+/** muwi setup --claude가 settings.json에 넣는 훅 명령. Windows의 Claude Code는 이 명령을 Git Bash로 실행한다 */
+export const hookCommandFor = (root: string, platform: NodeJS.Platform = process.platform) =>
+  `${HOOK_MARK} sh "${shPath(path.join(root, 'hooks', 'hook.sh'), platform)}"`;
+
+/** 플러그인의 hooks/hooks.json과 같은 구성. 계획 알림(nudge)과 push 앞에서 묻기(guard)를 켜고 끄는 것은 muwi config가 한다 */
+function entries(hookCommand: string): HookEntry[] {
+  // 훅이 실패해도(Windows에서 Git Bash가 없어 sh를 못 찾는 등) 하려던 일을 막지 않는다
+  const on = (event: string, matcher?: string, mode = ''): HookEntry => ({ event, ...(matcher ? { matcher } : {}), command: `${hookCommand}${mode}`, extra: { onFailure: 'continue' } });
+  return [
+    on('SessionStart'), on('UserPromptSubmit'), on('SubagentStart'), on('SubagentStop'),
+    on('PostToolUse', 'Skill|Read'),
+    on('PreToolUse', 'Edit|Write|MultiEdit|NotebookEdit|Agent|Task', ' nudge'),
+    on('PreToolUse', 'Bash', ' guard'),
+  ];
+}
+
+/** 우리 훅을 넣는다. 여러 번 해도 한 벌만 남는다 */
+export const mergeHooks = (settings: Settings, hookCommand: string): Settings => addHooks(settings, entries(hookCommand));
+export const installHooks = (settingsFile: string, hookCommand: string) => installEntries(settingsFile, entries(hookCommand));
+export const uninstallHooks = (settingsFile: string) => uninstallEntries(settingsFile);
 
 /** Claude Code 훅 입력 → 공통 사건. 코어가 볼 일이 아니면 null */
 export function fromClaude(payload: any, mode: HookMode, env: NodeJS.ProcessEnv = process.env): Happened | null {
@@ -59,3 +81,16 @@ export function toClaude(h: Happened, r: Reply): HookResult {
   if (r.say && h.kind === 'prompt') return out({ hookEventName: 'UserPromptSubmit', additionalContext: r.say });
   return {};
 }
+
+export const claude: Adapter = {
+  install(ctx) {
+    const settings = path.join(ctx.home, 'settings.json');
+    installHooks(settings, hookCommandFor(ctx.root, ctx.platform));
+    return { settings: [settings] };
+  },
+  remove(wired) {
+    for (const file of wired.settings ?? []) uninstallHooks(file);
+  },
+  from: fromClaude,
+  to: toClaude,
+};
