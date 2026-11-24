@@ -15,6 +15,11 @@ import {
 const SELECTED = "muwi.selected";
 /** 사람이(또는 따라가기가) 작업을 고른 때. 다른 칸이 계획 없는 세션의 빈 화면을 풀 때 본다 */
 const PICKED = "muwi.picked";
+/**
+ * 작업이나 노드를 눌러 그 작업을 한 대화의 터미널로 옮겨 간 때. 그 대화가 지금은 다른 작업에 붙어 있어도
+ * 키보드를 따라가는 그래프 칸들이 그 작업으로 바꾸지 않고 누른 작업을 그대로 보여 주게 한다 { terminal, at }
+ */
+const JUMP = "muwi.jump";
 const PLACE_NAME = { bottom: "아래", top: "위", right: "오른쪽" };
 /** 오른쪽 기록 칸의 가장 좁은 너비 */
 const DETAIL_MIN = 220;
@@ -464,6 +469,9 @@ export default class Muwi extends View {
     const key = `${term}|${known ? work : ""}|${agent ? "agent" : ""}`;
     if (key === this.followKey) return;
     this.followKey = key;
+    // 작업이나 노드를 눌러 그 일을 한 대화로 옮겨 왔다: 누른 작업을 그대로 보여 준다
+    const jumped = shared(JUMP);
+    if (jumped?.terminal === term && Date.now() - (jumped.at ?? 0) < 5000) return;
     this.planless = !known && agent;
     this.planlessSince = shared(PICKED) ?? 0;
     if (known) {
@@ -496,26 +504,28 @@ export default class Muwi extends View {
   }
 
   /**
-   * 그 노드를 한 세션의 터미널로 갈 수 있는가. 그래프와 터미널은 늘 같은 작업을 가리킨다:
-   * 그 터미널의 세션이 아직 이 작업에 붙어 있을 때만 간다. 다른 작업으로 간 세션의 터미널로 가면 그래프가 그 작업으로 바뀐다.
+   * 그 노드를 한 대화의 터미널로 갈 수 있는가. 누르면 그 일을 한 대화로 간다: 그 대화가 아직 그 터미널에 열려 있으면 간다.
    * { go: 터미널 } 또는 { why: 갈 수 없는 이유, closed }. 아직 아무도 하지 않은 노드면 null
    */
   nodeTerminal(view, n) {
     const terminal = this.terminalOf(view, n);
     if (!terminal) return null;
     if (!this.alive(terminal)) return { why: "터미널이 닫혔어요", closed: terminal };
-    const there = this.links().get(terminal);
-    // 띄우는 중인 새 세션은 아직 이 작업에 붙기 전이다
-    if (there === view.work || (n.status === "todo" && n.spawn?.terminal === terminal)) return { go: terminal };
-    const other = there ? (this.data?.works ?? []).find((w) => w.work === there) : null;
-    return { why: other ? `그 세션은 지금 다른 작업을 하고 있어요: ${other.title ?? other.work}` : "그 터미널에서는 지금 다른 대화가 돌고 있어요" };
+    // 띄우는 중인 새 세션은 아직 이름표가 붙기 전이다
+    if (n.status === "todo" && n.spawn?.terminal === terminal) return { go: terminal };
+    // 그 노드를 한 대화가 아직 그 터미널에 있으면 간다 (그 뒤에 다른 작업을 했어도 그 대화는 이 노드를 기억한다).
+    // 이름표가 없으면 옛 판에서 시작한 대화라 그 대화로 본다
+    const label = checking() ? null : (terminals() ?? []).find((x) => x.address === terminal)?.labels?.[LABEL_SESSION];
+    if (!label || label === n.session) return { go: terminal };
+    return { why: "그 터미널에서는 지금 다른 대화가 돌고 있어요" };
   }
 
   /** 그 노드를 한 세션의 터미널로 간다 (카드를 두 번 눌렀을 때). 갈 수 없으면 왜 안 가는지 알린다 */
   goNode(view, n) {
     const to = this.nodeTerminal(view, n);
     if (!to) return;
-    if (to.go || to.closed) return this.go(to.go ?? to.closed); // 닫혔으면 go가 알린다
+    if (to.go) return this.jump(to.go);
+    if (to.closed) return this.go(to.closed); // 닫혔으면 go가 알린다
     notify({ title: "그 노드를 한 세션으로 옮겨 가지 않았어요", body: to.why, level: "info" });
   }
 
@@ -537,11 +547,8 @@ export default class Muwi extends View {
     const variant = this.variant();
     const links = this.links();
     const live = checking() ? [] : agents();
-    // 살아 있는 세션이 붙어 있는 작업. 오래돼도 "지난 작업"으로 접지 않는다 (그 세션이 목록에서 사라지지 않게)
-    const linked = new Set(live.map((a) => links.get(a.address)).filter(Boolean));
     // 하는 노드가 없는 작업은 그 작업의 세션이 지금 하는 일로 보여 준다
-    const works = (this.data?.works ?? []).map((w) => this.shownView(w, links, live))
-      .map((w) => (w.past && linked.has(w.work) ? { ...w, past: false } : w));
+    const works = (this.data?.works ?? []).map((w) => this.shownView(w, links, live));
     // 키보드가 다른 터미널로 옮겨 갔으면 그 터미널의 작업으로
     this.follow(links);
     // 다른 칸에서 작업을 바꿨으면 따라간다
@@ -640,6 +647,9 @@ export default class Muwi extends View {
 
   head(t, view, works, now) {
     const c = this.colors(t);
+    // 이 작업을 한 대화가 열려 있는가. 열려 있으면 목록에서 누를 때 그리로 가고, 닫혔으면 새 대화로 이어 갈 수 있다
+    const talk = view ? this.talkOf(view, this.links()) : null;
+    const continuable = view && !talk && !checking() && this.folderOk(view, view.cwd);
     const place = this.placeControl(t);
     const legend = (text, color) => h_flex().gap(5).items_center()
       .child(div().size(8).rounded_full().bg(color))
@@ -649,12 +659,19 @@ export default class Muwi extends View {
         .child(h_flex().gap(8).items_center()
           .child(div().min_w(0).truncate().text_size(13).font_semibold().child(view ? (view.title ?? view.work) : this.planless ? "계획 없는 세션" : "작업 그래프"))
           .when(Boolean(view), (el) => el.child(this.pill(t, STATE_NAME[view.state] ?? view.state, c[view.state] ?? t.muted))))
-        .child(div().truncate().text_size(10.5).text_color(t.dim).child(
-          // 지금 보는 터미널의 세션은 계획 없이 일한다
-          !view && this.planless ? "지금 칸의 세션은 계획 없이 진행 중이에요"
-            : view ? [`${view.work} · ${view.counts.done}/${view.counts.total} 끝 · ${ago(view.updatedAt, now)}`,
-              view.helpers?.sessions ? `새 세션 ${view.helpers.sessions}` : null,
-              view.helpers?.subagents ? `서브에이전트 ${view.helpers.subagents}` : null].filter(Boolean).join(" · ") : `${works.length}개 작업`)))
+        .child(h_flex().min_w(0).gap(6).items_center().text_size(10.5)
+          .child(div().min_w(0).truncate().text_color(t.dim).child(
+            // 지금 보는 터미널의 세션은 계획 없이 일한다
+            !view && this.planless ? "지금 칸의 세션은 계획 없이 진행 중이에요"
+              : view ? [`${view.work} · ${view.counts.done}/${view.counts.total} 끝 · ${ago(view.updatedAt, now)}`,
+                view.helpers?.sessions ? `새 세션 ${view.helpers.sessions}` : null,
+                view.helpers?.subagents ? `서브에이전트 ${view.helpers.subagents}` : null,
+                talk ? `대화: ${talk.name} · 열려 있음` : "대화: 닫힘"].filter(Boolean).join(" · ") : `${works.length}개 작업`))
+          // 대화가 닫혔으면 새 대화가 muwi 기록을 읽고 이어 가게 연다 (그 작업을 하던 폴더에서)
+          .when(Boolean(continuable), (el) => el.child(div().id("head-continue").flex_none().text_color(t.accent).cursor_pointer()
+            .hover((s) => s.text_color(t.foreground))
+            .on_click((_e, cx) => { this.openTerminal("head-continue", ["claude", `${view.work} 작업 이어서 해줘`], view.cwd, view.work); cx.notify(); })
+            .child("새 대화로 이어 가기 ›")))))
       .when(Boolean(view) && this.size.width >= 860, (el) => el.child(h_flex().flex_none().gap(12)
         .child(legend("작업 중", c.doing)).child(legend("응답 대기", c.waiting)).child(legend("막힘", c.blocked)).child(legend("끝", c.done))))
       .when(Boolean(place), (el) => el.child(place));
@@ -853,13 +870,13 @@ export default class Muwi extends View {
   groups(t, works, links) {
     const c = this.colors(t);
     const current = works.filter((w) => !w.past);
-    const known = new Set(works.map((w) => w.work));
+    const open = new Set(current.filter((w) => w.state !== "done").map((w) => w.work));
     const byWork = new Map();
     const free = [];
     for (const a of checking() ? [] : agents()) {
       const work = links.get(a.address);
-      // 세션은 붙어 있는 작업의 줄에 보인다 (끝난 작업이어도). 어느 작업에도 붙지 않은 세션만 "계획 없는 세션"
-      if (work && known.has(work)) byWork.set(work, [...(byWork.get(work) ?? []), a]);
+      // 끝나지 않은 작업을 하는 세션은 그 작업 줄에 들어간다. 나머지 열린 대화(작업을 끝냈거나 계획 없이 일하는 것)는 "열린 대화"에
+      if (work && open.has(work)) byWork.set(work, [...(byWork.get(work) ?? []), a]);
       else free.push(a);
     }
     const bucket = { need: [], blocked: [], fresh: [], doing: [], stalled: [], free: [], done: [] };
@@ -880,7 +897,7 @@ export default class Muwi extends View {
       { id: "fresh", label: "새 결과", color: t.accent, items: bucket.fresh },
       { id: "doing", label: STATE_NAME.doing, color: c.doing, items: bucket.doing },
       { id: "stalled", label: STATE_NAME.stalled, color: t.muted, items: bucket.stalled },
-      { id: "free", label: "계획 없는 세션", color: t.dim, items: bucket.free },
+      { id: "free", label: "열린 대화", color: t.dim, items: bucket.free },
       { id: "done", label: STATE_NAME.done, color: c.done, items: bucket.done },
     ].filter((g) => g.items.length > 0);
   }
@@ -922,33 +939,50 @@ export default class Muwi extends View {
       .when(!open, (el) => el.child(div().text_size(10).text_color(t.dim).child("▸")));
   }
 
-  /** 그 작업에 붙어 있는 세션 중 갈 곳: 입력을 기다리는 것 → 일하는 것 → 쉬는 것 */
-  bestAgent(list) {
-    return [...list].sort((x, y) => (AGENT_RANK[y.status] ?? 0) - (AGENT_RANK[x.status] ?? 0))[0] ?? null;
-  }
-
   /**
-   * 작업을 고른다 (목록의 줄, 좁은 칸의 칩). 그래프와 터미널은 늘 같은 작업을 가리킨다:
-   * 그 작업의 그래프를 보여 주고, 그 작업에 붙어 있는 세션이 있으면 그 터미널로 같이 간다 (끝난 작업이어도).
-   * 붙어 있는 세션이 없으면(닫혔거나 다른 작업으로 감) 그래프만 바꾼다. 다른 작업으로 간 세션의 터미널로 가면 그래프가 그 작업으로 바뀐다
+   * 작업을 고른다 (목록의 줄, 좁은 칸의 칩). 누르면 그 작업을 한 대화로 간다. 닫혔으면 그래프만:
+   * 그 작업의 그래프를 보여 주고, 그 작업을 한 대화가 아직 열려 있으면 그 터미널로 간다 (끝난 작업이어도,
+   * 그 대화가 그 뒤에 다른 작업을 했어도. 그 대화는 이 작업을 기억한다). 그래프는 누른 작업 그대로 둔다
    */
-  openWork(work, mine, cx) {
-    this.select(work, cx);
-    const target = this.bestAgent(mine)?.address ?? null;
-    // 옮겨 간 터미널이 이 작업을 하고 있으니 따라가기가 다시 바꿀 것이 없다
-    if (target) this.followKey = `${target}|${work}|agent`;
-    this.go(target);
+  openWork(w, cx) {
+    this.select(w.work, cx);
+    const talk = this.talkOf(w, this.links());
+    if (talk) this.jump(talk.terminal);
+  }
+
+  /** 그 터미널로 간다. 키보드를 따라가는 그래프 칸들이 그 대화의 다른 작업으로 바꾸지 않게 알린다 */
+  jump(terminal) {
+    if (!terminal) return;
+    if (!checking()) setShared(JUMP, { terminal, at: Date.now() });
+    this.go(terminal);
   }
 
   /**
-   * 작업 한 줄: 제목 / 지금 눈여겨볼 노드 / 오른쪽에 그 작업에 붙어 있는 세션.
-   * 누르면 그 작업의 그래프를 보여 주고, 붙어 있는 세션이 있으면(오른쪽 표시가 있으면) 그 터미널로 간다
+   * 그 작업을 한 대화가 지금 열려 있는 터미널. 그 작업에 지금 붙어 있는 대화 → 계획을 낸 대화 → 나머지 순.
+   * 열려 있다 = 그 터미널에 그 대화(세션)의 이름표가 그대로 붙어 있고 에이전트가 돌고 있다 (/clear나 새로 띄운 대화는 다른 이름표다)
+   */
+  talkOf(w, links) {
+    if (!w || checking()) return null;
+    const keys = [...new Set(w.talks ?? [w.lead, ...Object.keys(w.sessions ?? {})].filter(Boolean))];
+    if (!keys.length) return null;
+    const running = agents();
+    const live = new Set(running.map((a) => a.address));
+    const open = (terminals() ?? []).filter((x) => live.has(x.address) && keys.includes(x.labels?.[LABEL_SESSION]));
+    if (!open.length) return null;
+    const rank = (x) => (links.get(x.address) === w.work ? 0 : 1000) + keys.indexOf(x.labels[LABEL_SESSION]);
+    const best = open.sort((a, b) => rank(a) - rank(b))[0];
+    const a = running.find((y) => y.address === best.address);
+    return { terminal: best.address, name: a?.space_name || a?.tab_name || best.address };
+  }
+
+  /**
+   * 작업 한 줄: 제목 / 지금 눈여겨볼 노드.
+   * 누르면 그 작업의 그래프를 보여 주고, 그 작업을 한 대화가 열려 있으면 그 터미널로 간다 (그래프 위 머리줄에 대화가 열렸는지 나온다)
    */
   workRow(t, c, item, selected, now, compact) {
     const w = item.w;
     const on = w.work === selected;
-    const best = this.bestAgent(item.agents);
-    const click = (_e, cx) => this.openWork(w.work, item.agents, cx);
+    const click = (_e, cx) => this.openWork(w, cx);
     if (compact) {
       return h_flex().id(`work-${w.work}`).h(26).flex_none().items_center().justify_center().rounded(6)
         .bg(on ? t.selected : t.chrome).hover((s) => s.bg(on ? t.selected : t.hover)).cursor_pointer()
@@ -957,8 +991,10 @@ export default class Muwi extends View {
     }
     const first = w.active.find((n) => n.status === "waiting" && !n.closed) ?? w.active.find((n) => n.status === "blocked" && !n.closed) ?? w.active[0];
     const line = item.ask ? "세션이 입력을 기다림" : w.state === "done" ? "모든 노드가 끝났어요"
-      : first ? `${first.title}${first.closed ? " · 세션이 닫힘" : first.note ? ` · ${first.note}` : ""}`
-      : `${w.between && BETWEEN_NAME[w.between] ? `${BETWEEN_NAME[w.between]} · ` : ""}${w.counts.done}/${w.counts.total} 끝`;
+      // 하는 노드가 여럿이면(나란히 맡긴 점검들) 첫 노드와 나머지 수
+      : first ? `${first.title}${w.active.length > 1 ? ` 외 ${w.active.length - 1}` : ""}${first.closed ? " · 세션이 닫힘" : first.note ? ` · ${first.note}` : ""}`
+      // 하는 노드가 없다 (몇 단계째인지는 오른쪽에 나온다)
+      : (w.between && BETWEEN_NAME[w.between]) || "다음 노드 전";
     return h_flex().id(`work-${w.work}`).px(8).py(6).gap(8).items_center().rounded(7)
       .bg(on ? t.selected : t.chrome).hover((s) => s.bg(on ? t.selected : t.hover)).cursor_pointer()
       .on_click(click)
@@ -967,9 +1003,8 @@ export default class Muwi extends View {
         .child(div().truncate().text_size(12).text_color(on || w.unread ? t.foreground : t.muted).when(on || w.unread, (el) => el.font_medium()).child(w.title ?? w.work))
         .child(h_flex().gap(6).text_size(10.5)
           .child(div().flex_1().min_w(0).truncate().text_color(item.ask ? c.waiting : c[w.state] ?? t.dim).child(line))
-          .child(div().flex_none().text_color(t.dim).child(ago(w.updatedAt, now)))))
-      // 이 작업에 붙어 있는 세션 (계획 없는 세션 줄과 같은 표시). 이 표시가 있는 줄은 누르면 그 터미널로 간다
-      .when(Boolean(best), (el) => el.child(this.sessionMark(t, best, `work-ses-${w.work}`)));
+          // 끝나지 않은 작업은 몇 단계째인지: 끝난 노드 / 전체
+          .child(div().flex_none().text_color(t.dim).child(w.state === "done" ? ago(w.updatedAt, now) : `${w.counts.done}/${w.counts.total} · ${ago(w.updatedAt, now)}`))));
   }
 
   /** 계획 없이 일하는 세션 한 줄 (Herdr의 Agents 칸과 같은 모양). 누르면 그 터미널로 간다 */
@@ -1103,7 +1138,7 @@ export default class Muwi extends View {
           .bg(on ? t.selected : t.surface).border_1().border_color(on ? t.accent : t.border).cursor_pointer()
           .hover((s) => s.bg(t.hover))
           // 목록의 줄과 같다: 그 작업에 붙어 있는 세션이 있으면 그 터미널로 같이 간다
-          .on_click((_e, cx) => this.openWork(w.work, (checking() ? [] : agents()).filter((a) => links.get(a.address) === w.work), cx))
+          .on_click((_e, cx) => this.openWork(w, cx))
           .child(div().size(7).rounded_full().bg(c[w.state] ?? t.muted))
           .child(div().text_size(11).text_color(on ? t.foreground : t.muted).child(w.work));
       }));
@@ -1574,7 +1609,7 @@ export default class Muwi extends View {
           h_flex().id(`go-${n.id}`).h(20).px(7).flex_none().items_center().rounded(5).bg(t.raised).border_1().border_color(t.border)
             .text_size(10.5).text_color(t.muted).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground))
             // pane이 있으면 그 pane으로 가고, pane 없이 떠 있는 세션이면 그 자리에서 들여다본다
-            .on_click(() => this.go(to.go))
+            .on_click(() => this.jump(to.go))
             .child("터미널로 가기"))))
         .when(Boolean(whoText && to?.why), (el) => el.child(line(to.why, t.dim)))
         .when(Boolean(plannedText), (el) => el.child(line(
