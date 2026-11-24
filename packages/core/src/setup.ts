@@ -1,12 +1,12 @@
 // muwi setup: npm으로 받은 muwi를 쓸 수 있게 넣는다.
-//   터미널과 그래프 칸이 부를 muwi 명령(~/.local/bin), 화면(Herdr 앱의 그래프 칸), 고른 AI 도구에 커넥터(지침·사용법 skill·훅).
-//   화면에 무엇을 넣는지는 화면이 안다 (화면 규격의 setup). 여기서는 부르고 기록한다.
+//   터미널과 보기가 부를 muwi 명령(~/.local/bin), 붙은 터미널 연결과 보기, 고른 AI 도구에 커넥터(지침·사용법 skill·훅).
+//   보기에 무엇을 넣는지는 보기가 안다 (보기 규격의 setup). 여기서는 부르고, 불러온 경로를 적어 둔다 (그 뒤의 명령과 훅이 같은 것을 불러온다).
 //   도구마다 무엇을 어디에 넣는지는 그 도구의 커넥터가 안다 (src/connectors). 여기서는 고른 도구들에 차례로 넣고 기록한다.
 // 남의 설정은 건드리지 않는다. 우리 것은 명령 앞의 표시와 구간 표시로 알아본다.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { host, hostFailure, hostPath, type HostInstall } from './host.ts';
+import { pluginFailures, pluginPaths, views, type ViewInstall } from './plugins.ts';
 import { nowIso, readJson, writeJson } from './store.ts';
 import { copyDir, installBlock, shPath, uninstallBlock, writeText } from './connectors/files.ts';
 import { adapterOf } from './connectors/index.ts';
@@ -26,17 +26,12 @@ export type Install = {
   bin?: string;
   /** Windows에서 넣은 muwi.cmd */
   cmd?: string;
-  /** 화면 모듈의 경로. muwi 명령과 훅이 이 경로에서 화면을 불러온다 (host.ts의 loadHost) */
-  host?: string;
-  /** 화면이 넣은 것 (Herdr 앱의 칸 등). 뺄 때 화면에 그대로 돌려준다 */
-  hosted?: HostInstall;
-  /** 0.6.0까지의 기록: 넣은 Herdr 앱 칸 */
-  herdr?: string;
+  /** 터미널 연결 모듈의 경로. muwi 명령과 훅이 이 경로에서 불러온다 (plugins.ts의 loadPlugins) */
+  terminals?: string;
+  /** 보기 모듈의 경로와 그 보기가 넣은 것 (뺄 때 그 보기에 그대로 돌려준다) */
+  views?: { path: string; installed?: ViewInstall }[];
   /** 커넥터를 넣은 도구들 (도구 id → 넣은 것) */
   tools?: Record<string, ToolInstall>;
-  /** 0.5.x의 기록. tools.codex, tools.claude와 같은 것을 옛 이름으로도 남긴다 */
-  codex?: { agents: string; skill: string };
-  claude?: { settings: string; skill: string };
   at: string;
 };
 
@@ -50,29 +45,23 @@ export function places(env: NodeJS.ProcessEnv = process.env): Places {
   return {
     home,
     bin: path.join(home, '.local', 'bin', 'muwi'),
-    // Windows의 PowerShell·cmd와 Herdr 앱 그래프 칸이 쓰는 명령 (sh 스크립트는 Git Bash에서만 실행된다)
+    // Windows의 PowerShell·cmd와 보기가 쓰는 명령 (sh 스크립트는 Git Bash에서만 실행된다)
     cmd: path.join(home, '.local', 'bin', 'muwi.cmd'),
     // src/find-node.sh가 로그인 셸에서 찾은 Node 경로를 적어 두는 곳
     nodeCache: path.join(env.XDG_CACHE_HOME || path.join(home, '.cache'), 'muwi', 'node'),
   };
 }
 
-/**
- * 설치 기록. 0.5.4까지는 install.json에 적었다.
- * 0.4.0·0.5.0의 훅은 세션이 시작될 때마다(압축·/clear 포함) install.json의 버전이 자기와 다르면 자기 버전으로 setup을
- * 다시 해서, 새 버전의 그래프 칸을 옛것으로 덮어썼다. 새 이름에 적으면 그 세션들은 기록을 찾지 못해 아무것도 하지 않는다.
- * install.json은 0.5.4 이하에서 올라올 때만 읽고, setup이 기록을 새로 적을 때 지운다.
- */
+/** 설치 기록 */
 const installFile = (dir: string) => path.join(dir, 'setup.json');
-const legacyInstallFile = (dir: string) => path.join(dir, 'install.json');
-export const readInstall = (dir: string) => readJson<Install>(installFile(dir)) ?? readJson<Install>(legacyInstallFile(dir));
+export const readInstall = (dir: string) => readJson<Install>(installFile(dir));
 
 const WRAPPER_MARK = '# muwi setup이 만든 파일';
 /** muwi.cmd의 표시. cmd.exe가 읽는 파일이라 ASCII로 적는다 */
 const CMD_MARK = 'rem Created by muwi setup.';
 
 /**
- * 터미널과 Herdr 앱에서 쓸 muwi 명령. 설치된 위치의 bin/muwi를 부른다.
+ * 터미널과 보기에서 쓸 muwi 명령. 설치된 위치의 bin/muwi를 부른다.
  * Node는 실행할 때마다 bin/muwi가 찾는다 (nvm 기본 버전을 바꾸면 따라간다).
  * setup을 실행한 Node는 다른 곳에서 못 찾을 때만 쓴다.
  */
@@ -88,7 +77,7 @@ const cliFile = (root: string) => {
 
 /**
  * Windows의 PowerShell·cmd에서 쓸 muwi.cmd. setup을 실행한 Node로 cli.ts를 바로 실행한다.
- * 그 Node가 없어졌으면 PATH의 node를 쓴다 (Windows의 Herdr 앱이 띄운 프로그램도 사용자 PATH를 받는다)
+ * 그 Node가 없어졌으면 PATH의 node를 쓴다 (멀티플렉서가 띄운 프로그램도 사용자 PATH를 받는다)
  */
 function cmdWrapper(root: string): string {
   return [
@@ -114,18 +103,16 @@ function isOurWrapper(file: string): boolean {
 
 export type SetupOptions = {
   root: string; version: string; dir: string; env?: NodeJS.ProcessEnv; log?: (line: string) => void;
-  /** 커넥터를 넣을 도구들 (도구 id). claude, codex는 --claude, --codex의 옛 이름 */
+  /** 커넥터를 넣을 도구들 (도구 id) */
   tools?: string[];
-  claude?: boolean;
-  codex?: boolean;
   /** 어느 OS에 넣는가 (테스트가 Windows를 흉내 낼 때 준다) */
   platform?: NodeJS.Platform;
-  /** 사람이 muwi setup을 실행했다: 화면이 점검하고 화면 상태를 알린다 (훅이 업데이트 뒤에 다시 맞출 때는 아니다) */
+  /** 사람이 muwi setup을 실행했다: 보기가 점검하고 상태를 알린다 (훅이 업데이트 뒤에 다시 맞출 때는 아니다) */
   report?: boolean;
 };
 
 /**
- * 넣는다: 터미널용 명령, 화면(Herdr 앱 칸), 고른 도구들의 커넥터.
+ * 넣는다: 터미널용 명령, 붙은 보기(그래프 칸 등), 고른 도구들의 커넥터. 터미널 연결과 보기를 불러온 경로를 적어 둔다.
  * 커넥터는 그 도구에 지침, 사용법 skill, 훅(또는 플러그인 파일)을 넣는다. 전에 넣었던 도구는 다시 실행할 때 고르지 않아도 새 판으로 맞춘다.
  */
 export function runSetup(o: SetupOptions): Install {
@@ -155,7 +142,7 @@ export function runSetup(o: SetupOptions): Install {
     install.bin = p.bin;
     log(`muwi 명령: ${p.bin}`);
   }
-  // Windows: PowerShell·cmd와 Herdr 앱 그래프 칸이 쓰는 muwi.cmd도 넣는다 (sh 스크립트는 Git Bash에서만 실행된다)
+  // Windows: PowerShell·cmd와 보기가 쓰는 muwi.cmd도 넣는다 (sh 스크립트는 Git Bash에서만 실행된다)
   if (platform === 'win32') {
     if (fs.existsSync(p.cmd) && !isOurWrapper(p.cmd)) {
       log(`${p.cmd}에 다른 파일이 있어서 muwi.cmd는 넣지 않았어요.`);
@@ -166,27 +153,27 @@ export function runSetup(o: SetupOptions): Install {
     }
   }
 
-  // 화면(Herdr 앱의 그래프 칸 등). 화면을 불러온 경로를 적어 두면 muwi 명령과 훅이 그 화면을 쓴다
-  const h = host();
-  if (h.setup) {
-    const hosted = h.setup({ root: o.root, dir: o.dir, env, log, report: o.report });
-    if (hosted) install.hosted = hosted;
-  }
-  const from = hostPath();
-  const failed = hostFailure();
-  if (from) install.host = from;
-  else if (failed && before?.host) {
-    // 적어 둔 화면을 불러오지 못했다 (화면 패키지를 지웠거나 옮겼다). 화면이 넣은 것을 모르므로 전 기록을 그대로 둔다.
-    // 지우면 그 뒤로 명령과 훅이 화면을 다시 불러오지 않고, setup --remove가 화면이 넣은 것을 빼지 못한다
-    install.host = before.host;
-    if (before.hosted) install.hosted = before.hosted;
-    log(`화면을 불러오지 못해서 화면이 넣은 것은 그대로 뒀어요: ${failed.from} (${failed.reason}). 화면 패키지를 옮겼으면 그 패키지의 muwi로 muwi setup을 다시 실행하세요.`);
+  // 터미널 연결과 보기. 불러온 경로를 적어 두면 그 뒤의 muwi 명령과 훅이 같은 것을 불러온다
+  const paths = pluginPaths();
+  if (paths.terminals) install.terminals = paths.terminals;
+  const loaded = views();
+  install.views = paths.views.map((p, i) => {
+    const v = loaded[i];
+    const installed = v?.setup?.({ root: o.root, dir: o.dir, env, log, report: o.report }) ?? null;
+    return { path: p, ...(installed ? { installed } : {}) };
+  });
+  if (!install.views.length) delete install.views;
+  // 적어 둔 것을 불러오지 못했다 (패키지를 지웠거나 옮겼다). 무엇을 넣었는지 모르므로 전 기록을 그대로 둔다.
+  // 지우면 그 뒤로 명령과 훅이 다시 불러오지 않고, setup --remove가 보기가 넣은 것을 빼지 못한다
+  const failed = pluginFailures();
+  if (failed.length && before) {
+    if (!install.terminals && before.terminals && failed.some(f => f.from === before!.terminals)) install.terminals = before.terminals;
+    const lost = (before.views ?? []).filter(v => failed.some(f => f.from === v.path));
+    if (lost.length) install.views = [...(install.views ?? []), ...lost];
+    for (const f of failed) log(`불러오지 못해서 그대로 뒀어요: ${f.from} (${f.reason}). 패키지를 옮겼으면 그 패키지의 muwi로 muwi setup을 다시 실행하세요.`);
   }
 
-  const want = new Set<string>([
-    ...(o.tools ?? []), ...(o.claude ? ['claude'] : []), ...(o.codex ? ['codex'] : []),
-    ...Object.keys(before?.tools ?? {}), ...(before?.claude ? ['claude'] : []), ...(before?.codex ? ['codex'] : []),
-  ]);
+  const want = new Set<string>([...(o.tools ?? []), ...Object.keys(before?.tools ?? {})]);
   // 표의 순서대로 넣는다
   for (const tool of TOOLS.filter(t => want.has(t.id))) {
     const done = installTool(tool, { root: o.root, env, platform, home: toolHome(tool, env, p.home) }, p.home, block, skill);
@@ -194,13 +181,7 @@ export function runSetup(o: SetupOptions): Install {
     install.tools = { ...(install.tools ?? {}), [tool.id]: done };
     log(`${tool.name} 커넥터: ${[done.instructions, done.skill, ...(done.settings ?? []), ...(done.files ?? [])].filter(Boolean).join(', ')}`);
   }
-  // 0.5.x가 읽던 이름으로도 남긴다
-  const codex = install.tools?.codex, claude = install.tools?.claude;
-  if (codex?.instructions && codex.skill) install.codex = { agents: codex.instructions, skill: codex.skill };
-  if (claude?.settings?.[0] && claude.skill) install.claude = { settings: claude.settings[0], skill: claude.skill };
-
   writeJson(installFile(o.dir), install);
-  fs.rmSync(legacyInstallFile(o.dir), { force: true });
   return install;
 }
 
@@ -242,26 +223,17 @@ export function removeSetup(dir: string, log: (line: string) => void = () => {})
   }
   if (install.bin && isOurWrapper(install.bin)) fs.rmSync(install.bin, { force: true });
   if (install.cmd && isOurWrapper(install.cmd)) fs.rmSync(install.cmd, { force: true });
-  // 화면이 넣은 것은 화면이 뺀다. 0.6.0까지의 기록(herdr)은 Herdr 앱 칸 폴더다
-  const hosted = install.hosted ?? (install.herdr ? { mod: install.herdr } : null);
-  if (hosted) {
-    const h = host();
-    if (h.remove) h.remove(hosted, { dir, log });
-    else {
-      if (hosted.mod) fs.rmSync(hosted.mod, { recursive: true, force: true });
-      const failed = hostFailure();
-      if (failed && install.hosted) log(`화면을 불러오지 못해서 화면 칸만 뺐어요: ${failed.from} (${failed.reason}). 화면이 바꾼 것(레이아웃 등)은 되돌리지 못했어요.`);
-    }
+  // 보기가 넣은 것은 보기가 뺀다. 그 보기를 불러오지 못했으면 무엇을 되돌려야 하는지 모르므로 알린다
+  const loaded = pluginPaths().views;
+  for (const v of install.views ?? []) {
+    if (!v.installed) continue;
+    const i = loaded.indexOf(v.path);
+    const view = i >= 0 ? views()[i] : undefined;
+    if (view?.remove) view.remove(v.installed, { dir, log });
+    else log(`보기를 불러오지 못해서 그 보기가 넣은 것은 빼지 못했어요: ${v.path}`);
   }
-  // 0.5.x의 기록(tools 없이 codex, claude만 있다)도 같은 모양으로 읽는다
-  const tools: Record<string, ToolInstall> = {
-    ...(install.codex ? { codex: { instructions: install.codex.agents, skill: install.codex.skill } } : {}),
-    ...(install.claude ? { claude: { settings: [install.claude.settings], skill: install.claude.skill } } : {}),
-    ...(install.tools ?? {}),
-  };
-  for (const [id, done] of Object.entries(tools)) removeTool(id, done);
+  for (const [id, done] of Object.entries(install.tools ?? {})) removeTool(id, done);
   fs.rmSync(installFile(dir), { force: true });
-  fs.rmSync(legacyInstallFile(dir), { force: true });
   log('muwi setup으로 넣은 것을 뺐어요. 기록 폴더는 그대로 있어요.');
 }
 
@@ -298,7 +270,7 @@ export function newerElsewhere(version: string, env: NodeJS.ProcessEnv = process
       let v: string | undefined;
       try {
         const m = readJson<{ name?: string; version?: string }>(path.join(pkg.root, 'package.json'));
-        if (m?.name && PACKAGE_NAMES.includes(m.name)) v = m.version;
+        if (m?.name?.startsWith('@muwi/')) v = m.version;
       } catch {
         continue;
       }
@@ -308,14 +280,20 @@ export function newerElsewhere(version: string, env: NodeJS.ProcessEnv = process
   return newest;
 }
 
-/** npm에 올리는 muwi 패키지들 (둘 다 muwi 명령을 낸다) */
-const PACKAGE_NAMES = ['@muwi/herdr-app', '@muwi/core'];
+
 
 function packagesAt(dir: string, platform: NodeJS.Platform): { bin: string; root: string }[] {
   if (platform === 'win32') {
     const bin = path.join(dir, 'muwi.cmd');
     if (!fs.existsSync(bin)) return [];
-    return PACKAGE_NAMES.map(name => ({ bin, root: path.join(dir, 'node_modules', ...name.split('/')) }));
+    // muwi 명령을 내는 muwi 패키지들 (@muwi/…)
+    let names: string[] = [];
+    try {
+      names = fs.readdirSync(path.join(dir, 'node_modules', '@muwi'));
+    } catch {
+      return [];
+    }
+    return names.map(name => ({ bin, root: path.join(dir, 'node_modules', '@muwi', name) }));
   }
   const bin = path.join(dir, 'muwi');
   try {

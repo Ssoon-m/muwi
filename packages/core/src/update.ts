@@ -1,5 +1,5 @@
 // 새 버전 알림: 사람이 터미널에서 친 명령이 끝나면, npm에 더 새 판이 있을 때 알린다.
-// - 사람이 친 명령에서만: 표준 오류가 터미널(TTY)일 때다. AI 도구가 실행한 명령, 훅, 그래프 칸이 부르는 명령은 터미널이 아니라서 조용하다
+// - 사람이 친 명령에서만: 표준 오류가 터미널(TTY)일 때다. AI 도구가 실행한 명령, 훅, 보기가 부르는 명령은 터미널이 아니라서 조용하다
 // - 명령을 늦추지 않는다: 알릴지는 캐시만 보고 정한다. npm에 묻는 일은 하루 한 번 따로 띄운 프로세스가 하고, 결과는 다음 명령에서 쓴다
 // - 같은 알림은 하루 한 번만 한다
 // - npm으로 깐 판(.js)에서만 묻는다. 저장소에서 .ts로 돌릴 때는 하지 않는다
@@ -43,15 +43,18 @@ const nameAt = (dir: string): string | undefined => {
 };
 
 /**
- * 사람이 npm으로 깐 패키지. 업데이트 명령에 이 이름을 쓴다.
- * 화면(@muwi/herdr-app)을 쓰고 있으면 그 패키지, 아니면 코어(@muwi/core). npm으로 깐 판이 아니면 null
+ * 사람이 npm으로 깐 패키지. 업데이트 명령에 이 이름을 쓴다. npm으로 깐 판이 아니면 null.
+ * 코어가 다른 muwi 패키지 안에 따라 들어왔으면(<패키지>/node_modules/@muwi/core) 그 패키지다.
+ * 아니면 붙은 보기·터미널 연결이 알려 준 패키지(plugins, 보기 먼저), 그것도 없으면 코어
  */
-export function installedPackage(root: string, hostFile: string | null): string | null {
+export function installedPackage(root: string, plugins: (string | undefined)[] = []): string | null {
   if (!fs.existsSync(path.join(root, 'src', 'cli.js'))) return null;
-  // 화면은 <패키지>/src/host.js에서 불러온다
-  if (hostFile && nameAt(path.resolve(hostFile, '..', '..')) === '@muwi/herdr-app') return '@muwi/herdr-app';
-  // 화면을 아직 적어 두지 않았어도 @muwi/herdr-app 안에 따라 들어온 코어면 그 패키지다: <herdr-app>/node_modules/@muwi/core
-  if (path.basename(path.resolve(root, '..', '..')) === 'node_modules' && nameAt(path.resolve(root, '..', '..', '..')) === '@muwi/herdr-app') return '@muwi/herdr-app';
+  if (path.basename(path.resolve(root, '..', '..')) === 'node_modules') {
+    const outer = nameAt(path.resolve(root, '..', '..', '..'));
+    if (outer?.startsWith('@muwi/')) return outer;
+  }
+  const named = plugins.find((p): p is string => Boolean(p));
+  if (named) return named;
   return nameAt(root) === '@muwi/core' ? '@muwi/core' : null;
 }
 
@@ -71,7 +74,8 @@ export type UpdateContext = {
   cmd: string | undefined;
   current: string;
   root: string;
-  hostFile: string | null;
+  /** 붙은 보기와 터미널 연결이 알려 준 패키지 이름 (보기 먼저) */
+  plugins?: (string | undefined)[];
   env?: NodeJS.ProcessEnv;
   tty?: boolean;
   now?: number;
@@ -87,7 +91,7 @@ export function afterCommand(o: UpdateContext) {
     if (!(o.tty ?? Boolean(process.stderr.isTTY))) return;
     if (env.MUWI_NO_UPDATE_CHECK || env.NO_UPDATE_NOTIFIER || env.CI) return;
     if (o.cmd === 'hook' || o.cmd === 'board') return;
-    const name = installedPackage(o.root, o.hostFile);
+    const name = installedPackage(o.root, o.plugins);
     if (!name) return;
     const file = cacheFile(env);
     const now = o.now ?? Date.now();

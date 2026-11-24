@@ -1,11 +1,11 @@
-// 계획과 사건 기록을 합쳐 보여 줄 모양을 만든다 (그래프 화면, muwi show, 문제 진단이 모두 이걸 읽는다).
+// 계획과 사건 기록을 합쳐 보여 줄 모양을 만든다 (보기의 그래프, muwi show, 문제 진단이 모두 이걸 읽는다).
 //   노드마다: 회차별로 누가 했는지, 얼마나 걸렸는지, 하는 동안 읽은 skill
 //   작업마다: 계획이 바뀐 이유들, 빠진 노드, 문제 표시, 노드 밖에서 읽은 skill
 // 사건에는 어느 노드의 몇 번째 회차인지가 적혀 있다. 여기서는 적힌 대로 모으기만 한다.
 // 시각을 맞춰 보며 짐작하지 않는다. 확실하지 않게 적힌 것(guess)과 관찰하지 못한 것(seen: false)은 그대로 드러낸다.
 import type { Event, NodeStatus, Plan, PlanNode, ShowIn } from './store.ts';
 import { clock, listWorks, readEvents, readPlan, resultsSince } from './store.ts';
-import { host } from './host.ts';
+import { sessionStates } from './live.ts';
 import { readSession, sessionLabel } from './session.ts';
 
 export type SkillUse = {
@@ -51,7 +51,7 @@ export type Try = {
   instant: boolean;
 };
 
-export type Spawn = { at: string; terminal: string; name?: string; show?: ShowIn; /** 그 세션에 맡긴 말 */ task?: string; /** 새 세션을 띄운 폴더 */ cwd?: string };
+export type Spawn = { at: string; /** 띄운 것의 이름표 */ id?: string; terminal: string; name?: string; show?: ShowIn; /** 그 세션에 맡긴 말 */ task?: string; /** 새 세션을 띄운 폴더 */ cwd?: string };
 
 /** 노드. who·skills·seen·instant는 가장 최근 회차의 것이고, 회차별 기록은 tries에 있다 */
 export type NodeView = PlanNode & {
@@ -97,16 +97,16 @@ export type WorkState = 'waiting' | 'blocked' | 'doing' | 'stalled' | 'done';
 /**
  * 하는 노드가 없는 작업(앞 노드를 끝내고 다음 노드를 아직 시작하지 않음)에서, 그 작업에 붙어 있는 세션이 하는 일.
  * working: 다음 노드를 준비하고 있다(작업 중), asking: 세션이 입력을 기다린다(응답 대기), stopped: 세션이 노드를 남긴 채 멈췄다(응답 대기),
- * gone: 이 작업을 맡은 세션이 없다(멈춤. 닫혔거나 다른 작업으로 갔다), unknown: 세션이 무얼 하는지 알 수 없다(화면이 없다. 작업 중으로 본다)
+ * gone: 이 작업을 맡은 세션이 없다(멈춤. 닫혔거나 다른 작업으로 갔다), unknown: 세션이 무얼 하는지 알 수 없다(훅도 터미널 연결도 알려 주지 않았다. 작업 중으로 본다)
  */
 export type Between = 'working' | 'asking' | 'stopped' | 'gone' | 'unknown';
 /**
  * 하는 중이라고 적힌 노드를 하던 세션이 일을 멈춘 모습. 노드의 상태는 AI가 적은 것이라, 세션이 멈추면(사용 한도, 권한 확인, 말을 끝냄) 적어 줄 쪽이 없어 계속 작업 중으로 남는다.
- * 그래서 세션이 지금 무얼 하는지는 화면(Herdr)에 묻는다. 도구가 무엇이든 화면이 아는 세션이면 된다.
+ * 그래서 세션이 지금 무얼 하는지는 훅과 터미널 연결이 알려 준 것으로 본다 (live.ts).
  * asking: 세션이 입력을 기다린다, stopped: 세션이 멈춰서 다음 말을 기다린다. 둘 다 사람이 말해야 다시 움직인다 (응답 대기)
  */
 export type Quiet = 'asking' | 'stopped';
-/** 화면이 알려 준 세션 상태가 일을 멈춘 것이면 어떻게 멈췄는지. 일하는 중이거나 모르면(화면이 없다) 없다 */
+/** 알려 준 세션 상태가 일을 멈춘 것이면 어떻게 멈췄는지. 일하는 중이거나 모르면 없다 */
 export const quietOf = (status?: string): Quiet | undefined => (!status || status === 'working' ? undefined : status === 'blocked' ? 'asking' : 'stopped');
 const BETWEEN_STATE: Record<Between, WorkState> = { working: 'doing', asking: 'waiting', stopped: 'waiting', gone: 'stalled', unknown: 'doing' };
 
@@ -114,7 +114,7 @@ export type SessionInfo = {
   label: string;
   tool: string;
   terminal?: string;
-  herdrPane?: string;
+  pane?: string;
   /** 이 세션이 마지막으로 무언가를 적은 시각 */
   seenAt?: string;
   /** 이 세션이 일하던 폴더. 세션이 닫혔을 때 이어서 하는 방법을 보여 주는 데 쓴다 */
@@ -125,7 +125,7 @@ export type SessionInfo = {
   native?: string;
   /** 이 세션이 지금 붙어 있는 작업 */
   work?: string;
-  /** 화면이 알려 준 지금 상태: working(일하는 중), blocked(입력을 기다림), done·idle(멈춰서 다음 말을 기다림). 모르면 없다 */
+  /** 훅이나 터미널 연결이 알려 준 지금 상태: working(일하는 중), blocked(입력을 기다림), done·idle(멈춰서 다음 말을 기다림). 모르면 없다 */
   status?: string;
 };
 
@@ -278,7 +278,7 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
     } else if (e.type === 'join') {
       if (e.session) joined.add(e.session);
     } else if (e.type === 'spawn') {
-      spawns.set(e.node, [...(spawns.get(e.node) ?? []), { at: e.at, terminal: e.terminal, ...(e.name ? { name: e.name } : {}), ...(e.show ? { show: e.show } : {}), ...(e.task ? { task: e.task } : {}), ...(e.cwd ? { cwd: e.cwd } : {}) }]);
+      spawns.set(e.node, [...(spawns.get(e.node) ?? []), { at: e.at, ...(e.id ? { id: e.id } : {}), terminal: e.terminal, ...(e.name ? { name: e.name } : {}), ...(e.show ? { show: e.show } : {}), ...(e.task ? { task: e.task } : {}), ...(e.cwd ? { cwd: e.cwd } : {}) }]);
     }
   }
 
@@ -378,7 +378,7 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
       else view.runUnknown = true;
     }
     if ((n.status === 'doing' || n.status === 'waiting' || n.status === 'blocked') && last?.who?.session && closed.has(last.who.session)) view.closed = true;
-    // 서브에이전트가 하는 노드도 그 세션의 상태로 본다. 뒤에서 도는 서브에이전트를 기다리는 세션은 화면(Herdr)이 일하는 중으로 알려 준다
+    // 서브에이전트가 하는 노드도 그 세션의 상태로 본다. 뒤에서 도는 서브에이전트를 기다리는 세션은 터미널 연결이 일하는 중으로 알려 준다
     const quiet = n.status === 'doing' && !view.closed && last?.who?.session ? quietOf(sessions[last.who.session]?.status) : undefined;
     if (quiet) view.quiet = quiet;
     if (n.status === 'todo' && (n.attempt ?? 0) > 0) view.paused = true;
@@ -485,7 +485,7 @@ export function sessionsOf(dir: string, events: Event[]): Record<string, Session
       label: sessionLabel(s, key),
       tool: s?.tool ?? 'unknown',
       ...(s?.terminal ? { terminal: s.terminal } : {}),
-      ...(s?.herdrPane ? { herdrPane: s.herdrPane } : {}),
+      ...(s?.pane ? { pane: s.pane } : {}),
       ...(s?.seenAt ? { seenAt: s.seenAt } : {}),
       ...(s?.cwd ? { cwd: s.cwd } : {}),
       ...(s?.model ? { model: s.model } : {}),
@@ -501,9 +501,9 @@ export function loadView(dir: string, work: string, env: NodeJS.ProcessEnv = pro
   if (!plan) return null;
   const events = readEvents(dir, work);
   const sessions = sessionsOf(dir, events);
-  // 끝나지 않은 노드가 있을 때만 화면에 물어본다: 세션이 닫혔는지, 살아 있으면 지금 무얼 하는지. 다 끝난 작업은 물어볼 것이 없다
+  // 끝나지 않은 노드가 있을 때만 본다: 세션이 닫혔는지, 살아 있으면 지금 무얼 하는지. 다 끝난 작업은 볼 것이 없다
   const open = plan.nodes.some(n => n.status !== 'done');
-  const live = open ? host().states(sessions, Object.keys(sessions), env) : { closed: new Map<string, number>(), status: new Map<string, string>() };
+  const live = open ? sessionStates(dir, Object.keys(sessions), env) : { closed: new Map<string, number>(), status: new Map<string, string>() };
   for (const [key, status] of live.status) if (sessions[key]) sessions[key].status = status;
   return buildView(plan, events, sessions, clock.now().getTime(), live.closed, resultsSince(dir));
 }
@@ -513,16 +513,16 @@ const ORDER: Record<WorkState, number> = { waiting: 0, blocked: 1, doing: 2, sta
 export const PAST_DAYS = 7;
 
 export type WorkSummary = Pick<WorkView, 'work' | 'title' | 'request' | 'state' | 'between' | 'quiet' | 'unread' | 'updatedAt' | 'counts' | 'spentMs'> & {
-  /** 이 작업을 한 대화(세션)들: 계획을 낸 대화 먼저, 나머지는 최근에 본 순. 그래프 칸이 누를 때 그 대화로 간다 */
+  /** 이 작업을 한 대화(세션)들: 계획을 낸 대화 먼저, 나머지는 최근에 본 순. 보기가 누를 때 그 대화로 간다 */
   talks?: string[];
   /**
    * 지금 눈여겨볼 노드들: 사람을 기다리는 것, 막힌 것, 하는 중인 것. closed: 그 노드를 하던 세션이 닫혔다.
-   * quiet: 그 노드를 하던 세션이 일을 멈췄다. terminal: 그 세션의 터미널 (그래프 칸이 지금 상태를 다시 볼 때 쓴다)
+   * quiet: 그 노드를 하던 세션이 일을 멈췄다. terminal: 그 세션의 터미널 (보기가 지금 상태를 다시 볼 때 쓴다)
    */
   active: { id: string; title: string; status: NodeStatus; note?: string; closed?: boolean; quiet?: Quiet; terminal?: string }[];
   /** 지난 작업: 끝났거나 멈춘 채로 오래됐다. 목록에서 접어 둔다 */
   past: boolean;
-  /** 이 작업으로 갈 때 열 터미널 (화면이 알려 준 자리). 모르면 없다 */
+  /** 이 작업으로 갈 때 열 터미널 (터미널 연결이 알려 준 주소). 모르면 없다 */
   terminal?: string;
 };
 
@@ -557,7 +557,7 @@ export function loadBoard(dir: string, env: NodeJS.ProcessEnv = process.env): { 
       const v = loadView(dir, work, env);
       if (!v) continue;
       // 살아 있는 세션이 하고 있는 작업은 오래돼도 접지 않는다
-      // 세션이 무얼 하는지 모르는 작업(화면이 없다)도 오래 그대로면 접는다
+      // 세션이 무얼 하는지 모르는 작업도 오래 그대로면 접는다
       const still = v.state === 'done' || v.state === 'stalled' || v.between === 'unknown';
       const terminal = terminalOf(v);
       works.push({

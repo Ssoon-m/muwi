@@ -1,17 +1,30 @@
 {
   "name": "@muwi/core",
   "version": "0.7.1",
-  "description": "AI가 스스로 짠 작업 플로우를 기록한다. 어느 AI 도구든 커넥터로 붙는다",
+  "description": "AI가 스스로 짠 작업 플로우를 기록한다. 어느 AI 도구든 커넥터로, 어느 멀티플렉서든 터미널 연결로 붙는다",
   "license": "MIT",
   "type": "module",
-  "bin": { "muwi": "bin/muwi.js" },
+  "bin": {
+    "muwi": "bin/muwi.js"
+  },
   "exports": {
     "./*": "./src/*.ts",
     "./package.json": "./package.json"
   },
-  "engines": { "node": ">=24" },
-  "publishConfig": { "access": "public" },
-  "repository": { "type": "git", "url": "git+https://github.com/Ssoon-m/muwi.git", "directory": "packages/core" },
+  "dependencies": {
+    "elkjs": "0.12.1"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ssoon-m/muwi.git",
+    "directory": "packages/core"
+  },
   "scripts": {
     "test": "node --test \"tests/*.test.ts\""
   }

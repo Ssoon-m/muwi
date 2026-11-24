@@ -1,12 +1,13 @@
-// 닫힌 세션을 이어 하는 버튼(그래프 칸의 "이어서 하려면")에 쓸 사실을 모은다.
-// 그래프 칸(Herdr 앱 mod)은 파일을 볼 수 없어서 muwi board가 알려 준다:
+// 닫힌 세션을 이어 하는 데 쓸 사실을 모은다. muwi resume과 보기의 이어 하기 버튼이 쓴다.
+// 보기는 파일을 볼 수 없을 수 있어서 muwi board가 알려 준다:
 //   그 폴더가 아직 있는가 (worktree를 지웠으면 그 폴더에서는 터미널을 열 수 없다)
 //   Claude 대화를 다시 열 수 있는가 (대화 파일이 없으면 claude --resume이 "No conversation found"로 끝난다)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { launchCommand, resumeCommand, toolById } from '@muwi/core/connectors/tools';
-import type { WorkView } from '@muwi/core/view';
+import { launchCommand, resumeCommand, toolById } from './connectors/tools.ts';
+import { TERMINAL_KEY } from './session.ts';
+import type { WorkView } from './view.ts';
 
 /** Claude Code 세션 id 모양. muwi는 Claude 세션의 id를 세션 이름으로 쓴다 */
 const CLAUDE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -26,8 +27,6 @@ export type ResumeFacts = {
   toolNames: Record<string, string>;
 };
 
-/** 터미널로 대신한 세션 이름 (세션 id를 주지 않는 도구). 이 이름으로는 대화를 다시 열 수 없다 */
-const STAND_IN = /^(hc|herdr)-/;
 
 /** Claude Code는 대화를 <설정 폴더>/projects/<폴더 경로의 글자 아닌 것을 -로 바꾼 이름>/<세션 id>.jsonl에 남긴다 */
 export function resumeFacts(v: Pick<WorkView, 'cwd' | 'sessions' | 'nodes' | 'lead'>, env: NodeJS.ProcessEnv = process.env): ResumeFacts {
@@ -57,7 +56,7 @@ export function resumeFacts(v: Pick<WorkView, 'cwd' | 'sessions' | 'nodes' | 'le
     if (toolById(s.tool)) launch[key] = launchCommand(s.tool);
     // Claude Code는 대화 파일이 남아 있어야 열린다. 다른 도구는 그 도구의 대화 id가 있으면 이어 가기 명령을 쓴다.
     // 터미널을 세션으로 본 도구는 훅이 적어 둔 대화 id(native)를 쓴다
-    const id = s.native ?? (STAND_IN.test(key) ? null : key);
+    const id = s.native ?? (key.startsWith(TERMINAL_KEY) ? null : key);
     const can = s.tool === 'claude' ? CLAUDE_ID.test(key) && saved(key, s.cwd) : Boolean(id);
     const command = can && id ? resumeCommand(s.tool, id) : null;
     if (command) resume[key] = command;

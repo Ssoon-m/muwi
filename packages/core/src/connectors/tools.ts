@@ -1,10 +1,10 @@
-// muwi가 아는 AI 도구들. Herdr가 통합을 두는 도구와 같은 이름(id)을 쓴다.
+// muwi가 아는 AI 도구들. id는 짧은 영문 이름이다 (멀티플렉서들이 그 도구를 부르는 이름과 맞춰 둔다).
 // 여기는 표만 둔다 (다른 파일을 읽지 않는다): 설정 폴더, 지침 파일, 띄우는 명령처럼 도구마다 다른 값.
 // 훅 입력을 번역하고 훅을 설치하는 코드는 도구별 커넥터에 있다.
 import path from 'node:path';
 
 export type Tool = {
-  /** Herdr의 통합 이름과 같다 (herdr integration status) */
+  /** 도구의 짧은 이름 (커넥터, 세션 파일, muwi setup --tool에 쓴다) */
   id: string;
   /** 사람이 읽는 이름 */
   name: string;

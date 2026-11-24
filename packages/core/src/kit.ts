@@ -1,5 +1,5 @@
 // 명령들이 같이 쓰는 것: 인자 읽기, 출력, 실패, 어느 작업에 적을지 고르기.
-// 코어의 명령과 화면 패키지(@muwi/herdr-app)가 더하는 명령이 함께 쓴다.
+// 코어의 명령과 보기가 더하는 명령이 함께 쓴다.
 import { attach, readSession, sessionKey } from './session.ts';
 import { checkWorkName, listWorks, readPlan, type Plan } from './store.ts';
 
@@ -21,15 +21,9 @@ process.stdout.on('error', (e: NodeJS.ErrnoException) => {
 });
 
 /** 값을 받는 코어 명령의 옵션 (--work <이름> 같은 것). 나머지 옵션은 켜고 끄는 것으로 읽는다 */
-export const VALUED: ReadonlySet<string> = new Set(['work', 'request', 'title', 'why', 'by', 'file', 'after', 'before', 'result', 'run', 'show', 'from', 'event', 'tool']);
+export const VALUED: ReadonlySet<string> = new Set(['work', 'request', 'title', 'why', 'by', 'file', 'after', 'before', 'result', 'run', 'show', 'from', 'event', 'tool', 'name', 'agent', 'cwd', 'fit', 'timeout']);
 
-/**
- * Herdr 화면(@muwi/herdr-app)이 더하는 명령의 이름. 코어만 깐 사람이 이 명령을 치면 어느 패키지에 있는지 알려 주려고 이름만 둔다.
- * @muwi/herdr-app의 시험이 이 목록과 화면이 더하는 명령이 같은지 본다
- */
-export const SCREEN_COMMANDS: ReadonlySet<string> = new Set(['board', 'layout', 'open', 'run', 'tidy']);
-
-/** 명령의 인자를 읽는다. valued: 값을 받는 옵션들 (화면이 더하는 명령은 자기 옵션을 더해서 준다) */
+/** 명령의 인자를 읽는다. valued: 값을 받는 옵션들 (보기가 더하는 명령은 자기 옵션을 더해서 준다) */
 export function parseArgs(argv: string[], valued: ReadonlySet<string> = VALUED) {
   const pos: string[] = [];
   const flags: Record<string, string | boolean> = {};

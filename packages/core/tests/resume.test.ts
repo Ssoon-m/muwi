@@ -24,7 +24,7 @@ test('이어 하기 버튼에 쓸 사실: 폴더가 아직 있는가, Claude 대
       [saved]: { label: 't1', tool: 'claude', cwd: repo },
       [lost]: { label: 't2', tool: 'claude', cwd: repo },
       [elsewhere]: { label: 't3', tool: 'claude', cwd: path.join(repo, 'sub') },
-      'hc-t4': { label: 't4', tool: 'codex', cwd: repo },
+      'terminal-t4': { label: 't4', tool: 'codex', cwd: repo },
     },
     nodes: [{ spawns: [{ at: '', terminal: 't5', cwd: gone }] }] as never,
   }, { HOME: home } as NodeJS.ProcessEnv);

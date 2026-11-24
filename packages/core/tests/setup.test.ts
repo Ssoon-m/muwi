@@ -100,22 +100,21 @@ test('muwi setup: 있는 도구에만 넣고, 무엇을 넣었는지 적어 둔�
   assert.ok(fs.readFileSync(bin, 'utf8').includes(`MUWI_SETUP_NODE="${posix(process.execPath)}" exec "${posix(path.join(ROOT, 'bin', 'muwi'))}"`));
   // Windows는 실행 권한 비트가 없다 (Git Bash는 #! 줄을 보고 실행한다)
   if (process.platform !== 'win32') assert.ok(fs.statSync(bin).mode & 0o100);
-  // 화면이 없으면 화면은 넣지 않는다. Codex가 없으면 건너뛴다. 고르지 않은 도구(Claude Code 포함)에는 커넥터를 넣지 않는다
-  assert.equal(install.host, undefined);
-  assert.equal(install.hosted, undefined);
-  assert.equal(install.codex, undefined);
-  assert.equal(install.claude, undefined);
+  // 터미널 연결과 보기가 없으면 적지 않는다. 고르지 않은 도구(Claude Code 포함)에는 커넥터를 넣지 않는다
+  assert.equal(install.terminals, undefined);
+  assert.equal(install.views, undefined);
+  assert.equal(install.tools, undefined);
   assert.equal(fs.existsSync(path.join(h.dir, '.claude')), false);
   assert.deepEqual(readInstall(h.records), install);
 });
 
-test('muwi setup: --codex를 주면 Codex 지침·skill을 넣고, --remove로 뺀다', () => {
+test('muwi setup: --tool codex를 주면 Codex 지침·skill을 넣고, --remove로 뺀다', () => {
   const h = home('codex');
   fs.writeFileSync(path.join(h.dir, '.codex', 'AGENTS.md'), '# 내 Codex 규칙\n');
-  // Codex가 있어도 --codex를 주지 않으면 건드리지 않는다
+  // Codex가 있어도 고르지 않으면 건드리지 않는다
   runSetup({ root: ROOT, version: '0.1.0', dir: h.records, env: h.env });
   assert.equal(fs.readFileSync(path.join(h.dir, '.codex', 'AGENTS.md'), 'utf8'), '# 내 Codex 규칙\n');
-  runSetup({ root: ROOT, version: '0.1.0', dir: h.records, env: h.env, codex: true });
+  runSetup({ root: ROOT, version: '0.1.0', dir: h.records, env: h.env, tools: ['codex'] });
   // 한 번 넣은 뒤로는 옵션 없이 다시 실행해도 유지한다 (업데이트 때 새 위치로 맞추기 위해)
   runSetup({ root: ROOT, version: '0.1.0', dir: h.records, env: h.env });
   const agents = fs.readFileSync(path.join(h.dir, '.codex', 'AGENTS.md'), 'utf8');
@@ -130,14 +129,16 @@ test('muwi setup: --codex를 주면 Codex 지침·skill을 넣고, --remove로 �
   assert.equal(readInstall(h.records), null);
 });
 
-test('muwi setup --claude (옛 이름, 지금은 --tool claude): Claude Code에 훅과 사용법 skill을 넣는다', () => {
+test('muwi setup --tool claude: Claude Code에 훅과 사용법 skill을 넣는다', () => {
   const h = home();
   fs.mkdirSync(path.join(h.dir, '.claude'));
   fs.writeFileSync(path.join(h.dir, '.claude', 'settings.json'), '{"model":"opus"}');
-  runSetup({ root: ROOT, version: '0.1.0', dir: h.records, env: h.env, claude: true });
+  runSetup({ root: ROOT, version: '0.1.0', dir: h.records, env: h.env, tools: ['claude'] });
   const settings = JSON.parse(fs.readFileSync(path.join(h.dir, '.claude', 'settings.json'), 'utf8'));
   assert.equal(settings.model, 'opus');
   assert.equal(settings.hooks.SessionStart[0].hooks[0].command, hookCommandFor(ROOT));
+  // 세션이 일하는지 기다리는지, 끝났는지를 알려 주는 훅도 건다 (화면 없이 세션 상태를 아는 길)
+  for (const event of ['UserPromptSubmit', 'Stop', 'SessionEnd']) assert.equal(settings.hooks[event][0].hooks[0].command, hookCommandFor(ROOT));
   assert.ok(fs.existsSync(path.join(h.dir, '.claude', 'skills', 'muwi', 'SKILL.md')));
   // 지침은 훅이 세션마다 넣어 주므로 CLAUDE.md는 건드리지 않는다
   assert.equal(fs.existsSync(path.join(h.dir, '.claude', 'CLAUDE.md')), false);
@@ -244,30 +245,7 @@ test('다른 자리의 더 새 muwi를 PATH에서 찾는다 (nvm으로 Node를 �
   assert.equal(newerElsewhere('0.7.0', PATH(path.join(tmp, 'missing')), 'linux'), null);
 });
 
-test('설치 기록은 setup.json에 적는다: install.json만 보는 옛 훅(0.4.0·0.5.0)이 새 설치를 되돌리지 못한다', () => {
-  const h = home();
-  const legacy = path.join(h.records, 'install.json');
-  // 0.5.4 이하가 남긴 기록에서 올라온다: 읽을 수 있고, 새로 적을 때 지운다
-  fs.mkdirSync(h.records, { recursive: true });
-  fs.writeFileSync(legacy, JSON.stringify({ root: '/old/muwi/0.5.4', version: '0.5.4', at: '2026-11-23T00:00:00.000Z' }));
-  assert.equal(readInstall(h.records)!.version, '0.5.4');
-  assert.equal(refreshSetup({ root: ROOT, version: '0.5.5', dir: h.records, env: h.env }), true);
-  assert.equal(fs.existsSync(legacy), false);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(h.records, 'setup.json'), 'utf8')).version, '0.5.5');
-  // 0.4.0·0.5.0의 규칙: install.json의 버전이 자기와 다르면 자기 버전으로 setup을 다시 한다. 기록이 없으면 아무것도 하지 않는다
-  const oldRule = (version: string) => {
-    if (!fs.existsSync(legacy)) return false;
-    return JSON.parse(fs.readFileSync(legacy, 'utf8')).version !== version;
-  };
-  assert.equal(oldRule('0.4.0'), false);
-  // 제거하면 두 기록 모두 없어진다
-  fs.writeFileSync(legacy, '{"root":"/old","version":"0.5.4","at":"x"}');
-  removeSetup(h.records);
-  assert.equal(fs.existsSync(legacy), false);
-  assert.equal(readInstall(h.records), null);
-});
-
-test('Windows의 훅 명령(setup --claude)은 경로를 슬래시로 적는다: Git Bash가 읽는다', () => {
+test('Windows의 훅 명령(setup --tool claude)은 경로를 슬래시로 적는다: Git Bash가 읽는다', () => {
   assert.equal(hookCommandFor('C:\\Users\\me\\muwi', 'win32'), 'MUWI_HOOK=1 sh "C:/Users/me/muwi/hooks/hook.sh"');
   // macOS·Linux는 경로를 그대로 둔다 (Windows 호스트에서는 path.join이 백슬래시를 만들어 이 조합이 나오지 않는다)
   if (process.platform !== 'win32') assert.equal(hookCommandFor('/Users/me/muwi', 'darwin'), 'MUWI_HOOK=1 sh "/Users/me/muwi/hooks/hook.sh"');

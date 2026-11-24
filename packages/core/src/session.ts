@@ -2,7 +2,7 @@
 //   muwi 명령은 환경 변수에서 세션을 읽고, 훅은 Claude Code가 넘겨주는 session_id를 쓴다. 둘은 같은 값이다.
 // 세션마다 파일 하나(<기록 폴더>/.sessions/<세션>.json)에 지금 붙어 있는 작업과 읽은 skill을 적어 둔다.
 import { detectTool, sessionFromEnv } from './connectors/tools.ts';
-import { host } from './host.ts';
+import { terminals } from './plugins.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { appendEvent, nowIso, readEvents, readJson, readPlan, writeJson } from './store.ts';
@@ -17,10 +17,14 @@ export type Session = {
   /** 그 도구가 붙인 대화 id. 터미널을 세션으로 본 도구에서 하던 대화를 다시 열 때 쓴다 */
   native?: string;
   cwd?: string;
-  /** 그 세션이 도는 자리의 주소 (화면이 알려 준다. Herdr 앱의 터미널). 화면이 그 세션의 상태를 보고 그 자리로 갈 때 쓴다 */
+  /** 그 세션이 도는 터미널의 주소 (터미널 연결이 알려 준다). 그 세션이 살아 있는지 보고, 보기가 그 터미널로 갈 때 쓴다 */
   terminal?: string;
-  /** 그 자리의 칸 (화면이 알려 준다. herdr의 pane) */
-  herdrPane?: string;
+  /** 그 터미널을 담은 칸 (멀티플렉서가 칸과 터미널을 따로 다룰 때) */
+  pane?: string;
+  /** 훅이 알려 준 지금 차례: working(사람이 말을 걸어 일하는 중), done(말을 끝내고 다음 말을 기다림) */
+  turn?: 'working' | 'done';
+  /** 훅이 세션이 끝났다고 알린 시각 */
+  endedAt?: string;
   /** 지금 붙어 있는 작업 */
   work?: string;
   /** 이 세션이 읽은 skill과 처음 읽은 시각. 작업을 옮겨도 세션은 내용을 갖고 있으므로 따로 기억한다 */
@@ -47,9 +51,13 @@ export function sessionKey(env: NodeJS.ProcessEnv = process.env): string | null 
   return sessionFromEnv(env) ?? terminalKey(env);
 }
 
-/** 세션 id를 주지 않는 도구는 이 프로세스가 도는 자리(터미널)를 세션으로 본다. 자리를 알려 주는 화면이 없으면 null */
+/** 세션 id를 주지 않는 도구의 세션 이름 앞에 붙인다. 그 도구는 이 프로세스가 도는 터미널을 세션으로 본다 */
+export const TERMINAL_KEY = 'terminal-';
+
+/** 세션 id를 주지 않는 도구는 이 프로세스가 도는 터미널을 세션으로 본다. 터미널을 알려 주는 연결이 없으면 null */
 export function terminalKey(env: NodeJS.ProcessEnv = process.env): string | null {
-  return host().place(env)?.key ?? null;
+  const t = terminals().place(env)?.terminal;
+  return t ? `${TERMINAL_KEY}${t}` : null;
 }
 
 export const toolOf = (env: NodeJS.ProcessEnv = process.env): Session['tool'] => detectTool(env);
@@ -82,9 +90,9 @@ export function touchSession(dir: string, key: string, patch: Partial<Session> =
   const at = nowIso();
   const old = readSession(dir, key);
   const fromEnv: Partial<Session> = {};
-  const place = host().place(env);
+  const place = terminals().place(env);
   if (place?.terminal) fromEnv.terminal = place.terminal;
-  if (place?.pane) fromEnv.herdrPane = place.pane;
+  if (place?.pane) fromEnv.pane = place.pane;
   const next: Session = {
     tool: toolOf(env),
     loaded: {},
@@ -141,8 +149,8 @@ export function recordSkill(dir: string, key: string, skill: string, via: 'tool'
 export type SessionLink = { key: string; terminal: string; work?: string; seenAt: string };
 
 /**
- * 최근에 본 세션 중 Herdr 터미널이 있는 것. 그래프 칸은 이걸로 "이 터미널의 세션은 어느 작업을 하는가"를 안다.
- * 오래된 세션은 넣지 않는다 (Herdr를 다시 켜면 터미널 주소가 다시 쓰인다)
+ * 최근에 본 세션 중 터미널을 아는 것. 보기는 이걸로 "이 터미널의 세션은 어느 작업을 하는가"를 안다.
+ * 오래된 세션은 넣지 않는다 (멀티플렉서를 다시 켜면 터미널 주소가 다시 쓰일 수 있다)
  */
 export function recentSessions(dir: string, since: number): SessionLink[] {
   let names: string[];
@@ -161,10 +169,10 @@ export function recentSessions(dir: string, since: number): SessionLink[] {
   return out.sort((a, b) => (a.seenAt < b.seenAt ? 1 : a.seenAt > b.seenAt ? -1 : 0));
 }
 
-/** 화면에 보여 줄 짧은 이름: 터미널 주소가 있으면 그것, 화면이 지은 이름이면 화면이 정한 것, 그 밖에는 세션 id 앞 네 글자 */
-export function sessionLabel(s: Pick<Session, 'key' | 'terminal' | 'herdrPane'> | null | undefined, key: string | null): string {
+/** 보여 줄 짧은 이름: 터미널 주소가 있으면 그것, 터미널을 세션으로 본 이름이면 그 주소, 그 밖에는 세션 id 앞 네 글자 */
+export function sessionLabel(s: Pick<Session, 'key' | 'terminal' | 'pane'> | null | undefined, key: string | null): string {
   if (!key) return '';
   if (s?.terminal) return s.terminal;
-  if (s?.herdrPane) return s.herdrPane;
-  return host().label?.(key) ?? key.slice(0, 4);
+  if (s?.pane) return s.pane;
+  return key.startsWith(TERMINAL_KEY) ? key.slice(TERMINAL_KEY.length) : key.slice(0, 4);
 }

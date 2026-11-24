@@ -5,15 +5,15 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileGuideHash, guideUpdate, handleHook, skillFromPath } from '../src/hook.ts';
 import { markNode } from '../src/node.ts';
-import { setHost } from '../src/host.ts';
-import { placeHost } from './place-host.ts';
+import { setTerminals } from '../src/plugins.ts';
+import { fakeTerminals } from './fake-terminals.ts';
 import { attach, readSession, recordSkill, touchSession } from '../src/session.ts';
 import { appendEvent, clock, readConfig, readEvents, readPlan, writeConfig, writePlan, type NodeStatus, type Plan } from '../src/store.ts';
 import { buildView, loadBoard, loadView, unionMs } from '../src/view.ts';
 
 const ENV = {} as NodeJS.ProcessEnv;
 // 세션이 도는 자리(터미널)를 알려 주는 화면이 있을 때를 시험한다
-setHost(placeHost);
+setTerminals(fakeTerminals);
 
 const T0 = Date.parse('2026-11-22T05:00:00.000Z');
 /** 시작 뒤 몇 분인지로 시각을 맞춘다 */

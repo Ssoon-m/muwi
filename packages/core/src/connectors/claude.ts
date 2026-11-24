@@ -1,7 +1,7 @@
 // Claude Code 커넥터: Claude Code의 훅 입력을 코어의 공통 사건으로 바꾸고, 코어의 답을 Claude Code가 알아듣는 형식으로 바꾼다.
 // 코어(events.ts)는 Claude Code의 훅 이름·도구 이름을 모른다.
 //   훅은 ~/.claude/settings.json에 두 갈래로 건다:
-//     record: SessionStart, SubagentStart/Stop, PostToolUse(Skill|Read). 사람이 말할 때(UserPromptSubmit)는 걸지 않는다
+//     record: SessionStart·SessionEnd, UserPromptSubmit·Stop(세션이 일하는지 기다리는지), SubagentStart/Stop, PostToolUse(Skill|Read)
 //     command: PreToolUse(Bash)
 import path from 'node:path';
 import { skillFromPath, type Happened, type Reply } from '../events.ts';
@@ -19,7 +19,7 @@ function entries(hookCommand: string): HookEntry[] {
   // 훅이 실패해도(Windows에서 Git Bash가 없어 sh를 못 찾는 등) 하려던 일을 막지 않는다
   const on = (event: string, matcher?: string, mode = ''): HookEntry => ({ event, ...(matcher ? { matcher } : {}), command: `${hookCommand}${mode}`, extra: { onFailure: 'continue' } });
   return [
-    on('SessionStart'), on('SubagentStart'), on('SubagentStop'),
+    on('SessionStart'), on('SessionEnd'), on('UserPromptSubmit'), on('Stop'), on('SubagentStart'), on('SubagentStop'),
     on('PostToolUse', 'Skill|Read'),
     on('PreToolUse', 'Bash', ' command'),
   ];
@@ -50,6 +50,8 @@ export function fromClaude(payload: any, mode: HookMode, env: NodeJS.ProcessEnv 
 
   if (event === 'SessionStart') return { ...who, kind: 'session-start', ...(payload.source === 'compact' ? { resumed: 'compact' as const } : {}) };
   if (event === 'UserPromptSubmit') return { ...who, kind: 'prompt' };
+  if (event === 'Stop') return { ...who, kind: 'turn-end' };
+  if (event === 'SessionEnd') return { ...who, kind: 'session-end' };
   if (event === 'SubagentStart' || event === 'SubagentStop') {
     const agentKind = typeof payload.agent_type === 'string' && payload.agent_type ? payload.agent_type : undefined;
     return { ...who, kind: event === 'SubagentStart' ? 'subagent-start' : 'subagent-end', ...(agentKind ? { agentKind } : {}) };
