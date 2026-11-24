@@ -7,9 +7,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { herdrApp } from './herdr.ts';
+import { herdrApp } from './hc.ts';
 import { layoutPreview } from './preview.ts';
-import { readJson, writeJson } from './store.ts';
+import { readJson, writeJson } from '../store.ts';
 
 export const LAYOUT_NAME = 'muwi';
 export const GRAPH_ID = 'muwi-graph';

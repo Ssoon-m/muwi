@@ -15,7 +15,7 @@ import path from 'node:path';
 import { appendEvent, nowIso, readEvents, readJson, readPlan } from './store.ts';
 import type { PlanNode } from './store.ts';
 import { attach, readSession, recordSkill, touchSession, whereNow, type Session } from './session.ts';
-import { LABEL_SESSION, hc, spawnedFor } from './herdr.ts';
+import { host } from './host.ts';
 import { markNode } from './node.ts';
 import { BLOCK_END, BLOCK_START, instructionText } from './connectors/files.ts';
 import { toolById, toolHome } from './connectors/tools.ts';
@@ -111,10 +111,10 @@ export function childNote(work: string, node: Pick<PlanNode, 'id' | 'title'>): s
 
 /** muwi run으로 뜬 세션이면 맡은 작업에 붙이고 노드를 시작한 것으로 적는다. 그 세션에 알려 줄 말을 돌려준다 */
 export function adoptSpawn(dir: string, key: string, env: NodeJS.ProcessEnv): string {
-  const terminal = env.HC_TERMINAL_ID;
-  if (!terminal) return '';
-  const got = spawnedFor(terminal, env);
+  // 맡긴 노드를 하라고 띄운 자리인지는 화면이 안다 (muwi run이 띄울 때 붙인 이름표)
+  const got = host().assigned(env);
   if (!got) return '';
+  const terminal = got.terminal;
   const node = readPlan(dir, got.work)?.nodes.find(n => n.id === got.node);
   if (!node) return '';
   // 라벨은 터미널이 닫힐 때까지 남는다. 그 터미널에서 처음 뜬 세션만 맡은 것으로 본다.
@@ -186,9 +186,9 @@ export function handleEvent(h: Happened, dir: string, env: NodeJS.ProcessEnv = p
     const inFile = Boolean(toolById(h.tool)?.instructions);
     const got = inFile ? fileGuideHash(h.tool, env) : guide ? instructionsHash(guide) : undefined;
     const session = touchSession(dir, key, { ...patch, ...(got ? { instructions: got } : {}) }, env);
-    // 이 터미널에서 지금 도는 세션이 누구인지 붙여 둔다. 나중에 "그 세션이 아직 살아 있나"를 볼 때 쓴다.
-    // 같은 터미널에서 /clear 하거나 새로 띄우면 여기서 새 이름으로 바뀌고, 앞 세션은 닫힌 것으로 보인다
-    if (env.HC_TERMINAL_ID) hc(['label', env.HC_TERMINAL_ID, `${LABEL_SESSION}=${key}`], env, 3000);
+    // 이 자리에서 지금 도는 세션이 누구인지 화면에 알린다. 나중에 "그 세션이 아직 살아 있나"를 볼 때 쓴다.
+    // 같은 자리에서 /clear 하거나 새로 띄우면 새 이름으로 바뀌고, 앞 세션은 닫힌 것으로 보인다
+    host().sessionStarted(key, env);
     // 대화가 요약되면 앞에서 읽은 skill 내용이 흐려질 수 있다. 기록에 남겨 두면 나중에 원인을 볼 때 단서가 된다
     if (h.resumed === 'compact' && session.work && readPlan(dir, session.work)) {
       appendEvent(dir, session.work, { type: 'session', what: 'compact' }, key);

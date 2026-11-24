@@ -5,11 +5,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { handleHook } from '../src/hook.ts';
+import { setHost } from '../src/host.ts';
+import { placeHost } from './place-host.ts';
 import { ADAPTERS, adapterOf } from '../src/connectors/index.ts';
 import { gaps } from '../src/connectors/types.ts';
 import { removeTomlRegion } from '../src/connectors/hooked.ts';
 import { TOOLS, detectTool, launchCommand, resumeCommand, toolById, toolHome } from '../src/connectors/tools.ts';
 import { readInstall, removeSetup, runSetup } from '../src/setup.ts';
+
+// 세션 id를 주지 않는 도구는 자리(터미널)를 세션으로 본다. 자리를 알려 주는 화면이 있을 때를 시험한다
+setHost(placeHost);
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const tmp = (name: string) => fs.mkdtempSync(path.join(os.tmpdir(), `muwi-${name}-`));
@@ -71,9 +76,9 @@ test('어느 도구에서도 파일을 고치려는 입력에는 아무 답도 �
 });
 
 test('세션: 셸 명령에 세션 id를 넘겨주지 않는 도구는 훅도 터미널을 세션으로 보고, 그 도구의 대화 id는 따로 적는다', () => {
-  const herdr = { HOME: tmp('home'), HC_TERMINAL_ID: 't9' } as NodeJS.ProcessEnv;
+  const herdr = { HOME: tmp('home'), TEST_PLACE: 't9' } as NodeJS.ProcessEnv;
   const qwen = ADAPTERS.qwen.from({ hook_event_name: 'SessionStart', session_id: 's1' }, 'record', herdr)!;
-  assert.deepEqual([qwen.session, qwen.native], ['hc-t9', 's1']);
+  assert.deepEqual([qwen.session, qwen.native], ['place-t9', 's1']);
   // Codex는 셸 명령에도 같은 id를 준다 (CODEX_THREAD_ID): 그 id가 세션이다
   const codex = ADAPTERS.codex.from({ hook_event_name: 'SessionStart', session_id: 's1', model: 'gpt-x' }, 'record', herdr)!;
   assert.deepEqual([codex.session, codex.native, codex.model], ['s1', undefined, 'gpt-x']);
@@ -207,14 +212,14 @@ test('커넥터 규격: 도구 표와 커넥터가 하나씩 짝이고, 커넥�
 test('Gemini CLI: 사건 이름이 달라도 같은 사건으로 바꾸고, 설정에 우리 훅만 넣고 뺀다', () => {
   const home = tmp('gemini-home');
   const dir = tmp('gemini-runs');
-  const env = { ...ENV(home), HC_TERMINAL_ID: 't5' } as NodeJS.ProcessEnv;
+  const env = { ...ENV(home), TEST_PLACE: 't5' } as NodeJS.ProcessEnv;
   const g = ADAPTERS.gemini;
   // 서브에이전트를 알려 주는 사건이 없다: --sub로 밝힌 노드만 서브에이전트로 나온다
   assert.deepEqual(g.can, { subagents: false, start: true, skills: true });
   // 셸 명령에 세션 id를 넘겨주지 않아서 터미널을 세션으로 본다
   // 셸 명령에 세션 id를 넘겨주지 않아서 터미널을 세션으로 본다
   const start = g.from({ hook_event_name: 'SessionStart', session_id: 'g1', source: 'startup' }, 'record', env)!;
-  assert.deepEqual([start.kind, start.session, start.native], ['session-start', 'hc-t5', 'g1']);
+  assert.deepEqual([start.kind, start.session, start.native], ['session-start', 'place-t5', 'g1']);
   // 파일을 고치려는 입력은 보지 않는다 (막지 않는다)
   assert.equal(g.from({ hook_event_name: 'BeforeTool', session_id: 'g1', tool_name: 'write_file', tool_input: { file_path: FILE } }, 'record', env), null);
   const skill = g.from({ hook_event_name: 'AfterTool', session_id: 'g1', tool_name: 'activate_skill', tool_input: { name: 'team-rules' } }, 'record', env) as any;

@@ -7,11 +7,13 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { handleHook, nodeStartIn } from '../src/hook.ts';
 import { markNode } from '../src/node.ts';
-import { terminalName } from '../src/herdr.ts';
+import { terminalName } from '../src/herdr/hc.ts';
 import { parsePlan, diffPlan, carryStatus, addNode } from '../src/plan.ts';
-import { closedSessions } from '../src/live.ts';
+import { closedSessions } from '../src/herdr/live.ts';
 import { attach, readSession, touchSession } from '../src/session.ts';
 import { modelIn } from '../src/connectors/tools.ts';
+import { setHost } from '../src/host.ts';
+import herdr from '../src/herdr/host.ts';
 import { appendEvent, clock, readEvents, readPlan, writePlan, type NodeStatus, type Plan, type RunBy } from '../src/store.ts';
 import { PAST_DAYS, loadBoard, loadView } from '../src/view.ts';
 
@@ -19,6 +21,10 @@ import { PAST_DAYS, loadBoard, loadView } from '../src/view.ts';
 const SH = process.platform === 'win32' ? { skip: 'sh 스크립트를 시험한다 (Windows는 CI의 Git Bash 단계에서 본다)' } : {};
 
 
+// Herdr 화면을 시험한다 (세션이 살아 있는지, 맡긴 노드, muwi run). hc와 herdr-app은 흉내 낸 것을 쓴다
+setHost(herdr);
+/** Herdr 화면 모듈. muwi 명령을 자식 프로세스로 띄울 때 $MUWI_HOST로 넘긴다 */
+const HERDR_HOST = path.resolve(import.meta.dirname, '../src/herdr/host.ts');
 const CLI = path.resolve(import.meta.dirname, '../src/cli.ts');
 const ENV = {} as NodeJS.ProcessEnv;
 const T0 = Date.parse('2026-11-22T05:00:00.000Z');
@@ -336,7 +342,7 @@ function bench() {
   const fake = fakeHerdr({ 'muwi.work': 'shop-1', 'muwi.node': 'impl' });
   const muwi = (args: string[], env: Record<string, string> = {}) => {
     const r = spawnSync(process.execPath, [CLI, ...args], {
-      env: { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir, MUWI_SESSION: 'lead', MUWI_HC: fake.hc, MUWI_HERDR_APP: fake.app, HC_TERMINAL_ID: 't2', ...env },
+      env: { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir, MUWI_HOST: HERDR_HOST, MUWI_SESSION: 'lead', MUWI_HC: fake.hc, MUWI_HERDR_APP: fake.app, HC_TERMINAL_ID: 't2', ...env },
       cwd, encoding: 'utf8',
     });
     return { code: r.status, out: r.stdout, err: r.stderr };
@@ -441,7 +447,7 @@ test('hook.sh: 서브에이전트의 시작·끝과 서브에이전트가 실행
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-hooksh-'));
   const sh = path.resolve(import.meta.dirname, '../hooks/hook.sh');
   const run = (payload: object, mode: string[] = []) =>
-    spawnSync('sh', [sh, ...mode], { input: JSON.stringify(payload), encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir, MUWI_SESSION: '' } });
+    spawnSync('sh', [sh, ...mode], { input: JSON.stringify(payload), encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir, MUWI_HOST: HERDR_HOST, MUWI_SESSION: '' } });
   const plan: Plan = { work: 'w1', createdAt: '', updatedAt: '', nodes: [{ id: 'main', title: '구현', after: [], status: 'todo' }, { id: 'rev', title: '리뷰', after: [], status: 'todo' }] };
   writePlan(dir, plan);
   clock.now = () => new Date();
@@ -610,7 +616,7 @@ test('뺀 노드의 기록은 남는다. 하던 노드를 빼면 알려 주고, 
 
 test('muwi show: 다시 한 노드는 회차별로, 훅이 보지 못한 세션과 한꺼번에 적은 노드는 그렇게 적는다', () => {
   const { dir, muwi } = bench();
-  const hook = (payload: object) => spawnSync(process.execPath, [CLI, 'hook'], { input: JSON.stringify(payload), encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir } });
+  const hook = (payload: object) => spawnSync(process.execPath, [CLI, 'hook'], { input: JSON.stringify(payload), encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir, MUWI_HOST: HERDR_HOST } });
   // 훅이 한 번도 돌지 않은 세션
   assert.equal(muwi(['node', 'read', 'start'], { MUWI_SESSION: 'bare', HC_TERMINAL_ID: '' }).code, 1); // 붙은 작업이 없다
   assert.equal(muwi(['node', 'read', 'start', '--work', 'shop-1'], { MUWI_SESSION: 'bare' }).code, 0);
@@ -794,7 +800,7 @@ test('지난 작업: 끝났거나 멈춘 채로 오래된 작업은 접는다. �
   ]);
   assert.deepEqual(board.works.find(w => w.work === 'old-stalled')!.active, [{ id: 'n', title: 'n', status: 'doing', closed: true }]);
   // muwi status는 지난 작업을 접어 두고, --all이면 다 보여 준다
-  const run = (args: string[]) => spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir, MUWI_HC: env.MUWI_HC! } });
+  const run = (args: string[]) => spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir, MUWI_HOST: HERDR_HOST, MUWI_HC: env.MUWI_HC! } });
   // (명령은 지금 시각으로 본다: 방금 만든 작업들은 모두 "지금"이다)
   assert.match(run(['status']).stdout, /멈춤 +old-stalled[^\n]*\n +● n +n \(세션이 닫힘\)/);
   assert.doesNotMatch(run(['status']).stdout, /지난 작업/);

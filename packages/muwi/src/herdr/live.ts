@@ -2,7 +2,7 @@
 // muwi는 AI가 적어 준 것만 안다. 세션을 닫아 버리면 "끝"을 적을 쪽이 없어서 노드가 계속 작업 중으로 남는다.
 // 그래서 보여 줄 때 Herdr에 그 터미널이 살아 있는지 확인하고, 없으면 "세션이 닫힘"으로 보여 준다.
 // 상태를 바꾸지는 않는다. 일이 끝났는지는 알 수 없다. 하다가 멈췄다는 것만 보여 준다.
-import { LABEL_SESSION, hc } from './herdr.ts';
+import { LABEL_SESSION, hc } from './hc.ts';
 
 export type SessionWhere = { terminal?: string; seenAt?: string };
 

@@ -5,11 +5,16 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileGuideHash, guideUpdate, handleHook, skillFromPath } from '../src/hook.ts';
 import { markNode } from '../src/node.ts';
+import { setHost } from '../src/host.ts';
+import { placeHost } from './place-host.ts';
 import { attach, readSession, recordSkill, touchSession } from '../src/session.ts';
 import { appendEvent, clock, readConfig, readEvents, readPlan, writeConfig, writePlan, type NodeStatus, type Plan } from '../src/store.ts';
 import { buildView, loadBoard, loadView, unionMs } from '../src/view.ts';
 
 const ENV = {} as NodeJS.ProcessEnv;
+// 세션이 도는 자리(터미널)를 알려 주는 화면이 있을 때를 시험한다
+setHost(placeHost);
+
 const T0 = Date.parse('2026-11-22T05:00:00.000Z');
 /** 시작 뒤 몇 분인지로 시각을 맞춘다 */
 const at = (min: number) => { clock.now = () => new Date(T0 + min * 60_000); };
@@ -211,7 +216,7 @@ test('훅: Skill 도구와 SKILL.md 읽기를 세션의 작업에 기록한다',
 
 test('훅: 세션 시작을 기억하고, 작업이 없는 세션의 skill은 세션 파일에만 남긴다', () => {
   const t = setup([{ id: 'impl' }]);
-  const started = handleHook({ session_id: 'new-1', hook_event_name: 'SessionStart', source: 'startup', cwd: '/repo' }, t.dir, 'record', { HC_TERMINAL_ID: 't7' } as NodeJS.ProcessEnv);
+  const started = handleHook({ session_id: 'new-1', hook_event_name: 'SessionStart', source: 'startup', cwd: '/repo' }, t.dir, 'record', { TEST_PLACE: 't7' } as NodeJS.ProcessEnv);
   // 세션이 시작될 때 지침을 넣어 준다 (설정 파일에 적어 두지 않는다). 구간 표시 주석은 빼고 본문만
   const context = JSON.parse(started.stdout!).hookSpecificOutput.additionalContext as string;
   assert.match(context, /muwi plan --work/);
@@ -247,7 +252,7 @@ test('muwi는 AI가 하려는 일을 막지 않는다: 셸 명령, 파일 수정
   assert.deepEqual(handleHook({ session_id: 'fresh', hook_event_name: 'UserPromptSubmit', prompt: '…' }, t.dir, 'record', ENV), {});
   // 0.5.x의 설정에 guard와 nudge가 켜져 있어도 읽지 않는다
   fs.writeFileSync(path.join(t.dir, 'config.json'), JSON.stringify({ nudge: true, guard: true, layout: false }));
-  assert.deepEqual(readConfig(t.dir), { layout: false });
+  assert.deepEqual(readConfig(t.dir, { layout: true }), { layout: false });
   assert.deepEqual(handleHook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git push' } }, t.dir, 'command', ENV), {});
 });
 

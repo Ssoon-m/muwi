@@ -4,10 +4,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { layoutPreview } from '../src/preview.ts';
-import { PLACE_VERSION, ScreenError, applyLayout, ensurePreview, hasMuwi, placeMuwi, readLayoutRecord, removeLayout, screenState, treeHash, type LayoutNode } from '../src/screen.ts';
+import { layoutPreview } from '../src/herdr/preview.ts';
+import { PLACE_VERSION, ScreenError, applyLayout, ensurePreview, hasMuwi, placeMuwi, readLayoutRecord, removeLayout, screenState, treeHash, type LayoutNode } from '../src/herdr/screen.ts';
 
 const CLI = path.resolve(import.meta.dirname, '../src/cli.ts');
+/** Herdr 화면 모듈. muwi 명령을 자식 프로세스로 띄울 때 $MUWI_HOST로 넘긴다 */
+const HERDR_HOST = path.resolve(import.meta.dirname, '../src/herdr/host.ts');
+
 
 /** Herdr의 기본 레이아웃(main)을 줄인 것: 사이드바에 Spaces와 Agents, 작업 영역에 탭 줄·터미널 영역·상태 줄 */
 const MAIN: LayoutNode = {
@@ -369,7 +372,7 @@ test('muwi layout: 앱이 닫혀 있거나 넣을 자리가 없으면 아무것�
 test('muwi layout 명령: 상태 보기, 바꾸기, 되돌리기를 사람이 읽는 글로 알린다', () => {
   const h = fakeApp();
   const muwi = (...args: string[]) => {
-    const r = spawnSync(process.execPath, [CLI, ...args], { env: { ...h.env, MUWI_DIR: h.records } as NodeJS.ProcessEnv, encoding: 'utf8' });
+    const r = spawnSync(process.execPath, [CLI, ...args], { env: { ...h.env, MUWI_DIR: h.records, MUWI_HOST: HERDR_HOST } as NodeJS.ProcessEnv, encoding: 'utf8' });
     return { code: r.status, out: r.stdout, err: r.stderr };
   };
   assert.match(muwi('layout', '--status').out, /지금 레이아웃\(main\)에는 muwi 칸이 없어요[\s\S]*Agents 자리에 작업 목록을, 터미널 아래에 그래프를/);

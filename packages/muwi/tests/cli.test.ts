@@ -10,13 +10,16 @@ const SH = process.platform === 'win32' ? { skip: 'sh 스크립트를 시험한�
 
 
 const CLI = path.resolve(import.meta.dirname, '../src/cli.ts');
+/** Herdr 화면 모듈. muwi 명령을 자식 프로세스로 띄울 때 $MUWI_HOST로 넘긴다 */
+const HERDR_HOST = path.resolve(import.meta.dirname, '../src/herdr/host.ts');
+
 
 /** 깨끗한 환경에서 muwi를 실행한다 (바깥 세션의 환경 변수가 섞이지 않게) */
 function bench() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-cli-'));
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-cwd-'));
   const muwi = (args: string[], o: { session?: string | null; input?: string; cwd?: string; env?: Record<string, string> } = {}) => {
-    const env: Record<string, string> = { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir, ...o.env };
+    const env: Record<string, string> = { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir, MUWI_HOST: HERDR_HOST, ...o.env };
     if (o.session !== null) env.MUWI_SESSION = o.session ?? 'lead';
     const r = spawnSync(process.execPath, [CLI, ...args], { env, cwd: o.cwd ?? cwd, input: o.input ?? '', encoding: 'utf8' });
     return { code: r.status, out: r.stdout, err: r.stderr };
@@ -424,4 +427,30 @@ test('계획은 선으로 이어진 그래프다: muwi add에 자리를 주지 �
   // 선이 하나도 없는 계획(순서 없이 늘어놓은 할 일)은 그대로 둔다
   const flat = muwi(['plan', '--work', 'c', JSON.stringify({ title: 't', nodes: [{ id: 'x', title: 'X' }, { id: 'y', title: 'Y' }] })]);
   assert.doesNotMatch(flat.out, /이어지지 않은 노드/);
+});
+
+test('화면 없이: 기록과 보기는 되고, 화면이 더하는 명령은 무엇이 필요한지 알린다. 화면을 불러오지 못해도 훅은 그대로 돈다', () => {
+  const { dir, muwi } = bench();
+  const bare = { env: { MUWI_HOST: '' } };
+  assert.equal(muwi(['plan', '--work', 'w', '--request', '작업해줘', PLAN], bare).code, 0);
+  assert.match(muwi(['status'], bare).out, /작업 중 +w/);
+  assert.match(muwi(['show', 'w'], bare).out, /연수원명 클릭 시 상세 이동/);
+  // 화면이 더하는 명령
+  const run = muwi(['run', 'impl', '구현해줘'], bare);
+  assert.equal(run.code, 1);
+  assert.match(run.err, /Herdr 앱 화면과 함께 쓰는 명령이에요\. herdr-muwi로 깔면 생겨요/);
+  assert.doesNotMatch(muwi(['--help'], bare).out, /muwi run/);
+  // 설정은 화면이 정한다
+  assert.match(muwi(['config'], bare).out, /설정이 없어요/);
+  // muwi setup이 적어 둔 화면을 불러온다
+  const setupFile = path.join(dir, 'setup.json');
+  fs.writeFileSync(setupFile, JSON.stringify({ root: '/x', version: '0.0.0', at: '2026-11-24T00:00:00.000Z', host: HERDR_HOST }));
+  assert.match(muwi(['--help'], bare).out, /muwi run/);
+  assert.match(muwi(['config'], bare).out, /layout +on/);
+  // 적어 둔 화면이 없어졌으면 화면 없이 돈다. 훅도 그대로 지침을 돌려준다
+  fs.writeFileSync(setupFile, JSON.stringify({ root: '/x', version: '0.0.0', at: '2026-11-24T00:00:00.000Z', host: '/no/such/host.ts' }));
+  assert.doesNotMatch(muwi(['--help'], bare).out, /muwi run/);
+  const hook = muwi(['hook'], { ...bare, session: null, input: JSON.stringify({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' }) });
+  assert.equal(hook.code, 0);
+  assert.match(JSON.parse(hook.out).hookSpecificOutput.additionalContext, /작업 진행 방식 \(muwi\)/);
 });

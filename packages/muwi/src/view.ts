@@ -5,7 +5,7 @@
 // 시각을 맞춰 보며 짐작하지 않는다. 확실하지 않게 적힌 것(guess)과 관찰하지 못한 것(seen: false)은 그대로 드러낸다.
 import type { Event, NodeStatus, Plan, PlanNode, ShowIn } from './store.ts';
 import { clock, listWorks, readEvents, readPlan, resultsSince } from './store.ts';
-import { sessionStates } from './live.ts';
+import { host } from './host.ts';
 import { readSession, sessionLabel } from './session.ts';
 
 export type SkillUse = {
@@ -97,16 +97,16 @@ export type WorkState = 'waiting' | 'blocked' | 'doing' | 'stalled' | 'done';
 /**
  * 하는 노드가 없는 작업(앞 노드를 끝내고 다음 노드를 아직 시작하지 않음)에서, 그 작업에 붙어 있는 세션이 하는 일.
  * working: 다음 노드를 준비하고 있다(작업 중), asking: 세션이 입력을 기다린다(응답 대기), stopped: 세션이 노드를 남긴 채 멈췄다(응답 대기),
- * gone: 이 작업을 맡은 세션이 없다(멈춤. 닫혔거나 다른 작업으로 갔다), unknown: 세션이 무얼 하는지 알 수 없다(Herdr 밖. 작업 중으로 본다)
+ * gone: 이 작업을 맡은 세션이 없다(멈춤. 닫혔거나 다른 작업으로 갔다), unknown: 세션이 무얼 하는지 알 수 없다(화면이 없다. 작업 중으로 본다)
  */
 export type Between = 'working' | 'asking' | 'stopped' | 'gone' | 'unknown';
 /**
  * 하는 중이라고 적힌 노드를 하던 세션이 일을 멈춘 모습. 노드의 상태는 AI가 적은 것이라, 세션이 멈추면(사용 한도, 권한 확인, 말을 끝냄) 적어 줄 쪽이 없어 계속 작업 중으로 남는다.
- * 그래서 세션이 지금 무얼 하는지는 Herdr에 묻는다. 도구가 무엇이든 Herdr가 아는 세션이면 된다.
+ * 그래서 세션이 지금 무얼 하는지는 화면(Herdr)에 묻는다. 도구가 무엇이든 화면이 아는 세션이면 된다.
  * asking: 세션이 입력을 기다린다, stopped: 세션이 멈춰서 다음 말을 기다린다. 둘 다 사람이 말해야 다시 움직인다 (응답 대기)
  */
 export type Quiet = 'asking' | 'stopped';
-/** Herdr가 알려 준 세션 상태가 일을 멈춘 것이면 어떻게 멈췄는지. 일하는 중이거나 모르면(Herdr 밖) 없다 */
+/** 화면이 알려 준 세션 상태가 일을 멈춘 것이면 어떻게 멈췄는지. 일하는 중이거나 모르면(화면이 없다) 없다 */
 export const quietOf = (status?: string): Quiet | undefined => (!status || status === 'working' ? undefined : status === 'blocked' ? 'asking' : 'stopped');
 const BETWEEN_STATE: Record<Between, WorkState> = { working: 'doing', asking: 'waiting', stopped: 'waiting', gone: 'stalled', unknown: 'doing' };
 
@@ -125,7 +125,7 @@ export type SessionInfo = {
   native?: string;
   /** 이 세션이 지금 붙어 있는 작업 */
   work?: string;
-  /** Herdr가 알려 준 지금 상태: working(일하는 중), blocked(입력을 기다림), done·idle(멈춰서 다음 말을 기다림). 모르면 없다 */
+  /** 화면이 알려 준 지금 상태: working(일하는 중), blocked(입력을 기다림), done·idle(멈춰서 다음 말을 기다림). 모르면 없다 */
   status?: string;
 };
 
@@ -378,7 +378,7 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
       else view.runUnknown = true;
     }
     if ((n.status === 'doing' || n.status === 'waiting' || n.status === 'blocked') && last?.who?.session && closed.has(last.who.session)) view.closed = true;
-    // 서브에이전트가 하는 노드도 그 세션의 상태로 본다. 뒤에서 도는 서브에이전트를 기다리는 세션은 Herdr가 일하는 중으로 알려 준다
+    // 서브에이전트가 하는 노드도 그 세션의 상태로 본다. 뒤에서 도는 서브에이전트를 기다리는 세션은 화면(Herdr)이 일하는 중으로 알려 준다
     const quiet = n.status === 'doing' && !view.closed && last?.who?.session ? quietOf(sessions[last.who.session]?.status) : undefined;
     if (quiet) view.quiet = quiet;
     if (n.status === 'todo' && (n.attempt ?? 0) > 0) view.paused = true;
@@ -501,9 +501,9 @@ export function loadView(dir: string, work: string, env: NodeJS.ProcessEnv = pro
   if (!plan) return null;
   const events = readEvents(dir, work);
   const sessions = sessionsOf(dir, events);
-  // 끝나지 않은 노드가 있을 때만 Herdr에 물어본다: 세션이 닫혔는지, 살아 있으면 지금 무얼 하는지. 다 끝난 작업은 물어볼 것이 없다
+  // 끝나지 않은 노드가 있을 때만 화면에 물어본다: 세션이 닫혔는지, 살아 있으면 지금 무얼 하는지. 다 끝난 작업은 물어볼 것이 없다
   const open = plan.nodes.some(n => n.status !== 'done');
-  const live = open ? sessionStates(sessions, Object.keys(sessions), env) : { closed: new Map<string, number>(), status: new Map<string, string>() };
+  const live = open ? host().states(sessions, Object.keys(sessions), env) : { closed: new Map<string, number>(), status: new Map<string, string>() };
   for (const [key, status] of live.status) if (sessions[key]) sessions[key].status = status;
   return buildView(plan, events, sessions, clock.now().getTime(), live.closed, resultsSince(dir));
 }
@@ -522,7 +522,7 @@ export type WorkSummary = Pick<WorkView, 'work' | 'title' | 'request' | 'state' 
   active: { id: string; title: string; status: NodeStatus; note?: string; closed?: boolean; quiet?: Quiet; terminal?: string }[];
   /** 지난 작업: 끝났거나 멈춘 채로 오래됐다. 목록에서 접어 둔다 */
   past: boolean;
-  /** 이 작업으로 갈 때 열 Herdr 터미널. 모르면 없다 */
+  /** 이 작업으로 갈 때 열 터미널 (화면이 알려 준 자리). 모르면 없다 */
   terminal?: string;
 };
 
@@ -557,7 +557,7 @@ export function loadBoard(dir: string, env: NodeJS.ProcessEnv = process.env): { 
       const v = loadView(dir, work, env);
       if (!v) continue;
       // 살아 있는 세션이 하고 있는 작업은 오래돼도 접지 않는다
-      // 세션이 무얼 하는지 모르는 작업(Herdr 밖)도 오래 그대로면 접는다
+      // 세션이 무얼 하는지 모르는 작업(화면이 없다)도 오래 그대로면 접는다
       const still = v.state === 'done' || v.state === 'stalled' || v.between === 'unknown';
       const terminal = terminalOf(v);
       works.push({

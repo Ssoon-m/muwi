@@ -4,21 +4,19 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { LABEL_MODEL, LABEL_NODE, LABEL_WORK, hc, herdrApp, terminalName, type Ran } from './herdr.ts';
-import { layoutFor, layoutProblems, type Fit, type Flow } from './layout.ts';
 import { ROOT, adoptSpawn, guideUpdate, handleHook, sessionInstructions } from './hook.ts';
+import { host, loadHost } from './host.ts';
+import { Fail, dur, join, needPlan, out, parseArgs, resolveWork, str, type Args } from './kit.ts';
 import { fromSubagent, markNode } from './node.ts';
 import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
-import { attach, readSession, recentSessions, sessionKey, sessionLabel, touchSession } from './session.ts';
-import { resumeFacts } from './resume.ts';
-import { checkMod, installedTools, newestPlugin, olderThan, readInstall, refreshSetup, removeSetup, runSetup } from './setup.ts';
+import { readSession, sessionKey, sessionLabel } from './session.ts';
+import { installedTools, newestPlugin, olderThan, readInstall, refreshSetup, removeSetup, runSetup } from './setup.ts';
 import { adapterOf } from './connectors/index.ts';
 import { gaps } from './connectors/types.ts';
-import { TOOLS, launchCommand, modelIn, toolById } from './connectors/tools.ts';
-import { GRAPH_AT, ScreenError, applyLayout, ensurePreview, removeLayout, screenState, type GraphAt, type Screen } from './screen.ts';
+import { TOOLS, toolById } from './connectors/tools.ts';
 import {
-  SCHEMA, SHOW_IN, appendEvent, checkWorkName, clock, listWorks, nowIso, readConfig, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
-  type Config, type NodeStatus, type Plan, type RunBy, type ShowIn,
+  SCHEMA, appendEvent, listWorks, nowIso, readConfig, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
+  type NodeStatus, type Plan, type RunBy, type ShowIn,
 } from './store.ts';
 import { PAST_DAYS, loadBoard, loadView, type Actor, type Between, type NodeView, type Quiet, type Try, type WorkView } from './view.ts';
 
@@ -36,12 +34,6 @@ const HELP = `사용법: muwi <명령>
       누가 할지 정했으면 노드에 "run": "me" | "subagent" | "session"을 적는다 (정하지 않았으면 뺀다).
       새 세션을 어디에 보여 줄지 정했으면 "show": "pane" | "tab"도 적는다.
 
-  새 세션에 맡기기 (Herdr 앱 안에서)
-  muwi run <id> "<맡길 일>" [--show pane|tab] [--down] [--name <이름>] [--agent "<명령>"] [--cwd <폴더>]
-                                       노드를 맡을 세션을 띄운다. 그 세션은 뜨면서 이 작업의 그 노드에 붙는다
-                                       기다릴 때는 hc wait --children any, 말을 걸 때는 hc send <주소> "…"
-  muwi tidy [<작업>]                    끝난 노드를 맡았던 새 세션의 터미널을 닫는다 (사람이 정리하라고 할 때)
-
   진행
   muwi node <id> start [--sub]         노드를 시작한다. 서브에이전트가 맡은 노드를 시작할 때는 --sub를 붙인다 (서브에이전트가 한 것으로 적힌다)
   muwi node <id> done ["<결과 한 줄>"]   노드를 끝낸다
@@ -56,127 +48,22 @@ const HELP = `사용법: muwi <명령>
   muwi show [<작업>] [--json]           작업 하나의 기록: 노드, 읽은 skill, 계획이 바뀐 이유, 문제 표시
   muwi session                         이 세션이 붙어 있는 작업과 읽은 skill
   muwi guide                           작업 진행 방식(지침)을 보여 준다. muwi가 업데이트되면 muwi 명령의 출력 끝에도 한 번 나온다
-  muwi open [--right]                  Herdr 앱에서 그래프 칸을 이 터미널 아래(--right면 오른쪽)에 연다
-
-  Herdr 앱 화면
-  muwi layout                          지금 레이아웃을 복제해 사이드바 Agents 자리에 작업 목록을, 터미널 아래에
-                                       그래프를 넣고 그 레이아웃으로 바꾼다. 원래 레이아웃은 그대로 남는다
-  muwi layout --graph bottom|top|right 그래프 칸을 터미널 아래·위·오른쪽에 둔다 (전에 고른 자리를 기억한다)
-  muwi layout --status [--json]        지금 화면에 muwi 칸이 있는지, 넣을 자리가 있는지 본다
-  muwi layout --remove                 원래 레이아웃으로 돌아가고 muwi가 만든 복제본을 지운다
 
   설치와 설정
-  muwi setup                         터미널용 muwi 명령과 Herdr 앱 그래프 칸을 넣는다
+  muwi setup                         터미널용 muwi 명령과 화면(Herdr 앱의 그래프 칸)을 넣는다
   muwi setup --tools                 아는 AI 도구와, 깔렸는지, muwi 통합을 넣었는지 본다
   muwi setup --tool <도구>[,<도구>]   그 AI 도구에 muwi 통합(지침·사용법 skill·훅)을 넣는다
   muwi setup --all                   이 컴퓨터에 깔린 도구 전부에 넣는다 (Claude Code는 플러그인이 넣어 주므로 뺀다)
   muwi setup --claude                플러그인 없이 쓸 때: Claude Code 훅과 사용법 skill도 넣는다
   muwi setup --remove                setup으로 넣은 것을 뺀다 (muwi layout으로 바꾼 화면도 되돌린다)
-  muwi config [layout on|off]        화면 바꾸기 안내(layout)를 켜고 끈다
+  muwi config [<이름> on|off]         설정을 보고 켜고 끈다 (화면이 정하는 설정)
   muwi --version
 
 작업은 --work <이름>으로 고른다. 없으면 이 세션이 붙어 있는 작업을 쓴다.
 기록 폴더: $MUWI_DIR, 없으면 ~/.muwi`;
 
-class Fail extends Error {
-  code: number;
-  constructor(message: string, code = 1) {
-    super(message);
-    this.code = code;
-  }
-}
-
 /** 필요한 Node의 가장 낮은 버전 */
 const NODE_MIN = 24;
-
-const out = (s: string) => process.stdout.write(s + '\n');
-
-// `muwi show | head`처럼 받는 쪽이 먼저 닫으면 조용히 끝낸다
-process.stdout.on('error', (e: NodeJS.ErrnoException) => {
-  if (e.code === 'EPIPE') process.exit(0);
-  throw e;
-});
-
-const VALUED = new Set(['work', 'request', 'title', 'why', 'by', 'file', 'after', 'before', 'result', 'run', 'show', 'name', 'agent', 'cwd', 'graph', 'fit', 'from', 'event', 'tool']);
-
-function parseArgs(argv: string[]) {
-  const pos: string[] = [];
-  const flags: Record<string, string | boolean> = {};
-  const multi: Record<string, string[]> = {};
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === '--') {
-      pos.push(...argv.slice(i + 1));
-      break;
-    }
-    if (a.startsWith('--') && a.length > 2) {
-      const eq = a.indexOf('=');
-      const name = eq > 0 ? a.slice(2, eq) : a.slice(2);
-      if (VALUED.has(name)) {
-        const value = eq > 0 ? a.slice(eq + 1) : argv[++i];
-        if (value === undefined) throw new Fail(`--${name}에 값이 없어요`);
-        flags[name] = value;
-        (multi[name] ??= []).push(value);
-      } else flags[name] = true;
-    } else pos.push(a);
-  }
-  return { pos, flags, multi };
-}
-
-type Args = ReturnType<typeof parseArgs>;
-const str = (a: Args, name: string) => (typeof a.flags[name] === 'string' ? (a.flags[name] as string) : undefined);
-
-function isDone(plan: Plan) {
-  return plan.nodes.length > 0 && plan.nodes.every(n => n.status === 'done');
-}
-
-/** 이 폴더에서 시작한 작업들 (최근 것부터) */
-function worksHere(dir: string): Plan[] {
-  const here = process.cwd();
-  return listWorks(dir)
-    .map(w => readPlan(dir, w))
-    .filter((p): p is Plan => Boolean(p) && p!.cwd === here)
-    .sort((x, y) => (x.updatedAt < y.updatedAt ? 1 : -1));
-}
-
-/**
- * 이 명령이 다룰 작업: --work나 $MUWI_WORK → 이 세션이 붙어 있는 작업.
- * 적는 명령은 여기까지만 본다. 폴더를 보고 짐작하면 다른 대화가 남겨 둔 작업에 적어 버릴 수 있다.
- *   guess: 보기만 하는 명령은 그것도 없으면 이 폴더에서 시작한 작업을 쓴다
- *   open: 끝나지 않은 작업만 (이름 없이 계획을 낼 때 끝난 작업을 덮어쓰지 않게)
- */
-function resolveWork(a: Args, dir: string, o: { guess?: boolean; open?: boolean; sessionOnly?: boolean } = {}): string {
-  const named = str(a, 'work') ?? process.env.MUWI_WORK;
-  if (named) {
-    const bad = checkWorkName(named);
-    if (bad) throw new Fail(bad);
-    return named;
-  }
-  const key = sessionKey();
-  const attached = key ? readSession(dir, key)?.work : undefined;
-  if (attached) {
-    const plan = readPlan(dir, attached);
-    if (plan && (!o.open || !isDone(plan))) return attached;
-  }
-  if (o.sessionOnly) throw new Fail('이 세션이 하던 작업이 없어요');
-  const here = worksHere(dir);
-  if (o.guess) {
-    const open = here.filter(p => !isDone(p));
-    if (open.length === 1) return open[0].work;
-    if (!open.length && here.length === 1) return here[0].work;
-  }
-  // 이름이 길게 쏟아지지 않게 몇 개만 보여 준다
-  const list = (here.length ? here.map(p => `${p.work}(${isDone(p) ? '끝' : '진행 중'})`) : listWorks(dir)).slice(0, 6);
-  throw new Fail(
-    `어느 작업인지 알 수 없어요. --work <이름>을 붙여요.${list.length ? ` ${here.length ? '이 폴더의 작업' : '있는 작업'}: ${list.join(', ')}` : ' (아직 기록된 작업이 없어요)'} 전체 목록은 muwi status`,
-  );
-}
-
-function needPlan(dir: string, work: string): Plan {
-  const plan = readPlan(dir, work);
-  if (!plan) throw new Fail(`작업이 없어요: ${work} (muwi status로 목록을 봐요)`);
-  return plan;
-}
 
 function readPlanText(a: Args): string {
   if (a.pos[0] !== undefined) return a.pos[0];
@@ -328,11 +215,6 @@ function cmdGuide(dir: string) {
   const key = sessionKey();
   // 지금 판을 읽었다고 적어 둔다 (같은 것을 다시 붙이지 않게)
   if (key) guideUpdate(dir, key);
-}
-
-function join(dir: string, work: string) {
-  const key = sessionKey();
-  if (key) attach(dir, key, work);
 }
 
 function cmdPlan(a: Args, dir: string) {
@@ -487,14 +369,6 @@ function clockTime(iso: string) {
   const d = new Date(iso);
   return `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
-/** 걸린 시간: 1h 1m 1s (그래프 칸과 같은 모양) */
-function dur(ms: number) {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
-  if (h > 0) return `${h}h ${m}m ${sec}s`;
-  if (m > 0) return `${m}m ${sec}s`;
-  return `${sec}s`;
-}
 
 /** 회차를 누가 했는지 한마디로 */
 function whoText(v: WorkView, who: Actor): string {
@@ -621,17 +495,11 @@ function printShow(v: WorkView) {
   }
 }
 
-/** prefer: 칸 모양으로 정한 흐름 방향. fit(칸 크기)을 알면 칸에 훨씬 크게 들어가는 쪽으로 바꿀 수 있다. 실제로 쓴 방향을 flow로 돌려준다 */
-async function withLayout(v: WorkView, prefer: Flow = 'right', fit?: Fit) {
-  const { layout, flow } = await layoutFor({ nodes: v.nodes, edges: v.edges }, prefer, fit);
-  return { ...v, layout, flow, layoutProblems: layoutProblems(layout, flow) };
-}
-
 async function cmdShow(a: Args, dir: string) {
   const work = a.pos[0] ?? resolveWork(a, dir, { guess: true });
   const v = loadView(dir, work);
   if (!v) throw new Fail(`작업이 없어요: ${work} (muwi status로 목록을 봐요)`);
-  if (a.flags.json) return out(JSON.stringify(a.flags.layout ? await withLayout(v) : v, null, 2));
+  if (a.flags.json) return out(JSON.stringify(v, null, 2));
   printShow(v);
 }
 
@@ -652,29 +520,6 @@ function cmdStatus(a: Args, dir: string) {
   }
   if (past.length && !a.flags.all) out(`지난 작업 ${past.length}개는 접어 뒀어요 (${PAST_DAYS}일 넘게 바뀐 것이 없는 작업). muwi status --all로 봐요.`);
   for (const e of board.errors) out(`⚠ ${e.work}: ${e.message}`);
-}
-
-async function cmdBoard(a: Args, dir: string) {
-  // 작업 시간을 센 때. 그래프 칸은 진행 중인 노드에 이 뒤로 흐른 시간을 더해 초마다 늘린다
-  const now = clock.now().getTime();
-  const board = loadBoard(dir);
-  // 고른 작업이 없으면 맨 위 작업을 보여 준다. 접어 둔 지난 작업보다 지금 작업이 먼저다
-  const pick = str(a, 'work') ?? (board.works.find(w => !w.past) ?? board.works[0])?.work;
-  let selected = null;
-  if (pick) {
-    const v = loadView(dir, pick);
-    // 그래프 칸이 세로로 길면 위→아래로 그린다 (--down)
-    // 닫힌 세션을 이어 하는 버튼에 쓸 것(폴더가 있는가, Claude 대화를 다시 열 수 있는가)도 함께 넘긴다
-    // --fit WxH: 그래프 칸의 크기. --down(칸 모양으로 정한 방향)의 반대 방향이 칸에 훨씬 크게 들어가면 그 방향으로 그린다
-    const m = /^(\d+)x(\d+)$/.exec(str(a, 'fit') ?? '');
-    const fit = m ? { w: Number(m[1]), h: Number(m[2]) } : undefined;
-    if (v) selected = { ...(await withLayout(v, a.flags.down ? 'down' : 'right', fit)), ...resumeFacts(v) };
-  }
-  // 그래프 칸이 Herdr 터미널과 작업을 잇는 데 쓴다 (지금 보는 탭의 작업 따라가기, 계획 없는 세션 가려내기)
-  const sessions = recentSessions(dir, Date.now() - PAST_DAYS * 86_400_000);
-  // 화면에 muwi 칸이 없을 때 그래프 칸이 바꾸자고 안내해도 되는가 (muwi config layout)
-  const suggest = readConfig(dir).layout;
-  out(JSON.stringify({ dir, now, ...board, sessions, suggest, selected }));
 }
 
 function cmdHook(a: Args, dir: string) {
@@ -730,11 +575,8 @@ function version(): string {
 }
 
 function cmdSetup(a: Args, dir: string) {
-  if (a.flags.remove) {
-    // 화면을 바꿔 뒀으면 먼저 되돌린다. 그래프 칸을 빼면 그 레이아웃의 칸이 비기 때문이다
-    if (fs.existsSync(`${dir}/layout.json`)) layoutRemoved(guardScreen(() => removeLayout(dir)));
-    return removeSetup(dir, out);
-  }
+  // 화면이 넣은 것(Herdr 앱의 칸, 바꾼 레이아웃)은 화면이 뺀다
+  if (a.flags.remove) return removeSetup(dir, out);
   if (a.flags.tools) {
     // 아는 도구와, 이 컴퓨터에 깔렸는지, muwi 통합을 넣었는지
     const have = new Set(installedTools().map(t => t.id));
@@ -754,83 +596,18 @@ function cmdSetup(a: Args, dir: string) {
   if (unknown.length) throw new Fail(`모르는 도구예요: ${unknown.join(', ')}. 아는 도구: ${TOOLS.map(t => t.id).join(', ')}`);
   // Claude Code는 플러그인이 넣어 주므로 --all에는 넣지 않는다 (둘 다 넣으면 훅이 두 번 돈다)
   const all = a.flags.all ? installedTools().map(t => t.id).filter(id => id !== 'claude') : [];
-  const install = runSetup({ root: ROOT, version: version(), dir, tools: [...picked, ...all], claude: Boolean(a.flags.claude), codex: Boolean(a.flags.codex), log: out });
-  if (install.herdr) {
-    const checked = checkMod(install.herdr);
-    if (checked && checked !== 'ok') out(`Herdr 앱 칸 점검에서 문제가 나왔어요:\n${checked}`);
-  }
+  // 화면이 있으면 화면도 넣는다 (Herdr 앱의 칸). 화면은 점검하고 지금 화면이 어떤지도 알린다
+  const install = runSetup({ root: ROOT, version: version(), dir, tools: [...picked, ...all], claude: Boolean(a.flags.claude), codex: Boolean(a.flags.codex), log: out, report: true });
   if (!install.claude) out('Claude Code의 훅·지침·사용법 skill은 플러그인이 넣어 줘요. 플러그인 없이 쓰려면 muwi setup --claude');
   else out('이미 열려 있는 Claude Code 세션은 다시 시작해야 훅이 적용돼요.');
-  if (install.herdr) {
-    // 그림 없이 만든 muwi 레이아웃이면 Herdr 설정 화면에 보일 그림을 넣는다
-    if (ensurePreview(dir)) out('Herdr 설정 화면(Look > Layout)의 muwi 레이아웃 그림을 새로 그렸어요.');
-    const screen = screenState(dir);
-    // 안내를 꺼 뒀으면 화면이 이미 muwi일 때만 알린다
-    if (readConfig(dir).layout || screen.muwi) out(describeScreen(screen));
-  }
 }
 
-/** 지금 Herdr 앱 화면이 어떤지, 무엇을 할 수 있는지 사람에게 말하듯 적는다 */
-function describeScreen(s: Screen): string {
-  if (!s.app || !s.shown) return 'Herdr 앱 화면: 앱이 열려 있지 않아 확인하지 못했어요. 앱을 켠 뒤 muwi layout --status로 볼 수 있어요.';
-  if (s.muwi && s.outdated) {
-    const why = s.outdatedBy === 'herdr' ? 'Herdr가 업데이트돼서' : 'muwi 화면 배치가 바뀌어서';
-    return `Herdr 앱 화면: ${why} muwi 레이아웃(${s.shown})이 옛 모양이에요. muwi layout을 다시 실행하면 새 모양으로 맞춰요.`;
-  }
-  if (s.muwi) return `Herdr 앱 화면: 지금 레이아웃(${s.shown})에 muwi 칸이 있어요.`;
-  if (!s.canList && !s.canGraph) return `Herdr 앱 화면: 지금 레이아웃(${s.shown})에는 muwi 칸을 넣을 자리가 없어요. 그래프는 muwi open으로 터미널 옆에 열어요.`;
-  const what = [s.canList ? '사이드바의 Agents 자리에 작업 목록을' : null, s.canGraph ? '터미널 아래에 그래프를' : null].filter(Boolean).join(', ');
-  return [
-    `Herdr 앱 화면: 지금 레이아웃(${s.shown})에는 muwi 칸이 없어요.`,
-    `  muwi layout을 실행하면 이 레이아웃을 복제해서 ${what} 넣고 그 레이아웃으로 바꿔요. 지금 레이아웃은 그대로 남아요.`,
-    '  바꾸지 않고 보려면 muwi open (이 터미널 아래에 그래프 칸을 연다)',
-  ].join('\n');
-}
-
-function guardScreen<T>(run: () => T): T {
-  try {
-    return run();
-  } catch (e) {
-    if (e instanceof ScreenError) throw new Fail(e.message);
-    throw e;
-  }
-}
-
-function layoutRemoved(r: ReturnType<typeof removeLayout>) {
-  if (r.none) return out('muwi layout으로 바꾼 화면이 없어요.');
-  if (r.switchedTo) out(`Herdr 앱 화면을 ${r.switchedTo} 레이아웃으로 되돌렸어요.`);
-  if (r.deleted) out('muwi가 만든 레이아웃 복제본을 지웠어요.');
-  if (r.kept) out(`레이아웃 복제본은 남겨 뒀어요 (손으로 고쳤거나 마지막으로 보던 레이아웃이에요): ${r.kept}`);
-}
-
-function cmdLayout(a: Args, dir: string) {
-  if (a.flags.remove) return layoutRemoved(guardScreen(() => removeLayout(dir)));
-  if (a.flags.status) {
-    const s = screenState(dir);
-    return out(a.flags.json ? JSON.stringify(s) : describeScreen(s));
-  }
-  const graphAt = str(a, 'graph');
-  if (graphAt !== undefined && !GRAPH_AT.includes(graphAt as GraphAt)) throw new Fail(`--graph는 ${GRAPH_AT.join(', ')} 중 하나예요`);
-  const r = guardScreen(() => applyLayout(dir, process.env, graphAt ? { graphAt: graphAt as GraphAt } : {}));
-  if (a.flags.json) return out(JSON.stringify(r));
-  const spot = { bottom: '터미널 아래', top: '터미널 위', right: '터미널 오른쪽' }[r.graphAt];
-  if (r.already) return out(`이미 muwi 칸이 있는 레이아웃이에요: ${r.name} (그래프: ${spot})`);
-  if (r.moved) return out(`그래프를 ${spot}에 뒀어요.`);
-  out(`Herdr 앱 화면을 ${r.name} 레이아웃으로 ${r.refreshed ? '새 모양에 맞춰 다시 만들었어요' : '바꿨어요'} (${r.base} 레이아웃을 복제했어요).`);
-  if (r.list) out('  사이드바: Agents 자리에 작업 목록 (계획 없는 세션도 같이 보여요)');
-  if (r.graph) out(`  ${spot}: ${r.list ? '고른 작업의 그래프 (지금 보는 탭의 작업을 따라가요)' : '작업 목록과 그래프'}`);
-  out('그래프 자리는 muwi layout --graph bottom|top|right 로 바꿔요. 그래프 칸 위쪽의 버튼으로도 바꿀 수 있어요.');
-  out(`되돌리려면 muwi layout --remove (${r.base} 레이아웃으로 돌아가요)`);
-}
-
-const CONFIG_KEYS: (keyof Config)[] = ['layout'];
-const CONFIG_ABOUT: Record<keyof Config, string> = {
-  layout: 'Herdr 앱 화면에 muwi 칸이 없을 때 넣자고 안내한다 (muwi setup, 그래프 칸)',
-};
-
+/** 설정의 이름, 기본값, 설명은 화면이 정한다 (화면 규격의 config). 코어에는 설정이 없다 */
 function cmdConfig(a: Args, dir: string) {
   const [key, value] = a.pos;
-  const config = readConfig(dir);
+  const about = host().config ?? {};
+  const keys = Object.keys(about);
+  const config = readConfig(dir, Object.fromEntries(keys.map(k => [k, about[k].default])));
   if (key === 'guard') {
     throw new Fail('push·PR 앞에서 묻기(guard)는 0.6.0에서 뺐어요. 무엇을 승인받고 할지는 muwi가 정하지 않아요. 그 도구의 권한 설정이나 직접 둔 훅을 쓰세요.');
   }
@@ -838,187 +615,14 @@ function cmdConfig(a: Args, dir: string) {
     throw new Fail('계획 알림(nudge)은 0.6.0에서 뺐어요. muwi는 계획이 없어도 AI가 하려는 일을 막지 않아요. 계획을 적을지는 AI가 일의 크기를 보고 정해요.');
   }
   if (key !== undefined) {
-    if (!CONFIG_KEYS.includes(key as keyof Config) || (value !== 'on' && value !== 'off')) {
-      throw new Fail(`사용법: muwi config [${CONFIG_KEYS.join('|')}] on|off`);
+    if (!keys.includes(key) || (value !== 'on' && value !== 'off')) {
+      throw new Fail(keys.length ? `사용법: muwi config [${keys.join('|')}] on|off` : '바꿀 설정이 없어요 (설정은 화면이 정해요. 화면 없이 쓰고 있어요)');
     }
-    config[key as keyof Config] = value === 'on';
+    config[key] = value === 'on';
     writeConfig(dir, config);
   }
-  for (const k of CONFIG_KEYS) out(`${k.padEnd(6)} ${config[k] ? 'on ' : 'off'}  ${CONFIG_ABOUT[k]}`);
-}
-
-/** Herdr 앱에서 그래프 칸을 연다. 이 터미널 옆에 열고, 글자 입력은 터미널에 그대로 둔다 */
-function cmdOpen(a: Args) {
-  const app = (args: string[]) => spawnSync('herdr-app', args, { encoding: 'utf8' });
-  const terminal = process.env.HC_TERMINAL_ID;
-  const ls = app(['ls']);
-  if (ls.error || ls.status !== 0) throw new Fail('Herdr 앱이 열려 있지 않거나 herdr-app 명령이 없어요. Herdr 앱 안에서 실행해요.');
-  let pane: string | undefined;
-  try {
-    for (const space of JSON.parse(ls.stdout).spaces ?? []) {
-      for (const tab of space.tabs ?? []) {
-        for (const t of tab.terminals ?? []) if (terminal && t.terminal === terminal) pane = t.pane;
-      }
-    }
-  } catch {
-    // 목록을 읽지 못하면 지금 보고 있는 칸 옆에 연다
-  }
-  const before = focusedPane();
-  const split = app(['do', 'pane.split', JSON.stringify({ direction: a.flags.right ? 'right' : 'down', mod: 'muwi', ...(pane ? { pane } : {}) })]);
-  if (split.status !== 0) throw new Fail(`그래프 칸을 열지 못했어요: ${(split.stderr || split.stdout).trim()}`);
-  // 글자 입력이 그래프 칸으로 넘어가지 않게, 키보드가 있던 칸으로 되돌린다
-  keepFocus(before, pane ? { pane } : undefined);
-  let opened = '';
-  try {
-    opened = JSON.parse(split.stdout).pane ?? '';
-  } catch {
-    // 칸 id를 모르면 안내만 한다
-  }
-  out(`그래프 칸을 열었어요${opened ? ` (${opened})` : ''}. 닫으려면 그 칸의 닫기 버튼을 눌러요.`);
-}
-
-const pause = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-
-/** 지금 키보드가 있는 칸. 알 수 없으면 null */
-function focusedPane(): string | null {
-  try {
-    const pane = JSON.parse(herdrApp(['status']).out)?.focused_pane;
-    return typeof pane === 'string' && pane ? pane : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * 칸을 새로 놓으면 조금 뒤에 키보드가 그 칸으로 옮겨 간다. 잠깐 지켜보다가 옮겨 갔으면 원래 있던 칸으로 되돌린다.
- * 사람이 다른 칸에서 쓰고 있었다면 그 칸으로 돌아간다. muwi를 부른 터미널로 끌어오지 않는다.
- * 원래 자리를 알 수 없을 때만 fallback(부른 터미널)으로 보낸다.
- */
-function keepFocus(before: string | null, fallback?: { pane?: string; terminal?: string }) {
-  let calm = 0;
-  for (let i = 0; i < 8 && calm < 3; i++) {
-    pause(200);
-    if (!before) {
-      if (fallback) herdrApp(['do', 'pane.focus', JSON.stringify(fallback)]);
-      continue;
-    }
-    const now = focusedPane();
-    if (now && now !== before) {
-      herdrApp(['do', 'pane.focus', JSON.stringify({ pane: before })]);
-      calm = 0;
-    } else calm += 1;
-  }
-}
-
-/** 띄운 세션을 pane이나 tab에 놓는다. 키보드는 원래 있던 칸에 둔다 */
-function placeTerminal(terminal: string, place: string, lead: string): Ran {
-  const before = focusedPane();
-  let kept: Ran = { ok: false, out: '', err: '' };
-  // 방금 띄운 터미널을 앱이 아직 모를 수 있어서 몇 번 다시 해 본다
-  for (let i = 0; i < 6 && !kept.ok; i++) {
-    if (i) pause(400);
-    kept = herdrApp(['do', 'terminal.keep', JSON.stringify({ terminal, place })]);
-  }
-  keepFocus(before, { terminal: lead });
-  return kept;
-}
-
-/**
- * 노드를 새 세션에 맡긴다. 세션은 hc가 띄우고, pane이나 tab에 놓는 것은 herdr-app이 한다.
- * 맡을지, 어디에 놓을지는 부르는 쪽(AI)이 정한다. 여기서는 띄우고, 노드와 터미널을 이어 적기만 한다.
- */
-function cmdRun(a: Args, dir: string) {
-  const [id, task] = a.pos;
-  if (!id || !task?.trim()) throw new Fail('사용법: muwi run <노드 id> "<맡길 일>" [--show pane|tab] [--down] [--name <이름>] [--agent "<명령>"] [--cwd <폴더>]');
-  const lead = process.env.HC_TERMINAL_ID;
-  if (!lead) throw new Fail('새 세션은 Herdr 앱의 터미널 안에서만 띄울 수 있어요 ($HC_TERMINAL_ID가 없어요). 여기서는 서브에이전트에 맡기거나 직접 해요.');
-  const work = resolveWork(a, dir);
-  const plan = needPlan(dir, work);
-  const node = plan.nodes.find(n => n.id === id);
-  if (!node) throw new Fail(`없는 노드예요: ${id}. 있는 노드: ${plan.nodes.map(n => n.id).join(', ')}. 새 노드면 muwi add로 먼저 넣어요.`);
-  const show = (str(a, 'show') ?? node.show) as ShowIn | undefined;
-  if (show !== undefined && !SHOW_IN.includes(show)) throw new Fail(`--show는 ${SHOW_IN.join(' 또는 ')}이에요`);
-  const cwd = str(a, 'cwd') ?? process.cwd();
-  // 띄울 명령을 주지 않으면 맡기는 세션과 같은 도구로 띄운다
-  const me = sessionKey();
-  // --agent codex처럼 도구 이름을 주면 그 도구가 첫 말을 받는 모양으로 띄운다. 그 밖의 값은 명령으로 보고 그대로 실행한다
-  const asked = str(a, 'agent')?.trim();
-  const other = toolById(asked);
-  const template = other ? other.launch : launchCommand(me ? readSession(dir, me)?.tool : undefined);
-  const given = other ? undefined : asked;
-  const agent = (given ?? template[0]).trim().split(/\s+/).filter(Boolean);
-  if (!agent.length) throw new Fail('--agent에 띄울 명령이 없어요');
-  // 띄우는 명령에 모델을 정해 줬으면 적어 둔다 (--agent "codex --model gpt-5"). 그 세션의 훅이 모델을 알려 주지 않아도 노드에 모델이 남는다
-  const model = modelIn(agent);
-  const brief = `${task.trim()}\n\n(muwi) 작업 ${work}의 노드 ${id}(${node.title})를 맡았어요. 시작은 자동으로 적혀요. 끝나면 muwi node ${id} done "<결과 한 줄>"을 적고, hc send ${lead} "<결과나 막힌 점>"으로 알려요.`;
-
-  // 이름은 Herdr의 목록에서 어느 노드인지 보이게 노드 id로 짓는다. 이미 있는 이름이면 뒤에 몇 글자를 붙인다
-  const base = terminalName(str(a, 'name') ?? id);
-  let name = base;
-  let started: Ran | null = null;
-  for (const candidate of [base, `${base.slice(0, 27)}-${Date.now().toString(36).slice(-4)}`]) {
-    name = candidate;
-    // 맡길 일은 명령 이름 바로 뒤에 둔다. 뒤에 두면 값을 여러 개 받는 옵션(--allowedTools 등)이 삼킨다
-    // --agent로 준 명령은 그 모양 그대로. 주지 않았으면 그 도구가 첫 말을 받는 자리에 넣는다 (qwen -i "<첫 말>" 같은 것)
-    const argv = given ? [agent[0], brief, ...agent.slice(1)] : template.map(part => (part === '{prompt}' ? brief : part));
-    started = hc(['run', '--bg', '--json', '--name', candidate, '--cwd', cwd, '--label', `${LABEL_WORK}=${work}`, '--label', `${LABEL_NODE}=${id}`, ...(model ? ['--label', `${LABEL_MODEL}=${model}`] : []), '--', ...argv]);
-    if (started.ok) break;
-  }
-  if (!started?.ok) throw new Fail(`새 세션을 띄우지 못했어요: ${(started?.err || started?.out || 'hc 명령이 없어요').trim()}`);
-  let terminal = '';
-  let sent = true;
-  try {
-    const j = JSON.parse(started.out);
-    terminal = String(j.address ?? j.terminal ?? j.id ?? '');
-    if (j.first_message && j.first_message.sent === false) sent = false;
-  } catch {
-    // 주소를 읽지 못하면 이름으로 가리킨다
-  }
-  if (!terminal) terminal = name;
-  // 첫 말을 명령으로 받지 못하는 도구는 뜬 뒤에 말로 보낸다
-  if (!given && !template.includes('{prompt}')) sent = hc(['send', terminal, brief]).ok;
-
-  let placed = '';
-  if (show) {
-    const place = show === 'tab' ? 'tab' : a.flags.down ? 'down' : 'right';
-    const kept = placeTerminal(terminal, place, lead);
-    placed = kept.ok ? show : `${show}에 놓지 못했어요 (${(kept.err || kept.out).trim().split('\n')[0]})`;
-  }
-
-  // 맡긴 말도 남긴다. 나중에 "맡긴 쪽이 무엇을 모르고 일했나"를 볼 수 있게
-  // 띄운 폴더도 남긴다. 새 세션이 기록을 남기기 전에 닫혀도 어디서 이어 하면 되는지 알려 줄 수 있게 (worktree에 띄웠을 때)
-  appendEvent(dir, work, { type: 'spawn', node: id, terminal, name, ...(show ? { show } : {}), task: task.trim().slice(0, 2000), cwd: path.resolve(cwd), ...(model ? { model } : {}) }, sessionKey());
-  join(dir, work);
-  out(`새 세션을 띄웠어요: ${name} (${terminal}) → 노드 ${id}${placed ? ` · ${placed}` : ''}`);
-  if (!sent) out(`맡길 일이 아직 전달되지 않았어요. hc read ${terminal}로 화면을 보고(폴더 신뢰 확인이 떠 있을 수 있어요) 풀어 준 뒤 hc send ${terminal} "<맡길 일>"로 다시 보내요.`);
-  out(`끝나거나 물어볼 게 생기길 기다리려면 hc wait --children any, 화면을 보려면 hc read ${terminal}, 말을 걸려면 hc send ${terminal} "…"`);
-}
-
-/** 끝난 노드를 맡았던 새 세션의 터미널을 닫는다. 판단 과정을 볼 수 있게 평소에는 남겨 두고, 사람이 정리하라고 할 때만 쓴다 */
-function cmdTidy(a: Args, dir: string) {
-  const work = a.pos[0] ?? resolveWork(a, dir);
-  const v = loadView(dir, work);
-  if (!v) throw new Fail(`작업이 없어요: ${work} (muwi status로 목록을 봐요)`);
-  // 같은 노드에 세션을 여러 번 띄웠으면 전부 본다
-  const targets = v.nodes.filter(n => n.status === 'done').flatMap(n => [...new Set(n.spawns.map(sp => sp.terminal))].map(terminal => ({ n, terminal })));
-  if (!targets.length) return out('닫을 세션이 없어요 (끝난 노드를 맡았던 새 세션만 닫아요)');
-  for (const { n, terminal } of targets) {
-    const got = hc(['get', terminal, '--json'], process.env, 5000);
-    let labels: Record<string, string> = {};
-    try {
-      labels = JSON.parse(got.out)?.labels ?? {};
-    } catch {
-      // 없는 터미널
-    }
-    // 주소는 다시 쓰일 수 있다. 이 작업의 이 노드를 맡았던 터미널이 맞을 때만 닫는다
-    if (!got.ok || labels[LABEL_WORK] !== work || labels[LABEL_NODE] !== n.id) {
-      out(`  ${n.id}: 이미 없어요 (${terminal})`);
-      continue;
-    }
-    hc(['kill', terminal], process.env, 10_000);
-    hc(['rm', terminal], process.env, 10_000);
-    out(`  ${n.id}: ${terminal} 닫음`);
-  }
+  if (!keys.length) return out('설정이 없어요 (설정은 화면이 정해요)');
+  for (const k of keys) out(`${k.padEnd(6)} ${config[k] ? 'on ' : 'off'}  ${about[k].about}`);
 }
 
 /** 이 세션은 계획 없이 진행한다고 밝힌다. 계획을 적지 않은 세션의 파일 수정을 막던 안내가 그친다 */
@@ -1041,11 +645,20 @@ function cmdSession(dir: string) {
 
 async function main(argv: string[]) {
   const [cmd, ...rest] = argv;
-  const a = parseArgs(rest);
   // TypeScript를 바로 실행하므로 Node 24(LTS) 이상에서만 돈다
   const major = Number(process.versions.node.split('.')[0]);
   if (major < NODE_MIN) throw new Fail(`muwi는 Node ${NODE_MIN} 이상이 필요해요 (지금: ${process.version})`);
   const dir = runsDir();
+  // 화면(Herdr 등)을 불러온다. 없으면 화면 없이 돈다
+  await loadHost(dir);
+  // 화면이 더하는 명령 (muwi run, muwi layout …): 인자는 그 명령이 읽는다
+  const hosted = cmd ? host().commands?.[cmd] : undefined;
+  if (hosted && cmd) {
+    await hosted(rest, dir);
+    if (TELLS.has(cmd)) tellGuide(dir);
+    return;
+  }
+  const a = parseArgs(rest);
   // 적는 명령이 끝나면 바뀐 지침이 있는지 보고 출력 끝에 붙인다
   if (cmd && TELLS.has(cmd)) {
     if (ADOPTS.has(cmd)) adoptHere(dir);
@@ -1061,8 +674,8 @@ async function main(argv: string[]) {
  */
 function adoptHere(dir: string) {
   const key = sessionKey();
-  if (!key || !process.env.HC_TERMINAL_ID) return;
-  // 이미 작업에 붙은 세션은 다시 묻지 않는다 (명령마다 Herdr에 묻지 않게)
+  if (!key || !host().place(process.env)) return;
+  // 이미 작업에 붙은 세션은 다시 묻지 않는다 (명령마다 화면에 묻지 않게)
   if (readSession(dir, key)?.work) return;
   try {
     adoptSpawn(dir, key, process.env);
@@ -1070,6 +683,17 @@ function adoptHere(dir: string) {
     // 붙이지 못해도 명령은 그대로 한다
   }
 }
+
+/** 사용법: 코어의 명령과 화면이 더하는 명령 */
+const help = () => {
+  const extra = host().help;
+  if (!extra) return HELP;
+  const at = HELP.indexOf('\n  설치와 설정');
+  return `${HELP.slice(0, at)}\n${extra}\n${HELP.slice(at)}`;
+};
+
+/** 화면(Herdr)이 더하는 명령. 화면 없이 부르면 무엇이 필요한지 알린다 */
+const HOSTED = new Set(['board', 'layout', 'open', 'run', 'tidy']);
 
 /** 맡은 세션이 처음 실행할 만한 명령들: 맡은 노드의 진행을 적는 명령 */
 const ADOPTS = new Set(['node', 'start', 'done', 'wait', 'block', 'add', 'remove']);
@@ -1089,20 +713,18 @@ async function run(cmd: string | undefined, a: Args, dir: string) {
     case 'viewed': return cmdViewed(a, dir);
     case 'show': return cmdShow(a, dir);
     case 'status': return cmdStatus(a, dir);
-    case 'board': return cmdBoard(a, dir);
     case 'hook': return cmdHook(a, dir);
     case 'setup': return cmdSetup(a, dir);
     case 'config': return cmdConfig(a, dir);
     case 'version': case '--version': case '-v': return out(version());
-    case 'open': return cmdOpen(a);
-    case 'layout': return cmdLayout(a, dir);
     case 'skip': return cmdSkip();
-    case 'run': return cmdRun(a, dir);
-    case 'tidy': return cmdTidy(a, dir);
     case 'session': return cmdSession(dir);
     case 'guide': return cmdGuide(dir);
-    case undefined: case 'help': case '--help': case '-h': return out(HELP);
-    default: throw new Fail(`모르는 명령: ${cmd}\n\n${HELP}`);
+    case undefined: case 'help': case '--help': case '-h': return out(help());
+    default:
+      // 화면이 더하는 명령인데 화면이 없다
+      if (cmd && HOSTED.has(cmd)) throw new Fail(`muwi ${cmd}는 Herdr 앱 화면과 함께 쓰는 명령이에요. herdr-muwi로 깔면 생겨요.`);
+      throw new Fail(`모르는 명령: ${cmd}\n\n${help()}`);
   }
 }
 

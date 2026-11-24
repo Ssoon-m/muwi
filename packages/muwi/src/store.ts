@@ -232,22 +232,19 @@ export function listWorks(dir: string): string[] {
     .map(e => e.name);
 }
 
-/** 켜고 끄는 것 (muwi config). 파일이 없으면 기본값 */
-export type Config = {
-  /** Herdr 앱 화면에 muwi 칸이 없을 때 넣자고 안내한다 (muwi setup, 그래프 칸) */
-  layout: boolean;
-};
-export const DEFAULT_CONFIG: Config = { layout: true };
+/** 켜고 끄는 것 (muwi config). 이름과 기본값은 화면이 정한다 (화면 규격의 config) */
+export type Config = Record<string, boolean>;
 const configFile = (dir: string) => path.join(dir, 'config.json');
 
-export function readConfig(dir: string): Config {
+/** defaults에 있는 이름만 읽는다. 0.6.0에서 뺀 nudge, guard 같은 옛 값은 읽지 않는다 */
+export function readConfig(dir: string, defaults: Config = {}): Config {
+  let saved: Record<string, unknown> = {};
   try {
-    // 0.6.0에서 뺀 nudge, guard 같은 옛 값은 읽지 않는다
-    const saved = readJson<Partial<Config>>(configFile(dir)) ?? {};
-    return { layout: saved.layout ?? DEFAULT_CONFIG.layout };
+    saved = readJson<Record<string, unknown>>(configFile(dir)) ?? {};
   } catch {
-    return { ...DEFAULT_CONFIG };
+    // 깨진 파일: 기본값
   }
+  return Object.fromEntries(Object.entries(defaults).map(([k, d]) => [k, typeof saved[k] === 'boolean' ? (saved[k] as boolean) : d]));
 }
 
 export function writeConfig(dir: string, config: Config) {

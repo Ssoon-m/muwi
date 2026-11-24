@@ -8,8 +8,11 @@ import {
   hookCommandFor, installBlock, installHooks, instructionText, mergeHooks, readInstall, refreshSetup, removeBlock, removeHooks,
   olderThan, removeSetup, runSetup, uninstallBlock, uninstallHooks, upsertBlock,
 } from '../src/setup.ts';
+import { setHost } from '../src/host.ts';
+import herdr from '../src/herdr/host.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
+const HERDR_HOST = path.resolve(import.meta.dirname, '../src/herdr/host.ts');
 /** sh 래퍼는 Windows에서도 슬래시 경로로 적는다 (Git Bash가 읽기 쉽게) */
 const posix = (p: string) => (process.platform === 'win32' ? p.replace(/\\/g, '/') : p);
 const HOOK = hookCommandFor('/Users/me/tools/muwi');
@@ -101,16 +104,25 @@ test('muwi setup: 있는 도구에만 넣고, 무엇을 넣었는지 적어 둔�
   assert.ok(fs.readFileSync(bin, 'utf8').includes(`MUWI_SETUP_NODE="${posix(process.execPath)}" exec "${posix(path.join(ROOT, 'bin', 'muwi'))}"`));
   // Windows는 실행 권한 비트가 없다 (Git Bash는 #! 줄을 보고 실행한다)
   if (process.platform !== 'win32') assert.ok(fs.statSync(bin).mode & 0o100);
-  // Herdr 앱도 Codex도 없으면 건너뛴다. Claude Code 설정은 플러그인 몫이라 건드리지 않는다
-  assert.equal(install.herdr, undefined);
+  // 화면이 없으면 화면은 넣지 않는다. Codex가 없으면 건너뛴다. Claude Code 설정은 플러그인 몫이라 건드리지 않는다
+  assert.equal(install.host, undefined);
+  assert.equal(install.hosted, undefined);
   assert.equal(install.codex, undefined);
   assert.equal(install.claude, undefined);
   assert.equal(fs.existsSync(path.join(h.dir, '.claude')), false);
-  assert.match(lines.join('\n'), /Herdr 앱이 없어/);
   assert.deepEqual(readInstall(h.records), install);
 });
 
-test('muwi setup: Herdr 앱 칸을 넣고, --codex를 주면 Codex 지침·skill도 넣고, --remove로 뺀다', () => {
+test('muwi setup: Herdr 앱 칸을 넣고, --codex를 주면 Codex 지침·skill도 넣고, --remove로 뺀다', t => {
+  // Herdr 화면이 있을 때. 화면을 불러온 경로를 적어 두면 muwi 명령과 훅이 그 화면을 쓴다
+  setHost(herdr, HERDR_HOST);
+  t.after(() => setHost(null));
+  // Herdr 앱이 없으면 칸은 건너뛴다
+  const none = home();
+  const lines: string[] = [];
+  const skipped = runSetup({ root: ROOT, version: '0.1.0', dir: none.records, env: none.env, log: l => lines.push(l) });
+  assert.match(lines.join('\n'), /Herdr 앱이 없어/);
+  assert.equal(skipped.hosted, undefined);
   const h = home('herdr', 'codex');
   fs.writeFileSync(path.join(h.dir, '.codex', 'AGENTS.md'), '# 내 Codex 규칙\n');
   // Codex가 있어도 --codex를 주지 않으면 건드리지 않는다
@@ -121,6 +133,7 @@ test('muwi setup: Herdr 앱 칸을 넣고, --codex를 주면 Codex 지침·skill
   runSetup({ root: ROOT, version: '0.1.0', dir: h.records, env: h.env });
   const mod = path.join(h.dir, '.config', 'herdr-app', 'mods', 'muwi');
   assert.deepEqual(fs.readdirSync(mod).sort(), ['arc.svg', 'main.js', 'mod.json']);
+  assert.deepEqual([readInstall(h.records)!.host, readInstall(h.records)!.hosted], [HERDR_HOST, { mod }]);
   const agents = fs.readFileSync(path.join(h.dir, '.codex', 'AGENTS.md'), 'utf8');
   assert.match(agents, /^# 내 Codex 규칙\n\n<!-- muwi:start/);
   // 사용법 skill은 Codex가 읽는 ~/.agents/skills에 넣는다

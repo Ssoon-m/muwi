@@ -2,6 +2,7 @@
 //   muwi 명령은 환경 변수에서 세션을 읽고, 훅은 Claude Code가 넘겨주는 session_id를 쓴다. 둘은 같은 값이다.
 // 세션마다 파일 하나(<기록 폴더>/.sessions/<세션>.json)에 지금 붙어 있는 작업과 읽은 skill을 적어 둔다.
 import { detectTool, sessionFromEnv } from './connectors/tools.ts';
+import { host } from './host.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { appendEvent, nowIso, readEvents, readJson, readPlan, writeJson } from './store.ts';
@@ -16,9 +17,9 @@ export type Session = {
   /** 그 도구가 붙인 대화 id. 터미널을 세션으로 본 도구에서 하던 대화를 다시 열 때 쓴다 */
   native?: string;
   cwd?: string;
-  /** Herdr 앱의 터미널 주소 ($HC_TERMINAL_ID). 그래프에서 세션 상태를 보고 그 터미널로 갈 때 쓴다 */
+  /** 그 세션이 도는 자리의 주소 (화면이 알려 준다. Herdr 앱의 터미널). 화면이 그 세션의 상태를 보고 그 자리로 갈 때 쓴다 */
   terminal?: string;
-  /** herdr(터미널 앱)의 pane ($HERDR_PANE_ID) */
+  /** 그 자리의 칸 (화면이 알려 준다. herdr의 pane) */
   herdrPane?: string;
   /** 지금 붙어 있는 작업 */
   work?: string;
@@ -46,11 +47,9 @@ export function sessionKey(env: NodeJS.ProcessEnv = process.env): string | null 
   return sessionFromEnv(env) ?? terminalKey(env);
 }
 
-/** 세션 id를 주지 않는 도구는 터미널을 세션으로 본다 (Herdr의 터미널). Herdr 밖이면 null */
+/** 세션 id를 주지 않는 도구는 이 프로세스가 도는 자리(터미널)를 세션으로 본다. 자리를 알려 주는 화면이 없으면 null */
 export function terminalKey(env: NodeJS.ProcessEnv = process.env): string | null {
-  if (env.HC_TERMINAL_ID) return `hc-${env.HC_TERMINAL_ID}`;
-  if (env.HERDR_PANE_ID) return `herdr-${env.HERDR_PANE_ID}`;
-  return null;
+  return host().place(env)?.key ?? null;
 }
 
 export const toolOf = (env: NodeJS.ProcessEnv = process.env): Session['tool'] => detectTool(env);
@@ -83,8 +82,9 @@ export function touchSession(dir: string, key: string, patch: Partial<Session> =
   const at = nowIso();
   const old = readSession(dir, key);
   const fromEnv: Partial<Session> = {};
-  if (env.HC_TERMINAL_ID) fromEnv.terminal = env.HC_TERMINAL_ID;
-  if (env.HERDR_PANE_ID) fromEnv.herdrPane = env.HERDR_PANE_ID;
+  const place = host().place(env);
+  if (place?.terminal) fromEnv.terminal = place.terminal;
+  if (place?.pane) fromEnv.herdrPane = place.pane;
   const next: Session = {
     tool: toolOf(env),
     loaded: {},

@@ -1,12 +1,13 @@
 // muwi setup: 플러그인이 해 주지 못하는 설치를 맡는다.
 //   Claude Code 플러그인으로 받으면 명령·훅·지침·사용법 skill은 Claude Code가 넣어 준다.
-//   여기서 하는 일은 그 밖의 것: 터미널에서도 muwi 명령을 쓰게 하기, Herdr 앱 그래프 칸, 다른 AI 도구에 통합 넣기.
+//   여기서 하는 일은 그 밖의 것: 터미널에서도 muwi 명령을 쓰게 하기, 화면(Herdr 앱의 그래프 칸), 다른 AI 도구에 커넥터 넣기.
+//   화면에 무엇을 넣는지는 화면이 안다 (화면 규격의 setup). 여기서는 부르고 기록한다.
 //   도구마다 무엇을 어디에 넣는지는 그 도구의 커넥터가 안다 (src/connectors). 여기서는 고른 도구들에 차례로 넣고 기록한다.
 // 남의 설정은 건드리지 않는다. 우리 것은 명령 앞의 표시와 구간 표시로 알아본다.
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { host, hostPath, type HostInstall } from './host.ts';
 import { nowIso, readJson, writeJson } from './store.ts';
 import { copyDir, installBlock, shPath, uninstallBlock, writeText } from './connectors/files.ts';
 import { adapterOf } from './connectors/index.ts';
@@ -26,6 +27,11 @@ export type Install = {
   bin?: string;
   /** Windows에서 넣은 muwi.cmd */
   cmd?: string;
+  /** 화면 모듈의 경로. muwi 명령과 훅이 이 경로에서 화면을 불러온다 (host.ts의 loadHost) */
+  host?: string;
+  /** 화면이 넣은 것 (Herdr 앱의 칸 등). 뺄 때 화면에 그대로 돌려준다 */
+  hosted?: HostInstall;
+  /** 0.6.0까지의 기록: 넣은 Herdr 앱 칸 */
   herdr?: string;
   /** 통합을 넣은 도구들 (도구 id → 넣은 것) */
   tools?: Record<string, ToolInstall>;
@@ -38,7 +44,7 @@ export type Install = {
 /** 한 도구에 넣은 것: 지침 구간을 넣은 파일, 사용법 skill 폴더, 훅·플러그인 */
 export type ToolInstall = { instructions?: string; skill?: string } & Wired;
 
-export type Places = { home: string; bin: string; cmd: string; herdr: string; nodeCache: string };
+export type Places = { home: string; bin: string; cmd: string; nodeCache: string };
 
 export function places(env: NodeJS.ProcessEnv = process.env): Places {
   const home = env.HOME || os.homedir();
@@ -47,7 +53,6 @@ export function places(env: NodeJS.ProcessEnv = process.env): Places {
     bin: path.join(home, '.local', 'bin', 'muwi'),
     // Windows의 PowerShell·cmd와 Herdr 앱 그래프 칸이 쓰는 명령 (sh 스크립트는 Git Bash에서만 실행된다)
     cmd: path.join(home, '.local', 'bin', 'muwi.cmd'),
-    herdr: env.HERDR_APP_HOME || path.join(home, '.config', 'herdr-app'),
     // src/find-node.sh가 로그인 셸에서 찾은 Node 경로를 적어 두는 곳
     nodeCache: path.join(env.XDG_CACHE_HOME || path.join(home, '.cache'), 'muwi', 'node'),
   };
@@ -102,16 +107,6 @@ function isOurWrapper(file: string): boolean {
   }
 }
 
-/** Herdr 앱 칸을 넣는다. 앱은 저장하는 즉시 다시 불러오므로 main.js를 마지막에 쓴다 */
-function installMod(root: string, appHome: string): string {
-  const from = path.join(root, 'herdr-app', 'muwi');
-  const to = path.join(appHome, 'mods', 'muwi');
-  const generated = (name: string) => name.endsWith('.d.ts') || name === 'jsconfig.json' || name === '.gitignore';
-  copyDir(from, to, name => name === 'main.js' || generated(name));
-  fs.copyFileSync(path.join(from, 'main.js'), path.join(to, 'main.js'));
-  return to;
-}
-
 export type SetupOptions = {
   root: string; version: string; dir: string; env?: NodeJS.ProcessEnv; log?: (line: string) => void;
   /** 통합을 넣을 도구들 (도구 id). claude, codex는 --claude, --codex의 옛 이름 */
@@ -120,6 +115,8 @@ export type SetupOptions = {
   codex?: boolean;
   /** 어느 OS에 넣는가 (테스트가 Windows를 흉내 낼 때 준다) */
   platform?: NodeJS.Platform;
+  /** 사람이 muwi setup을 실행했다: 화면이 점검하고 화면 상태를 알린다 (훅이 업데이트 뒤에 다시 맞출 때는 아니다) */
+  report?: boolean;
 };
 
 /**
@@ -159,12 +156,14 @@ export function runSetup(o: SetupOptions): Install {
     }
   }
 
-  if (fs.existsSync(p.herdr)) {
-    install.herdr = installMod(o.root, p.herdr);
-    log(`Herdr 앱 그래프 칸: ${install.herdr}`);
-  } else {
-    log('Herdr 앱이 없어 그래프 칸은 건너뛰었어요.');
+  // 화면(Herdr 앱의 그래프 칸 등). 화면을 불러온 경로를 적어 두면 muwi 명령과 훅이 그 화면을 쓴다
+  const h = host();
+  if (h.setup) {
+    const hosted = h.setup({ root: o.root, dir: o.dir, env, log, report: o.report });
+    if (hosted) install.hosted = hosted;
   }
+  const from = hostPath();
+  if (from) install.host = from;
 
   const want = new Set<string>([
     ...(o.tools ?? []), ...(o.claude ? ['claude'] : []), ...(o.codex ? ['codex'] : []),
@@ -225,7 +224,13 @@ export function removeSetup(dir: string, log: (line: string) => void = () => {})
   }
   if (install.bin && isOurWrapper(install.bin)) fs.rmSync(install.bin, { force: true });
   if (install.cmd && isOurWrapper(install.cmd)) fs.rmSync(install.cmd, { force: true });
-  if (install.herdr) fs.rmSync(install.herdr, { recursive: true, force: true });
+  // 화면이 넣은 것은 화면이 뺀다. 0.6.0까지의 기록(herdr)은 Herdr 앱 칸 폴더다
+  const hosted = install.hosted ?? (install.herdr ? { mod: install.herdr } : null);
+  if (hosted) {
+    const h = host();
+    if (h.remove) h.remove(hosted, { dir, log });
+    else if (hosted.mod) fs.rmSync(hosted.mod, { recursive: true, force: true });
+  }
   // 0.5.x의 기록(tools 없이 codex, claude만 있다)도 같은 모양으로 읽는다
   const tools: Record<string, ToolInstall> = {
     ...(install.codex ? { codex: { instructions: install.codex.agents, skill: install.codex.skill } } : {}),
@@ -280,11 +285,4 @@ export function olderThan(a: string, b: string): boolean {
     if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) < (pb[i] ?? 0);
   }
   return false;
-}
-
-/** Herdr 앱 칸이 문제없이 불리는지 앱에 확인받는다. 앱 명령이 없으면 건너뛴다 */
-export function checkMod(modDir: string): string | null {
-  const r = spawnSync('herdr-app', ['check', modDir], { encoding: 'utf8' });
-  if (r.error) return null;
-  return r.status === 0 ? 'ok' : (r.stdout + r.stderr).trim();
 }
