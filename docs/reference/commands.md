@@ -52,7 +52,6 @@
 | `muwi setup --all` | 깔려 있는 AI 도구 전부에 통합을 넣습니다. Claude Code는 플러그인이 넣어 주므로 뺍니다 |
 | `muwi setup --remove` | `muwi setup`으로 설치한 것을 지웁니다. `muwi layout`으로 바꾼 화면도 되돌립니다 |
 | `muwi config` | 현재 설정을 보여 줍니다 |
-| `muwi config nudge on\|off` | 계획 알림을 켜거나 끕니다. 기본값은 `on`입니다 |
 | `muwi config layout on\|off` | 화면에 muwi 칸이 없을 때 `muwi layout`을 권하는 안내를 켜거나 끕니다. 기본값은 `on`입니다 |
 
 각 항목이 무엇을 설치하고 설정하는지는 [설치와 설정](setup.md)에 있습니다.
@@ -132,7 +131,6 @@
 | `muwi node <id> block "<이유>"` | 스스로 풀 수 없어서 멈춥니다 |
 | `muwi node <id> pause` | 하던 노드를 잠시 멈춥니다. 다른 노드를 먼저 할 때 씁니다. 다시 `start`하면 같은 회차로 이어집니다 (`todo`도 같습니다) |
 | `muwi flag [<id>] "<메모>"` | 문제 지점을 표시합니다. id를 생략하면 작업에 표시합니다 |
-| `muwi skip "<이유>"` | 이번에 시킨 일은 계획 없이 진행한다고 남깁니다. 다음에 시킨 일에는 적용되지 않습니다 |
 
 `muwi start <id>`, `muwi done <id>`, `muwi wait <id>`, `muwi block <id>`처럼 `node`를 생략해도 됩니다. 결과 한 줄은 `--result "<글>"`로도 줄 수 있습니다.
 

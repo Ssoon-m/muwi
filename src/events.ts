@@ -2,9 +2,8 @@
 // 여기서 쓰는 공통 사건(Happened)으로 바꿔서 넘기고, 여기서는 그 사건을 기록하고 할 말(Reply)을 돌려준다.
 //   세션이 시작되면 세션 파일을 만들고, skill을 읽으면 사건 기록에 한 줄 남긴다.
 //   읽은 skill은 AI가 스스로 적지 않는다. 여기서 관찰한 것만 기록이 된다.
-// 계획을 적지 않은 세션이 파일을 고치거나 서브에이전트를 띄우려 하면 알려 준다 (before-edit, before-spawn). 지침만으로는 계획을 적지 않는 때가 있어서다.
-//   둘 다 여러 단계로 하는 일의 신호다. 계획은 파일을 고치는지가 아니라 일의 크기로 정한다 (PR 리뷰처럼 고치지 않는 일도 적는다).
-//   계획을 적거나(muwi plan, muwi node … start) 계획 없이 진행하겠다고 밝히면(muwi skip) 그 뒤로는 지나간다. 순서는 막지 않는다.
+// muwi는 AI가 하려는 일을 막지 않는다. 계획을 적을지는 AI가 일의 크기를 보고 정하고, 적지 않았으면 작은 일이라고 본 것이다.
+//   그래서 코어의 답은 "말해 주기(say)" 하나다. 훅은 관찰만 한다: 세션 시작, 읽은 skill, 서브에이전트.
 // 무엇을 승인받고 할지는 muwi가 정하지 않는다 (그 도구의 권한 설정과 사용자의 훅이 할 일이다). 셸 명령 앞(before-command)에서는 막지 않고,
 //   서브에이전트가 노드를 시작하는 명령인지만 본다.
 // 서브에이전트가 한 일은 사건의 agent로 구분한다 (서브에이전트는 세션 id가 부모와 같다).
@@ -13,9 +12,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { appendEvent, nowIso, readConfig, readEvents, readJson, readPlan } from './store.ts';
+import { appendEvent, nowIso, readEvents, readJson, readPlan } from './store.ts';
 import type { PlanNode } from './store.ts';
-import { attach, isSettled, markSettled, readSession, recordSkill, touchSession, unsettle, whereNow, type Session } from './session.ts';
+import { attach, readSession, recordSkill, touchSession, whereNow, type Session } from './session.ts';
 import { LABEL_SESSION, hc, spawnedFor } from './herdr.ts';
 import { markNode } from './node.ts';
 import { BLOCK_END, BLOCK_START, instructionText } from './integrations/files.ts';
@@ -134,44 +133,6 @@ export function adoptSpawn(dir: string, key: string, env: NodeJS.ProcessEnv): st
 }
 
 /**
- * 계획 없이 파일을 고치거나 서브에이전트를 띄우려 할 때 알려 주는 말. 사람이 새로 일을 시킬 때마다 다시 따진다.
- * done: 이 세션이 하던 작업이 있고 노드가 다 끝났으면 그 작업 이름 (그 작업의 연장일 수 있다)
- * spawning: 서브에이전트를 띄우려 했다
- */
-export function nudgeText(done?: string, spawning = false): string {
-  // 조사까지 붙여 둔다 (수정을, 서브에이전트 띄우기를)
-  const act = spawning ? '서브에이전트 띄우기를' : '수정을';
-  return [
-    done
-      ? `muwi: 이 세션이 하던 작업(${done})은 노드가 다 끝났어요. 지금 하려는 일을 어디에 적을지 정하고 ${act} 다시 시도하세요.`
-      : `muwi: 지금 하려는 일의 계획이 아직 없어요. 여러 단계로 하는 일이면 파일을 고치지 않아도 계획을 적어요. 사람은 그 계획을 그래프로 보면서 진행을 확인해요. 아래 중 하나를 하고 ${act} 다시 시도하세요.`,
-    ...(done ? [`- 그 작업의 연장이면 노드를 넣는다: muwi add <id> "<제목>" --why "<이유>" 그리고 muwi node <id> start`] : []),
-    `- 새 일이면 계획을 적는다 (작은 일이면 노드 두세 개로 충분해요): muwi plan --work <저장소>-<작업키> --request "<시킨 말>" '{"title":"…","nodes":[{"id":"…","title":"…"},{"id":"…","title":"…","after":["…"]}]}' 그리고 muwi node <id> start`,
-    '- 다른 세션이 맡긴 노드를 하는 중이면: muwi node <id> start --work <작업 이름>',
-    `- 한 번에 끝나는 일이면 (${spawning ? '질문에 답하려고 잠깐 찾아보기 같은 것' : '오타처럼 한 곳만 고치는 일'}): muwi skip "<이유>" (이번에 시킨 일에만 적용돼요)`,
-  ].join('\n');
-}
-export const NUDGE = nudgeText();
-
-/** 작업물이 아닌 곳(기록 폴더, 에이전트 설정, 임시 폴더)에 쓰는 파일은 알리지 않는다 */
-export function isScratchPath(file: unknown, dir: string, env: NodeJS.ProcessEnv = process.env): boolean {
-  if (typeof file !== 'string' || !file) return true;
-  const home = env.HOME || env.USERPROFILE || os.homedir();
-  // macOS·Linux의 임시 폴더와 Windows의 임시 폴더(%TEMP%, %TMP%)
-  const roots = [
-    dir, path.join(home, '.muwi'), path.join(home, '.claude'), path.join(home, '.codex'),
-    '/tmp', '/private/tmp', '/var/folders', '/private/var/folders', os.tmpdir(), env.TMPDIR, env.TEMP, env.TMP,
-  ].filter((r): r is string => Boolean(r));
-  // Windows는 경로의 대소문자를 가리지 않는다 (C:\Users와 c:\users는 같은 곳)
-  const norm = (p: string) => (process.platform === 'win32' ? p.toLowerCase() : p);
-  const full = norm(path.resolve(file));
-  return roots.some(root => {
-    const r = norm(path.resolve(root)).replace(/[\\/]+$/, '');
-    return full === r || full.startsWith(r + path.sep);
-  });
-}
-
-/**
  * 도구에서 일어난 일. 도구의 통합이 그 도구의 훅 입력을 이 모양으로 바꿔 준다.
  * tool: 알린 도구, session: 그 대화 (모르면 null), agent: 서브에이전트 안에서 일어났으면 그 id, cwd: 그 세션이 일하는 폴더,
  * model: 그 세션이 쓰는 모델 (도구가 알려 줄 때), native: 터미널을 세션으로 볼 때 그 도구가 붙인 대화 id
@@ -179,12 +140,8 @@ export function isScratchPath(file: unknown, dir: string, env: NodeJS.ProcessEnv
 export type Happened = { tool: Session['tool']; session: string | null; agent?: string; cwd?: string; model?: string; native?: string } & (
   /** 대화가 시작됐다. resumed: 대화가 요약돼 다시 시작했다 */
   | { kind: 'session-start'; resumed?: 'compact' }
-  /** 사람이 새로 말을 걸었다 */
+  /** 사람이 새로 말을 걸었다 (0.5.x의 훅 설정이 알려 준다. 지금은 걸지 않는다) */
   | { kind: 'prompt' }
-  /** 파일을 고치려 한다 */
-  | { kind: 'before-edit'; file?: unknown }
-  /** 서브에이전트를 띄우려 한다 */
-  | { kind: 'before-spawn' }
   /** 셸 명령을 실행하려 한다 */
   | { kind: 'before-command'; command?: unknown }
   /** skill을 읽었다. via: 도구로 불렀나(tool), SKILL.md 파일을 읽었나(file) */
@@ -197,8 +154,6 @@ export type Happened = { tool: Session['tool']; session: string | null; agent?: 
 export type Reply = {
   /** AI에게 보여 줄 말 (지침, 맡은 노드) */
   say?: string;
-  /** 하려던 일을 막고 보여 줄 이유 (계획 없이 고치려 할 때) */
-  stop?: string;
 };
 
 export function handleEvent(h: Happened, dir: string, env: NodeJS.ProcessEnv = process.env, root: string = ROOT): Reply {
@@ -222,30 +177,6 @@ export function handleEvent(h: Happened, dir: string, env: NodeJS.ProcessEnv = p
   // 서브에이전트의 모델은 세션의 모델로 적지 않는다
   const patch = { tool: h.tool, ...(h.cwd ? { cwd: h.cwd } : {}), ...(h.model && !agent ? { model: h.model } : {}), ...(h.native && !agent ? { native: h.native } : {}), hooked: nowIso() };
 
-  if (h.kind === 'before-edit' || h.kind === 'before-spawn') {
-    if (!readConfig(dir).nudge) {
-      markSettled(dir, key);
-      return {};
-    }
-    // 서브에이전트를 띄우는 것은 여러 단계로 하는 일의 신호다 (PR 리뷰의 점검들처럼). 파일 수정과 똑같이 따진다
-    const spawning = h.kind === 'before-spawn';
-    // 서브에이전트 안에서 일어난 일은 따지지 않는다. 맡긴 세션이 이미 따졌다
-    if (spawning && agent) return {};
-    if (h.kind === 'before-edit' && isScratchPath(h.file, dir, env)) return {};
-    // 이번에 시킨 일에서 이미 확인했으면 다시 따지지 않는다. 사람이 새로 말을 걸면 표시가 지워진다
-    if (isSettled(dir, key)) return {};
-    const session = touchSession(dir, key, patch, env);
-    const plan = session.work ? readPlan(dir, session.work) : null;
-    // 하던 작업에 끝나지 않은 노드가 있으면 그 작업을 계속하는 것으로 본다
-    const open = Boolean(plan && plan.nodes.some(n => n.status !== 'done'));
-    if (open || session.skipped) {
-      markSettled(dir, key);
-      return {};
-    }
-    if (!session.nudged) touchSession(dir, key, { nudged: nowIso() }, env);
-    return { stop: nudgeText(plan ? plan.work : undefined, spawning) };
-  }
-
   if (h.kind === 'session-start') {
     const guide = sessionInstructions(root);
     // 늘 읽히는 지침 파일이 있는 도구(AGENTS.md 등)는 지침이 이미 거기 있다. 두 번 넣지 않는다.
@@ -265,10 +196,9 @@ export function handleEvent(h: Happened, dir: string, env: NodeJS.ProcessEnv = p
   }
 
   if (h.kind === 'prompt') {
-    // 사람이 새로 말을 걸었다. 계획을 적었는지 다음 수정 때 다시 따지고, 앞에서 한 skip은 여기서 끝난다.
+    // 사람이 새로 말을 걸었다. 여기서 할 일은 없다 (세션을 봤다는 것만 적는다).
     // 지침이 바뀐 것은 여기서 넣지 않는다. 말할 때 문맥을 넣을 수 없는 도구가 있어서, 어느 도구에서나 되는 muwi 명령의 출력으로 전한다 (guideUpdate)
-    touchSession(dir, key, { ...patch, skipped: undefined }, env);
-    unsettle(dir, key);
+    touchSession(dir, key, patch, env);
     return {};
   }
 

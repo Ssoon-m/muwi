@@ -132,7 +132,7 @@ function normalizeTool(tool, args) {
 
 function modeFor(name) {
   if (name === "Bash") return "command"; // links a node a subagent starts; never blocks
-  if (name === "Edit" || name === "Write" || name === "Agent") return "nudge";
+  // Edits and subagent spawns are not reported: muwi never blocks what the agent does.
   return undefined;
 }
 

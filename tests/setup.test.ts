@@ -25,14 +25,13 @@ test('훅 넣기: 남의 훅은 그대로 두고 우리 것만 한 벌 넣는다
   assert.deepEqual(once.hooks!.PostToolUse, [{ matcher: 'Skill|Read', hooks: [ours()] }]);
   assert.deepEqual(once.hooks!.PreToolUse, [
     theirs,
-    { matcher: 'Edit|Write|MultiEdit|NotebookEdit|Agent|Task', hooks: [ours(' nudge')] },
     { matcher: 'Bash', hooks: [ours(' command')] },
   ]);
   assert.deepEqual(removeHooks(once), start);
   // 설치 위치가 바뀌어도 옛 위치의 우리 훅을 알아보고 바꾼다
   const moved = mergeHooks(once, hookCommandFor('/somewhere/else'));
   assert.equal(JSON.stringify(moved).includes('/Users/me/tools/muwi'), false);
-  assert.equal(moved.hooks!.PreToolUse.length, 3);
+  assert.equal(moved.hooks!.PreToolUse.length, 2); // 남의 훅 하나와 우리 것 하나 (셸 명령 앞)
   assert.deepEqual(removeHooks(mergeHooks({ theme: 'dark' }, HOOK)), { theme: 'dark' });
 });
 

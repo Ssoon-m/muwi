@@ -302,8 +302,6 @@ def _pre_tool_call(tool_name=None, args=None, session_id=None, tool_call_id=None
         name, tool_input, _agent_type = _normalize_tool(tool_name, args)
         if name == "Bash":
             mode = "command"  # links a node a subagent starts; never blocks
-        elif name in ("Edit", "Write", "Agent"):
-            mode = "nudge"
         else:
             return None
         reply = _run_hook(mode, _payload("PreToolUse", session_id, tool_name=name,

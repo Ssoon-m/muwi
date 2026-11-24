@@ -24,10 +24,6 @@ export type Session = {
   work?: string;
   /** 이 세션이 읽은 skill과 처음 읽은 시각. 작업을 옮겨도 세션은 내용을 갖고 있으므로 따로 기억한다 */
   loaded: Record<string, string>;
-  /** 계획 없이 파일을 고치거나 서브에이전트를 띄우려 해서 처음 알린 시각 (nudge 훅) */
-  nudged?: string;
-  /** 계획 없이 진행하겠다고 밝혔다 (muwi skip). 사람이 다음 말을 하면 지워진다 */
-  skipped?: { at: string; reason: string };
   /** 훅이 이 세션을 마지막으로 본 시각. 있으면 이 세션이 읽은 skill을 관찰할 수 있다 */
   hooked?: string;
   /** 이 세션에 마지막으로 넣은 muwi 지침의 해시. muwi가 업데이트돼 지침이 바뀌면 다시 넣는다 */
@@ -82,28 +78,6 @@ export function whereNow(plan: Plan, session: Pick<Session, 'key' | 'agents'>, a
   return { node: noted.node, attempt: noted.attempt ?? 1, ...(noted.guess ? { guess: true } : {}) };
 }
 
-/**
- * "이 세션은 더 알릴 것이 없다"는 표시. 작업에 붙었거나 계획 없이 진행하겠다고 밝혔을 때 남긴다.
- * hook.sh가 이 파일을 보고 파일 수정마다 node를 띄우지 않고 바로 끝낸다.
- */
-export function markSettled(dir: string, key: string) {
-  const file = path.join(dir, '.sessions', `${safe(key)}.ok`);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, '');
-}
-
-/** 이번 요청에서 이미 확인이 끝난 세션인가 */
-export const isSettled = (dir: string, key: string) => fs.existsSync(path.join(dir, '.sessions', `${safe(key)}.ok`));
-
-/** 사람이 새로 말을 걸었다. 계획을 적었는지 다시 따지게 표시를 지우고, 앞에서 한 skip도 끝낸다 */
-export function unsettle(dir: string, key: string) {
-  try {
-    fs.rmSync(path.join(dir, '.sessions', `${safe(key)}.ok`), { force: true });
-  } catch {
-    // 지우지 못해도 다음 확인에서 다시 본다
-  }
-}
-
 /** 세션 파일을 만들거나 고친다. 환경에서 알 수 있는 것(도구, 폴더, 터미널)을 채운다 */
 export function touchSession(dir: string, key: string, patch: Partial<Session> = {}, env: NodeJS.ProcessEnv = process.env): Session {
   const at = nowIso();
@@ -133,7 +107,6 @@ export function touchSession(dir: string, key: string, patch: Partial<Session> =
 export function attach(dir: string, key: string, work: string, env: NodeJS.ProcessEnv = process.env): Session {
   const session = touchSession(dir, key, {}, env);
   if (session.work === work) {
-    markSettled(dir, key);
     return session;
   }
   const known = new Set(
@@ -142,7 +115,6 @@ export function attach(dir: string, key: string, work: string, env: NodeJS.Proce
   for (const [skill, at] of Object.entries(session.loaded)) {
     if (!known.has(skill)) appendEvent(dir, work, { type: 'skill', skill, via: 'tool', carried: true }, key, at);
   }
-  markSettled(dir, key);
   return touchSession(dir, key, { work }, env);
 }
 

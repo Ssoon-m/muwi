@@ -19,11 +19,9 @@ export type Shape = {
   /** 사건 이름. 없는 사건은 걸지 않는다 */
   on: { start?: string; prompt?: string; before?: string; after?: string; subStart?: string; subStop?: string };
   /** 그 도구에서 쓰는 도구 이름 (훅 입력의 tool_name) */
-  tools: { edit: string[]; spawn: string[]; shell: string[]; read: string[]; skill?: string[] };
+  tools: { shell: string[]; read: string[]; skill?: string[] };
   /** 파일을 셸 명령으로 읽는 도구인가 (cat …/SKILL.md). 그러면 셸 명령에서도 읽은 skill을 찾는다 */
   shellReads?: boolean;
-  /** 막을 때 답하는 법: JSON(permissionDecision deny) 또는 종료 코드 2와 표준 오류 */
-  deny?: 'json' | 'exit2';
   /** AI에게 보여 줄 말을 넣는 법: JSON(additionalContext) 또는 표준 출력 그대로 */
   say?: 'json' | 'stdout';
   /** 답 JSON을 hookSpecificOutput으로 감싸지 않는 도구 */
@@ -82,11 +80,6 @@ export function fromShaped(shape: Shape, raw: any, mode: HookMode, env: NodeJS.P
   const { on, tools } = shape;
 
   if (mode === 'command') return event === on.before && is(tools.shell) ? { ...who, kind: 'before-command', command: input.command ?? input.cmd } : null;
-  if (mode === 'nudge') {
-    if (event !== on.before) return null;
-    if (is(tools.spawn)) return { ...who, kind: 'before-spawn' };
-    return is(tools.edit) ? { ...who, kind: 'before-edit', file: fileOf(input) } : null;
-  }
   if (event && event === on.start) return { ...who, kind: 'session-start', ...(payload.source === 'compact' ? { resumed: 'compact' as const } : {}) };
   if (event && event === on.prompt) return { ...who, kind: 'prompt' };
   if (event && (event === on.subStart || event === on.subStop)) {
@@ -118,11 +111,6 @@ export function toShaped(shape: Shape, h: Happened, r: Reply): HookResult {
     const { hookEventName: _event, ...rest } = o;
     return { stdout: JSON.stringify(rest) };
   };
-  if (r.stop) {
-    return shape.deny === 'exit2'
-      ? { stderr: r.stop + '\n', code: 2 }
-      : out({ hookEventName: shape.on.before, permissionDecision: 'deny', permissionDecisionReason: r.stop });
-  }
   if (r.say && (h.kind === 'session-start' || h.kind === 'prompt')) {
     if (shape.say === 'stdout') return { stdout: r.say };
     return out({ hookEventName: h.kind === 'session-start' ? shape.on.start : shape.on.prompt, additionalContext: r.say });
@@ -134,7 +122,7 @@ export function toShaped(shape: Shape, h: Happened, r: Reply): HookResult {
 export const toolCommand = (root: string, id: string, platform: NodeJS.Platform = process.platform) =>
   `${HOOK_MARK} sh "${shPath(path.join(root, 'hooks', 'tool.sh'), platform)}" ${id}`;
 
-/** 걸 훅들. Claude Code 통합과 같은 세 갈래다 (기록, 계획 알림, 셸 명령 앞) */
+/** 걸 훅들. Claude Code 통합과 같은 두 갈래다 (기록, 셸 명령 앞). 사람이 말할 때와 파일을 고치기 전에는 걸지 않는다 */
 export function shapedEntries(shape: Shape, wiring: Wiring, command: string): HookEntry[] {
   const { on, tools } = shape;
   const match = (names: string[]) => (wiring.matcher === 'none' || !names.length ? undefined : wiring.matcher === 'regex' ? `^(${names.join('|')})$` : names.join('|'));
@@ -144,9 +132,8 @@ export function shapedEntries(shape: Shape, wiring: Wiring, command: string): Ho
     return [{ event, ...(matcher !== undefined ? { matcher } : {}), command: `${command}${mode}`, ...(wiring.extra ? { extra: wiring.extra } : {}) }];
   };
   return [
-    ...entry(on.start, null), ...entry(on.prompt, null), ...entry(on.subStart, null), ...entry(on.subStop, null),
+    ...entry(on.start, null), ...entry(on.subStart, null), ...entry(on.subStop, null),
     ...entry(on.after, [...tools.read, ...(tools.skill ?? []), ...(shape.shellReads ? tools.shell : [])]),
-    ...entry(on.before, [...tools.edit, ...tools.spawn], ' nudge'),
     // 셸 명령 앞: 서브에이전트가 맡은 노드를 이을 수 있을 때만 건다 (서브에이전트를 알려 주는 도구)
     ...(on.subStart ? entry(on.before, tools.shell, ' command') : []),
   ];
@@ -200,7 +187,7 @@ export function flatShaped(shape: Shape, o: { file: string; matcher: Wiring['mat
 /** 플러그인이 넘기는 입력의 모양: Claude Code의 사건 이름과 도구 이름 그대로 (플러그인이 그 도구의 이름을 이렇게 바꿔 넘긴다) */
 export const PLUGIN_SHAPE = {
   on: { start: 'SessionStart', prompt: 'UserPromptSubmit', before: 'PreToolUse', after: 'PostToolUse', subStart: 'SubagentStart', subStop: 'SubagentStop' },
-  tools: { edit: ['Edit', 'Write'], spawn: ['Agent'], shell: ['Bash'], read: ['Read'], skill: ['Skill'] },
+  tools: { shell: ['Bash'], read: ['Read'], skill: ['Skill'] },
 } satisfies Omit<Shape, 'id'>;
 
 /** 플러그인 파일 안에서 muwi 훅 스크립트의 자리를 가리키는 표시. 넣을 때 실제 경로로 바꾼다 */

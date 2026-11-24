@@ -16,7 +16,7 @@ const tmp = (name: string) => fs.mkdtempSync(path.join(os.tmpdir(), `muwi-${name
 /** Herdr 밖의 빈 환경 */
 const ENV = (home: string) => ({ HOME: home, PATH: process.env.PATH }) as NodeJS.ProcessEnv;
 
-/** 도구마다 "파일을 고치려 한다"가 어떤 입력으로 오는지. 통합이 같은 사건(before-edit, 그 파일)으로 바꿔야 한다 */
+/** 도구마다 "파일을 고치려 한다"가 어떤 입력으로 오는지. muwi는 이 입력에 답하지 않는다 (0.5.x는 계획이 없으면 여기서 돌려보냈다) */
 const FILE = '/repo/src/a.ts';
 const EDITS: Record<string, any> = {
   claude: { hook_event_name: 'PreToolUse', session_id: 's1', tool_name: 'Edit', tool_input: { file_path: FILE } },
@@ -51,31 +51,37 @@ test('도구 표: 환경 변수로 도구를 알아보고, 도구마다 띄우�
   assert.equal(resumeCommand('nope', 'abc'), null);
 });
 
-for (const [id, payload] of Object.entries(EDITS)) {
-  test(`${id} 통합: 파일을 고치려는 입력을 같은 사건으로 바꾸고, 계획이 없으면 그 도구의 형식으로 막는다`, () => {
-    const dir = tmp('rec');
-    const adapter = ADAPTERS[id];
-    const happened = adapter.from(payload, 'nudge', ENV(tmp('home')));
-    assert.ok(happened && happened.kind === 'before-edit', `${id}: before-edit가 아니다`);
-    assert.deepEqual([happened.tool, happened.session, (happened as any).file], [id, 's1', FILE]);
-    // Letta의 agent_id는 서브에이전트가 아니다
-    assert.equal(happened.agent, undefined);
+/** 도구마다 세션을 가리키는 이름이 다르다 */
+const SESSION_ID: Record<string, any> = { cursor: { conversation_id: 's1' }, 'antigravity-cli': { conversationId: 's1' }, grok: { sessionId: 's1' }, letta: { conversation_id: 's1' } };
 
-    const r = handleHook(payload, dir, 'nudge', ENV(tmp('home')), ROOT, id);
-    const said = `${r.stdout ?? ''}${r.stderr ?? ''}`;
-    assert.match(said, /muwi: 지금 하려는 일의 계획이 아직 없어요/, `${id}: 막는 이유가 없다 (${said})`);
-    // 막는 법: 종료 코드 2(표준 오류) 아니면 JSON
-    if (r.code === 2) assert.ok(r.stderr);
-    else assert.doesNotThrow(() => JSON.parse(r.stdout!));
+for (const id of Object.keys(ADAPTERS)) {
+  test(`${id} 커넥터: 세션이 시작됐다는 입력을 같은 사건으로 바꾼다`, () => {
+    const start = { ...(SESSION_ID[id] ?? { session_id: 's1' }), hook_event_name: id === 'cursor' ? 'sessionStart' : 'SessionStart' };
+    const happened = ADAPTERS[id].from(start, 'record', ENV(tmp('home')));
+    assert.ok(happened && happened.kind === 'session-start', `${id}: session-start가 아니다`);
+    assert.deepEqual([happened.tool, happened.session], [id, 's1']);
+  });
+}
+
+for (const [id, payload] of Object.entries(EDITS)) {
+  test(`${id} 커넥터: 파일을 고치려는 입력에는 아무 답도 하지 않는다 (muwi는 AI가 하려는 일을 막지 않는다)`, () => {
+    const dir = tmp('rec');
+    // 고치기 전의 입력은 코어가 볼 일이 아니다
+    assert.equal(ADAPTERS[id].from(payload, 'record', ENV(tmp('home'))), null);
+    const r = handleHook(payload, dir, 'record', ENV(tmp('home')), ROOT, id);
+    assert.ok(!r.code, `${id}: 종료 코드로 막았다 (${r.code})`);
+    assert.ok(!r.stderr, `${id}: 표준 오류로 답했다`);
+    // 답이 늘 JSON이어야 하는 도구는 빈 JSON을, 나머지는 아무것도 내지 않는다
+    assert.ok(!r.stdout || r.stdout === '{}', `${id}: ${r.stdout}`);
   });
 }
 
 test('세션: 셸 명령에 세션 id를 넘겨주지 않는 도구는 훅도 터미널을 세션으로 보고, 그 도구의 대화 id는 따로 적는다', () => {
   const herdr = { HOME: tmp('home'), HC_TERMINAL_ID: 't9' } as NodeJS.ProcessEnv;
-  const qwen = ADAPTERS.qwen.from(EDITS.qwen, 'nudge', herdr)!;
+  const qwen = ADAPTERS.qwen.from({ hook_event_name: 'SessionStart', session_id: 's1' }, 'record', herdr)!;
   assert.deepEqual([qwen.session, qwen.native], ['hc-t9', 's1']);
   // Codex는 셸 명령에도 같은 id를 준다 (CODEX_THREAD_ID): 그 id가 세션이다
-  const codex = ADAPTERS.codex.from(EDITS.codex, 'nudge', herdr)!;
+  const codex = ADAPTERS.codex.from({ hook_event_name: 'SessionStart', session_id: 's1', model: 'gpt-x' }, 'record', herdr)!;
   assert.deepEqual([codex.session, codex.native, codex.model], ['s1', undefined, 'gpt-x']);
 });
 
@@ -154,7 +160,9 @@ test('남의 훅은 그대로: Cursor의 hooks.json과 Kimi Code의 config.toml�
   runSetup({ root: ROOT, version: '0.0.0', dir: records, env, tools: ['cursor', 'kimi'] });
   const cursor = JSON.parse(fs.readFileSync(cursorFile, 'utf8'));
   assert.deepEqual(cursor.hooks.stop, [{ command: './mine.sh' }]);
-  assert.match(cursor.hooks.preToolUse[0].command, /tool\.sh" cursor nudge$/);
+  // 파일을 고치기 전에는 걸지 않는다. 셸 명령 앞의 훅은 서브에이전트가 시작한 노드를 잇는 데만 쓴다
+  assert.deepEqual(cursor.hooks.preToolUse.map((h: any) => [h.matcher, /tool\.sh" cursor command$/.test(h.command)]), [['^(Shell)$', true]]);
+  assert.equal(cursor.hooks.beforeSubmitPrompt, undefined);
   const kimi = fs.readFileSync(kimiFile, 'utf8');
   assert.match(kimi, /^model = "kimi-x"\n\n\[\[hooks\]\]\nevent = "Stop"\ncommand = "mine\.sh"\n\n# muwi:start/);
   // Kimi Code는 [[hooks]]에 네 키만 받는다
@@ -166,23 +174,22 @@ test('남의 훅은 그대로: Cursor의 hooks.json과 Kimi Code의 config.toml�
   assert.equal(fs.readFileSync(kimiFile, 'utf8'), 'model = "kimi-x"\n\n[[hooks]]\nevent = "Stop"\ncommand = "mine.sh"\n');
 });
 
-test('muwi hook --from <도구>: 그 도구의 형식으로 읽고 답한다 (종료 코드와 표준 오류로 답하는 도구, 사건 이름을 명령이 알려 주는 도구)', () => {
+test('muwi hook --from <도구>: 그 도구의 형식으로 읽고 답한다 (말을 표준 출력으로 받는 도구, 사건 이름을 명령이 알려 주는 도구)', () => {
   const CLI = path.join(ROOT, 'src', 'cli.ts');
   const run = (args: string[], payload: object) => {
     const home = tmp('home');
     return spawnSync(process.execPath, [CLI, 'hook', ...args], { input: JSON.stringify(payload), encoding: 'utf8', env: { HOME: home, PATH: process.env.PATH, MUWI_DIR: path.join(home, '.muwi') } });
   };
-  // Mastra Code: 막을 때 종료 코드 2와 표준 오류
-  const mastra = run(['nudge', '--from', 'mastracode'], EDITS.mastracode);
-  assert.equal(mastra.status, 2);
-  assert.match(mastra.stderr, /muwi: 지금 하려는 일의 계획이 아직 없어요/);
+  // Letta Code: AI에게 줄 말을 표준 출력 그대로 낸다
+  assert.match(run(['--from', 'letta'], { event_type: 'SessionStart', conversation_id: 'c1' }).stdout, /^## 작업 진행 방식 \(muwi\)/);
   // Antigravity CLI: 입력에 사건 이름이 없어 명령이 알려 준다. 볼 일이 없어도 빈 JSON을 낸다
-  const { hook_event_name: _name, ...bare } = EDITS['antigravity-cli'];
-  const agy = run(['nudge', '--from', 'antigravity-cli', '--event', 'PreToolUse'], bare);
-  assert.equal(JSON.parse(agy.stdout).decision, 'deny');
+  assert.equal(run(['--from', 'antigravity-cli', '--event', 'SessionStart'], { conversationId: 'c' }).stdout.trim(), '{}');
   assert.equal(run(['--from', 'antigravity-cli', '--event', 'PostToolUse'], { conversationId: 'c', toolCall: { name: 'view_file', args: { AbsolutePath: '/x/a.md' } } }).stdout.trim(), '{}');
+  // 0.5.x의 훅 설정이 부르던 갈래(계획 없이 고칠 때 알림)는 조용히 지나간다: 막지 않는다
+  const old = run(['nudge', '--from', 'mastracode'], EDITS.mastracode);
+  assert.deepEqual([old.status, old.stdout, old.stderr], [0, '', '']);
   // 모르는 도구면 아무것도 하지 않는다
-  assert.deepEqual([run(['nudge', '--from', 'nope'], EDITS.claude).status, run(['nudge', '--from', 'nope'], EDITS.claude).stdout], [0, '']);
+  assert.deepEqual([run(['--from', 'nope'], EDITS.claude).status, run(['--from', 'nope'], EDITS.claude).stdout], [0, '']);
 });
 
 test('커넥터 규격: 모든 도구에 커넥터가 있고, 그 도구의 훅이 알려 주는 것을 선언한다', () => {
@@ -201,7 +208,7 @@ test('커넥터 규격: 모든 도구에 커넥터가 있고, 그 도구의 훅�
   assert.deepEqual(gaps({ subagents: true, start: true, skills: true }), []);
 });
 
-test('Gemini CLI: 사건 이름이 달라도 같은 사건으로 바꾸고, 막을 때는 종료 코드 2와 표준 오류로 답한다', () => {
+test('Gemini CLI: 사건 이름이 달라도 같은 사건으로 바꾸고, 설정에 우리 훅만 넣고 뺀다', () => {
   const home = tmp('gemini-home');
   const dir = tmp('gemini-runs');
   const env = { ...ENV(home), HC_TERMINAL_ID: 't5' } as NodeJS.ProcessEnv;
@@ -209,16 +216,13 @@ test('Gemini CLI: 사건 이름이 달라도 같은 사건으로 바꾸고, 막�
   // 서브에이전트를 알려 주는 사건이 없다: --sub로 밝힌 노드만 서브에이전트로 나온다
   assert.deepEqual(g.can, { subagents: false, start: true, skills: true });
   // 셸 명령에 세션 id를 넘겨주지 않아서 터미널을 세션으로 본다
-  const edit = g.from({ hook_event_name: 'BeforeTool', session_id: 'g1', tool_name: 'write_file', tool_input: { file_path: FILE } }, 'nudge', env)!;
-  assert.deepEqual([edit.kind, edit.session, edit.native], ['before-edit', 'hc-t5', 'g1']);
-  assert.equal(g.from({ hook_event_name: 'BeforeAgent', session_id: 'g1', prompt: '다음 일' }, 'record', env)!.kind, 'prompt');
-  assert.equal(g.from({ hook_event_name: 'SessionStart', session_id: 'g1', source: 'startup' }, 'record', env)!.kind, 'session-start');
+  // 셸 명령에 세션 id를 넘겨주지 않아서 터미널을 세션으로 본다
+  const start = g.from({ hook_event_name: 'SessionStart', session_id: 'g1', source: 'startup' }, 'record', env)!;
+  assert.deepEqual([start.kind, start.session, start.native], ['session-start', 'hc-t5', 'g1']);
+  // 파일을 고치려는 입력은 보지 않는다 (막지 않는다)
+  assert.equal(g.from({ hook_event_name: 'BeforeTool', session_id: 'g1', tool_name: 'write_file', tool_input: { file_path: FILE } }, 'record', env), null);
   const skill = g.from({ hook_event_name: 'AfterTool', session_id: 'g1', tool_name: 'activate_skill', tool_input: { name: 'team-rules' } }, 'record', env) as any;
   assert.deepEqual([skill.kind, skill.skill], ['skill-read', 'team-rules']);
-  // 계획 없이 고치려 하면 돌려보낸다: 종료 코드 2, 이유는 표준 오류로 (그 글이 에이전트에게 간다)
-  const denied = handleHook({ hook_event_name: 'BeforeTool', session_id: 'g1', tool_name: 'replace', tool_input: { file_path: FILE } }, dir, 'nudge', env, ROOT, 'gemini');
-  assert.equal(denied.code, 2);
-  assert.match(denied.stderr!, /계획이 아직 없어요/);
   // 설정에 넣고 뺀다: 남의 훅과 다른 설정은 그대로
   const settings = path.join(home, '.gemini', 'settings.json');
   fs.mkdirSync(path.dirname(settings), { recursive: true });
@@ -228,9 +232,11 @@ test('Gemini CLI: 사건 이름이 달라도 같은 사건으로 바꾸고, 막�
   const now = JSON.parse(fs.readFileSync(settings, 'utf8'));
   assert.equal(now.theme, 'dark');
   assert.deepEqual(now.hooks.BeforeTool[0], theirs.hooks.BeforeTool[0]);
-  assert.deepEqual(Object.keys(now.hooks).sort(), ['AfterTool', 'BeforeAgent', 'BeforeTool', 'SessionStart']);
-  assert.match(JSON.stringify(now.hooks.BeforeTool), /hooks\/tool\.sh\\?" gemini nudge/);
-  assert.equal(now.hooks.BeforeTool.at(-1).hooks[0].timeout, 10000);
+  // 세션 시작과 skill 읽기에만 건다. 도구를 쓰기 전(BeforeTool)에는 우리 훅이 없다
+  assert.deepEqual(Object.keys(now.hooks).sort(), ['AfterTool', 'BeforeTool', 'SessionStart']);
+  assert.equal(now.hooks.BeforeTool.length, 1);
+  assert.match(JSON.stringify(now.hooks.AfterTool), /hooks\/tool\.sh\\?" gemini/);
+  assert.equal(now.hooks.AfterTool.at(-1).hooks[0].timeout, 10000);
   // 지침은 Gemini가 늘 읽는 GEMINI.md에, 사용법 skill은 skills 폴더에
   assert.match(fs.readFileSync(path.join(home, '.gemini', 'GEMINI.md'), 'utf8'), /muwi:start/);
   assert.ok(fs.existsSync(path.join(home, '.gemini', 'skills', 'muwi', 'SKILL.md')));

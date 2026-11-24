@@ -2,8 +2,8 @@
 import type { Happened, Reply } from '../events.ts';
 
 /** 훅이 불린 갈래. 도구가 사건을 나눠 걸 수 있으면 갈래마다 따로 건다 (볼 필요 없는 호출을 줄인다) */
-/** record: 기록, nudge: 고치기·서브에이전트 띄우기 앞, command: 셸 명령 앞 (서브에이전트가 시작한 노드를 잇는다. 옛 설치는 guard라고 부른다) */
-export type HookMode = 'record' | 'command' | 'nudge';
+/** record: 기록, command: 셸 명령 앞 (서브에이전트가 시작한 노드를 잇는다). 0.5.x의 훅 설정이 부르는 nudge와 guard는 받아서 조용히 지나간다 */
+export type HookMode = 'record' | 'command';
 /** 훅이 도구에 돌려주는 것: 표준 출력, 표준 오류, 종료 코드 */
 export type HookResult = { stdout?: string; stderr?: string; code?: number };
 
@@ -44,7 +44,7 @@ export function gaps(can: Can): string[] {
 /**
  * 커넥터: 한 AI 도구를 muwi에 끼우는 데 필요한 전부. 코어는 도구를 모르고, 도구마다 다른 것은 여기에 둔다.
  * 꼭 해야 하는 일은 넷이다: 넣기(install), 빼기(remove), 그 도구의 말을 공통 사건으로(from), 코어의 답을 그 도구의 말로(to).
- * 코어의 답은 "말해 주기(say)"와 "돌려보내기(stop)" 둘뿐이다
+ * 코어의 답은 "말해 주기(say)" 하나다. muwi는 AI가 하려는 일을 막지 않는다
  */
 export type Adapter = {
   /** 이 도구의 훅이 알려 주는 것 */

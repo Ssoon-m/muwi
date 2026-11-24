@@ -17,7 +17,7 @@ const WITH_SUBAGENTS = { ...EVENTS, subStart: 'SubagentStart', subStop: 'Subagen
 // ── Codex: ~/.codex/hooks.json. 파일을 고치는 도구는 apply_patch 하나이고(패치 글에 경로가 있다), 파일은 셸로 읽는다.
 //    훅은 /hooks에서 한 번 믿어 줘야 돈다
 export const codex = shaped(
-  { id: 'codex', on: WITH_SUBAGENTS, tools: { edit: ['apply_patch'], spawn: ['spawn_agent'], shell: ['Bash'], read: [] }, shellReads: true },
+  { id: 'codex', on: WITH_SUBAGENTS, tools: { shell: ['Bash'], read: [] }, shellReads: true },
   { file: 'hooks.json', wrap: 'hooks', matcher: 'list', extra: { timeout: 10 } },
 );
 
@@ -25,18 +25,18 @@ export const codex = shaped(
 export const qwen = shaped(
   {
     id: 'qwen', on: WITH_SUBAGENTS,
-    tools: { edit: ['edit', 'write_file', 'notebook_edit', 'replace'], spawn: ['agent', 'task'], shell: ['run_shell_command'], read: ['read_file'], skill: ['skill'] },
+    tools: { shell: ['run_shell_command'], read: ['read_file'], skill: ['skill'] },
   },
   { file: 'settings.json', wrap: 'hooks', matcher: 'regex', extra: { timeout: 10 } },
 );
 
 // ── Gemini CLI: ~/.gemini/settings.json. 사건 이름이 다르다 (BeforeTool, AfterTool, BeforeAgent). 서브에이전트를 알려 주는 사건이 없어서
-//    서브에이전트는 --sub로 밝힌 노드만 표시된다. 막을 때는 종료 코드 2와 표준 오류로 답한다 (그 글이 에이전트에게 간다). timeout은 밀리초다.
+//    서브에이전트는 --sub로 밝힌 노드만 표시된다. timeout은 밀리초다.
 //    셸 명령에는 세션 id를 넘겨주지 않아서 (GEMINI_SESSION_ID는 훅 프로세스에만 있다) 터미널을 세션으로 본다
 export const gemini = shaped(
   {
-    id: 'gemini', on: { start: 'SessionStart', prompt: 'BeforeAgent', before: 'BeforeTool', after: 'AfterTool' }, deny: 'exit2',
-    tools: { edit: ['write_file', 'replace'], spawn: [], shell: ['run_shell_command'], read: ['read_file'], skill: ['activate_skill'] },
+    id: 'gemini', on: { start: 'SessionStart', prompt: 'BeforeAgent', before: 'BeforeTool', after: 'AfterTool' },
+    tools: { shell: ['run_shell_command'], read: ['read_file'], skill: ['activate_skill'] },
   },
   { file: 'settings.json', wrap: 'hooks', matcher: 'regex', extra: { timeout: 10000 } },
 );
@@ -45,27 +45,27 @@ export const gemini = shaped(
 export const qodercli = shaped(
   {
     id: 'qodercli', on: WITH_SUBAGENTS,
-    tools: { edit: ['Edit', 'Write', 'NotebookEdit'], spawn: ['Agent'], shell: ['Bash'], read: ['Read'], skill: ['Skill'] },
+    tools: { shell: ['Bash'], read: ['Read'], skill: ['Skill'] },
   },
   { file: 'settings.json', wrap: 'hooks', matcher: 'regex', extra: { timeout: 10 } },
 );
 
-// ── Devin CLI: ~/.config/devin/config.json. 입력에 폴더가 없어 환경 변수에서 읽고, 막을 때는 종료 코드 2로 답한다
+// ── Devin CLI: ~/.config/devin/config.json. 입력에 폴더가 없어 환경 변수에서 읽는다
 export const devin = shaped(
   {
-    id: 'devin', on: EVENTS, deny: 'exit2',
-    tools: { edit: ['edit', 'write', 'apply_patch'], spawn: ['run_subagent'], shell: ['exec'], read: ['read'], skill: ['skill'] },
+    id: 'devin', on: EVENTS,
+    tools: { shell: ['exec'], read: ['read'], skill: ['skill'] },
     normalize: (p, env) => ({ ...p, cwd: p.cwd ?? env.DEVIN_PROJECT_DIR }),
   },
   { file: 'config.json', wrap: 'hooks', matcher: 'regex' },
 );
 
 // ── Letta Code: ~/.letta/settings.json. 입력의 이름이 다르고(event_type, working_directory), agent_id는 서브에이전트가 아니라
-//    Letta의 에이전트라서 뺀다. AI에게 줄 말은 표준 출력 그대로, 막을 때는 종료 코드 2. 시간은 밀리초다
+//    Letta의 에이전트라서 뺀다. AI에게 줄 말은 표준 출력 그대로. 시간은 밀리초다
 export const letta = shaped(
   {
-    id: 'letta', on: EVENTS, say: 'stdout', deny: 'exit2',
-    tools: { edit: ['Edit', 'Write', 'MultiEdit', 'ApplyPatch'], spawn: ['Task'], shell: ['Bash', 'exec_command'], read: ['Read'], skill: ['Skill'] },
+    id: 'letta', on: EVENTS, say: 'stdout',
+    tools: { shell: ['Bash', 'exec_command'], read: ['Read'], skill: ['Skill'] },
     normalize: p => ({ ...p, hook_event_name: p.hook_event_name ?? p.event_type, cwd: p.cwd ?? p.working_directory, session_id: p.session_id ?? p.conversation_id, agent_id: undefined }),
   },
   { file: 'settings.json', wrap: 'hooks', matcher: 'regex', extra: { timeout: 10000 } },
@@ -75,7 +75,7 @@ export const letta = shaped(
 export const grok = shaped(
   {
     id: 'grok', on: WITH_SUBAGENTS,
-    tools: { edit: ['search_replace', 'write'], spawn: ['spawn_subagent'], shell: ['run_terminal_command'], read: ['read_file'] },
+    tools: { shell: ['run_terminal_command'], read: ['read_file'] },
     normalize: p => ({ ...p, session_id: p.session_id ?? p.sessionId, agent_id: p.agent_id ?? p.subagentId, agent_type: p.agent_type ?? p.subagentType }),
   },
   { file: path.join('hooks', 'muwi.json'), wrap: 'hooks', matcher: 'regex', extra: { timeout: 10 } },
@@ -86,7 +86,7 @@ export const grok = shaped(
 //    서브에이전트가 시작하는 사건이 없고 끝나는 사건에도 id가 없어 서브에이전트는 잇지 못한다
 const DROID: Shape = {
   id: 'droid', on: EVENTS,
-  tools: { edit: ['Edit', 'Create', 'ApplyPatch'], spawn: ['Task'], shell: ['Execute'], read: ['Read'], skill: ['Skill'] },
+  tools: { shell: ['Execute'], read: ['Read'], skill: ['Skill'] },
 };
 export const droid: Adapter = {
   can: canOf(DROID),
@@ -109,7 +109,7 @@ export const droid: Adapter = {
 export const copilot = flatShaped(
   {
     id: 'copilot', on: EVENTS, flat: true,
-    tools: { edit: ['Edit', 'Write'], spawn: ['Agent'], shell: ['Bash'], read: ['Read'], skill: ['skill', 'Skill'] },
+    tools: { shell: ['Bash'], read: ['Read'], skill: ['skill', 'Skill'] },
   },
   { file: path.join('hooks', 'muwi.json'), matcher: 'regex', version: true, each: { type: 'command', timeoutSec: 10 } },
 );
@@ -119,10 +119,9 @@ export const cursor = flatShaped(
   {
     id: 'cursor',
     on: { start: 'sessionStart', prompt: 'beforeSubmitPrompt', before: 'preToolUse', after: 'postToolUse', subStart: 'subagentStart', subStop: 'subagentStop' },
-    tools: { edit: ['Write', 'Delete'], spawn: ['Task'], shell: ['Shell'], read: ['Read'] },
+    tools: { shell: ['Shell'], read: ['Read'] },
     normalize: p => ({ ...p, session_id: p.conversation_id ?? p.session_id, agent_id: p.agent_id ?? p.subagent_id }),
     reply(h: Happened, r: Reply): HookResult {
-      if (r.stop) return { stdout: JSON.stringify({ permission: 'deny', agent_message: r.stop, user_message: r.stop }) };
       if (r.say && h.kind === 'session-start') return { stdout: JSON.stringify({ additional_context: r.say }) };
       return {};
     },
@@ -134,8 +133,8 @@ export const cursor = flatShaped(
 //    시작할 때는 대화 id 자리에 임시 값이 온다
 export const mastracode = flatShaped(
   {
-    id: 'mastracode', on: EVENTS, deny: 'exit2',
-    tools: { edit: ['string_replace_lsp', 'ast_smart_edit', 'write_file'], spawn: ['subagent'], shell: ['execute_command'], read: ['view'] },
+    id: 'mastracode', on: EVENTS,
+    tools: { shell: ['execute_command'], read: ['view'] },
     normalize: p => ({ ...p, session_id: p.session_id === 'session-init' ? undefined : p.session_id }),
   },
   { file: 'hooks.json', matcher: 'regex', bare: true, each: { type: 'command', timeout: 10000 }, matcherAs: m => ({ tool_name: m }) },
@@ -145,7 +144,7 @@ export const mastracode = flatShaped(
 //    세션이 시작될 때의 출력은 버려지므로 지침은 AGENTS.md로 들어가고, 사람이 말할 때의 말은 표준 출력 그대로 넣는다
 const KIMI: Shape = {
   id: 'kimi', on: EVENTS, say: 'stdout',
-  tools: { edit: ['Edit', 'Write'], spawn: ['Agent', 'AgentSwarm'], shell: ['Bash'], read: ['Read'], skill: ['Skill'] },
+  tools: { shell: ['Bash'], read: ['Read'], skill: ['Skill'] },
 };
 const TOML_START = '# muwi:start (muwi setup이 넣은 구간. 고치지 말고 muwi setup을 다시 실행해요)';
 const TOML_END = '# muwi:end';
@@ -189,7 +188,7 @@ export const kimi: Adapter = {
 //    사람이 말할 때의 사건이 없다
 const AGY: Shape = {
   id: 'antigravity-cli', on: { start: 'SessionStart', before: 'PreToolUse', after: 'PostToolUse' },
-  tools: { edit: ['write_to_file', 'replace_file_content', 'multi_replace_file_content'], spawn: ['invoke_subagent'], shell: ['run_command'], read: ['view_file'] },
+  tools: { shell: ['run_command'], read: ['view_file'] },
   normalize: p => ({
     hook_event_name: p.hook_event_name,
     session_id: p.conversationId,
@@ -199,7 +198,6 @@ const AGY: Shape = {
     tool_input: { file_path: p.toolCall?.args?.TargetFile ?? p.toolCall?.args?.AbsolutePath, command: p.toolCall?.args?.CommandLine },
   }),
   reply(h: Happened, r: Reply): HookResult {
-    if (r.stop) return { stdout: JSON.stringify({ decision: 'deny', reason: r.stop }) };
     if (r.say && h.kind === 'session-start') return { stdout: JSON.stringify({ injectSteps: [{ systemMessage: { systemMessage: r.say } }] }) };
     return { stdout: '{}' };
   },
@@ -221,7 +219,6 @@ export const antigravity: Adapter = {
     const only = (names: string[]) => `^(${names.join('|')})$`;
     const muwi = {
       SessionStart: [run('', 'SessionStart')],
-      PreToolUse: [{ matcher: only([...AGY.tools.edit, ...AGY.tools.spawn]), hooks: [run(' nudge', 'PreToolUse')] }],
       PostToolUse: [{ matcher: only(AGY.tools.read), hooks: [run('', 'PostToolUse')] }],
     };
     backup(file);
