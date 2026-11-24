@@ -111,7 +111,7 @@ test('읽은 skill: 도구마다 다른 입력에서 같은 사건으로 바꾼�
 });
 
 for (const tool of TOOLS.filter(t => ADAPTERS[t.id])) {
-  test(`${tool.id} 통합: muwi setup --tool이 지침·사용법 skill·훅을 넣고, --remove가 우리 것만 뺀다`, () => {
+  test(`${tool.id} 커넥터: muwi setup --tool이 지침·사용법 skill·훅을 넣고, --remove가 우리 것만 뺀다`, () => {
     const home = tmp('home'), records = path.join(home, '.muwi');
     const env = ENV(home);
     const at = toolHome(tool, env, home);

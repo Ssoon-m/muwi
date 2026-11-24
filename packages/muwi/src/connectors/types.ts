@@ -1,4 +1,4 @@
-// 도구 통합이 구현하는 것. 코어(events.ts)는 공통 사건만 알고, 도구마다 다른 것은 여기서 번역한다.
+// 커넥터가 구현하는 것. 코어(events.ts)는 공통 사건만 알고, 도구마다 다른 것은 여기서 번역한다.
 import type { Happened, Reply } from '../events.ts';
 
 /** 훅이 불린 갈래. 도구가 사건을 나눠 걸 수 있으면 갈래마다 따로 건다 (볼 필요 없는 호출을 줄인다) */
@@ -15,7 +15,7 @@ export type SetupCtx = {
   /** 그 도구의 설정 폴더 */
   home: string;
 };
-/** 통합이 그 도구에 넣은 것. 다음 실행과 제거가 이걸 본다 */
+/** 커넥터가 그 도구에 넣은 것. 다음 실행과 제거가 이걸 본다 */
 export type Wired = { files?: string[]; settings?: string[] };
 
 /**

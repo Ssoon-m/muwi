@@ -814,7 +814,7 @@ export default class Muwi extends View {
     return v_flex().p(14).gap(6).text_size(12)
       .child(div().text_color(t.blocked).font_semibold().child("기록을 읽지 못했어요"))
       .child(div().text_color(t.muted).child(this.error ?? ""))
-      .child(div().text_color(t.dim).child("Claude Code 세션에서 muwi setup을 실행하면 ~/.local/bin/muwi가 생겨요 (Windows는 muwi.cmd)."));
+      .child(div().text_color(t.dim).child("터미널에서 muwi setup을 실행하세요. 이 칸이 쓰는 ~/.local/bin/muwi(Windows는 muwi.cmd)를 넣고, 화면의 자리를 다시 적어 둡니다."));
   }
 
   /**

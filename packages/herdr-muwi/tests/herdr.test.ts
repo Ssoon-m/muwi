@@ -9,6 +9,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { handleHook } from 'muwi/hook';
 import { setHost } from 'muwi/host';
+import { SCREEN_COMMANDS } from 'muwi/kit';
 import { markNode } from 'muwi/node';
 import { attach, readSession, touchSession } from 'muwi/session';
 import { modelIn } from 'muwi/connectors/tools';
@@ -410,4 +411,8 @@ test('지난 작업: 끝났거나 멈춘 채로 오래된 작업은 접는다. �
   // (명령은 지금 시각으로 본다: 방금 만든 작업들은 모두 "지금"이다)
   assert.match(run(['status']).stdout, /멈춤 +old-stalled[^\n]*\n +● n +n \(세션이 닫힘\)/);
   assert.doesNotMatch(run(['status']).stdout, /지난 작업/);
+});
+
+test('코어가 아는 화면 명령의 이름(코어만 깐 사람에게 herdr-muwi에 있다고 알려 준다)과 Herdr 화면이 더하는 명령이 같다', () => {
+  assert.deepEqual(Object.keys(herdr.commands ?? {}).sort(), [...SCREEN_COMMANDS].sort());
 });

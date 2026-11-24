@@ -135,7 +135,7 @@ export function adoptSpawn(dir: string, key: string, env: NodeJS.ProcessEnv): st
 }
 
 /**
- * 도구에서 일어난 일. 도구의 통합이 그 도구의 훅 입력을 이 모양으로 바꿔 준다.
+ * 도구에서 일어난 일. 도구의 커넥터가 그 도구의 훅 입력을 이 모양으로 바꿔 준다.
  * tool: 알린 도구, session: 그 대화 (모르면 null), agent: 서브에이전트 안에서 일어났으면 그 id, cwd: 그 세션이 일하는 폴더,
  * model: 그 세션이 쓰는 모델 (도구가 알려 줄 때), native: 터미널을 세션으로 볼 때 그 도구가 붙인 대화 id
  */
@@ -152,7 +152,7 @@ export type Happened = { tool: Session['tool']; session: string | null; agent?: 
   | { kind: 'subagent-end'; agentKind?: string }
 );
 
-/** 코어가 도구에 돌려주는 말. 통합이 그 도구가 알아듣는 형식으로 바꾼다 */
+/** 코어가 도구에 돌려주는 말. 커넥터가 그 도구가 알아듣는 형식으로 바꾼다 */
 export type Reply = {
   /** AI에게 보여 줄 말 (지침, 맡은 노드) */
   say?: string;

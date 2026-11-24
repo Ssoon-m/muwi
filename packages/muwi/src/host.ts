@@ -28,6 +28,8 @@ export type Host = {
   place(env: NodeJS.ProcessEnv): Place | null;
   /** 세션이 시작됐다. 그 자리에 세션 이름을 붙여 둔다 (그 자리에서 지금 도는 세션이 누구인지, 아직 살아 있는지 볼 때 쓴다) */
   sessionStarted(key: string, env: NodeJS.ProcessEnv): void;
+  /** 이 화면이 지은 세션 이름(place의 key)을 사람이 읽을 짧은 이름으로. 이 화면이 지은 이름이 아니면 null */
+  label?(key: string): string | null;
   /** 이 자리가 맡긴 노드를 하라고 띄운 자리면 그 작업과 노드 */
   assigned(env: NodeJS.ProcessEnv): Assigned | null;
   /** 세션들이 지금 어떤가. 판단할 수 없는 세션은 어느 쪽에도 넣지 않는다 */

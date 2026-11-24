@@ -30,6 +30,8 @@ const herdr: Host = {
     if (env.HERDR_PANE_ID) return { key: `herdr-${env.HERDR_PANE_ID}`, pane: env.HERDR_PANE_ID };
     return null;
   },
+  // place가 지은 이름에서 터미널(pane) 주소만 보여 준다
+  label: key => /^(?:hc|herdr)-(.+)$/.exec(key)?.[1] ?? null,
   // 이 터미널에서 지금 도는 세션이 누구인지 붙여 둔다. 나중에 "그 세션이 아직 살아 있나"를 볼 때 쓴다.
   // 같은 터미널에서 /clear 하거나 새로 띄우면 여기서 새 이름으로 바뀌고, 앞 세션은 닫힌 것으로 보인다
   sessionStarted(key, env) {

@@ -100,7 +100,7 @@ test('muwi setup: 있는 도구에만 넣고, 무엇을 넣었는지 적어 둔�
   assert.ok(fs.readFileSync(bin, 'utf8').includes(`MUWI_SETUP_NODE="${posix(process.execPath)}" exec "${posix(path.join(ROOT, 'bin', 'muwi'))}"`));
   // Windows는 실행 권한 비트가 없다 (Git Bash는 #! 줄을 보고 실행한다)
   if (process.platform !== 'win32') assert.ok(fs.statSync(bin).mode & 0o100);
-  // 화면이 없으면 화면은 넣지 않는다. Codex가 없으면 건너뛴다. Claude Code 설정은 플러그인 몫이라 건드리지 않는다
+  // 화면이 없으면 화면은 넣지 않는다. Codex가 없으면 건너뛴다. 고르지 않은 도구(Claude Code 포함)에는 커넥터를 넣지 않는다
   assert.equal(install.host, undefined);
   assert.equal(install.hosted, undefined);
   assert.equal(install.codex, undefined);
@@ -130,7 +130,7 @@ test('muwi setup: --codex를 주면 Codex 지침·skill을 넣고, --remove로 �
   assert.equal(readInstall(h.records), null);
 });
 
-test('muwi setup --claude: 플러그인 없이 쓸 때 훅과 사용법 skill을 직접 넣는다', () => {
+test('muwi setup --claude (옛 이름, 지금은 --tool claude): Claude Code에 훅과 사용법 skill을 넣는다', () => {
   const h = home();
   fs.mkdirSync(path.join(h.dir, '.claude'));
   fs.writeFileSync(path.join(h.dir, '.claude', 'settings.json'), '{"model":"opus"}');

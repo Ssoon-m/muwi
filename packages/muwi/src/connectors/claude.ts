@@ -1,7 +1,7 @@
 // Claude Code 커넥터: Claude Code의 훅 입력을 코어의 공통 사건으로 바꾸고, 코어의 답을 Claude Code가 알아듣는 형식으로 바꾼다.
 // 코어(events.ts)는 Claude Code의 훅 이름·도구 이름을 모른다.
 //   훅은 ~/.claude/settings.json에 두 갈래로 건다:
-//     record: SessionStart, UserPromptSubmit, SubagentStart/Stop, PostToolUse(Skill|Read)
+//     record: SessionStart, SubagentStart/Stop, PostToolUse(Skill|Read). 사람이 말할 때(UserPromptSubmit)는 걸지 않는다
 //     command: PreToolUse(Bash)
 import path from 'node:path';
 import { skillFromPath, type Happened, type Reply } from '../events.ts';
@@ -33,7 +33,7 @@ export const uninstallHooks = (settingsFile: string) => uninstallEntries(setting
 /** Claude Code 훅 입력 → 공통 사건. 코어가 볼 일이 아니면 null */
 export function fromClaude(payload: any, mode: HookMode, env: NodeJS.ProcessEnv = process.env): Happened | null {
   if (payload == null || typeof payload !== 'object') return null;
-  // Cursor는 Claude Code의 설정(~/.claude/settings.json)에 건 훅도 돌린다. 그건 Cursor 통합이 따로 본다
+  // Cursor는 Claude Code의 설정(~/.claude/settings.json)에 건 훅도 돌린다. 그건 Cursor 커넥터가 따로 본다
   if (payload.cursor_version) return null;
   const event = payload.hook_event_name;
   const tool = payload.tool_name;

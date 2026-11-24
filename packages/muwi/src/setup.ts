@@ -32,7 +32,7 @@ export type Install = {
   hosted?: HostInstall;
   /** 0.6.0까지의 기록: 넣은 Herdr 앱 칸 */
   herdr?: string;
-  /** 통합을 넣은 도구들 (도구 id → 넣은 것) */
+  /** 커넥터를 넣은 도구들 (도구 id → 넣은 것) */
   tools?: Record<string, ToolInstall>;
   /** 0.5.x의 기록. tools.codex, tools.claude와 같은 것을 옛 이름으로도 남긴다 */
   codex?: { agents: string; skill: string };
@@ -192,7 +192,7 @@ export function runSetup(o: SetupOptions): Install {
     const done = installTool(tool, { root: o.root, env, platform, home: toolHome(tool, env, p.home) }, p.home, block, skill);
     if (tool.note) log(`  ${tool.note}`);
     install.tools = { ...(install.tools ?? {}), [tool.id]: done };
-    log(`${tool.name} 통합: ${[done.instructions, done.skill, ...(done.settings ?? []), ...(done.files ?? [])].filter(Boolean).join(', ')}`);
+    log(`${tool.name} 커넥터: ${[done.instructions, done.skill, ...(done.settings ?? []), ...(done.files ?? [])].filter(Boolean).join(', ')}`);
   }
   // 0.5.x가 읽던 이름으로도 남긴다
   const codex = install.tools?.codex, claude = install.tools?.claude;
@@ -204,7 +204,7 @@ export function runSetup(o: SetupOptions): Install {
   return install;
 }
 
-/** 한 도구에 통합을 넣는다: 지침(늘 읽히는 파일이 있으면), 사용법 skill, 훅 */
+/** 한 도구에 커넥터를 넣는다: 지침(늘 읽히는 파일이 있으면), 사용법 skill, 훅 */
 function installTool(tool: Tool, ctx: { root: string; env: NodeJS.ProcessEnv; platform: NodeJS.Platform; home: string }, userHome: string, block: string, skill: string): ToolInstall {
   const done: ToolInstall = {};
   if (tool.instructions) {

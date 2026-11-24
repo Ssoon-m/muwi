@@ -23,6 +23,12 @@ process.stdout.on('error', (e: NodeJS.ErrnoException) => {
 /** 값을 받는 코어 명령의 옵션 (--work <이름> 같은 것). 나머지 옵션은 켜고 끄는 것으로 읽는다 */
 export const VALUED: ReadonlySet<string> = new Set(['work', 'request', 'title', 'why', 'by', 'file', 'after', 'before', 'result', 'run', 'show', 'from', 'event', 'tool']);
 
+/**
+ * Herdr 화면(herdr-muwi)이 더하는 명령의 이름. 코어만 깐 사람이 이 명령을 치면 어느 패키지에 있는지 알려 주려고 이름만 둔다.
+ * herdr-muwi의 시험이 이 목록과 화면이 더하는 명령이 같은지 본다
+ */
+export const SCREEN_COMMANDS: ReadonlySet<string> = new Set(['board', 'layout', 'open', 'run', 'tidy']);
+
 /** 명령의 인자를 읽는다. valued: 값을 받는 옵션들 (화면이 더하는 명령은 자기 옵션을 더해서 준다) */
 export function parseArgs(argv: string[], valued: ReadonlySet<string> = VALUED) {
   const pos: string[] = [];

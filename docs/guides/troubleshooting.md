@@ -16,6 +16,8 @@ hc exec '$HOME/.local/bin/muwi --version'   # Herdr가 띄우는 세션에서도
 
 터미널에서 `muwi setup`을 실행하세요. AI에게 "muwi setup 실행해줘"라고 해도 됩니다.
 
+칸에 "화면을 불러오지 못했어요: <경로>"가 같이 나오면, `muwi setup`이 적어 둔 Herdr 화면(herdr-muwi)이 그 자리에 없는 것입니다. herdr-muwi를 지웠거나 다른 자리(다른 Node 버전)에 다시 깔았을 때 그렇습니다. 지금 깔린 herdr-muwi의 `muwi`로 `muwi setup`을 다시 실행하면 새 자리를 적습니다 ([다른 자리에 새로 깔았을 때](../reference/setup.md#업데이트하기)). 세션이 시작될 때 같은 내용이 `~/.muwi/.hook-errors.log`에도 남습니다.
+
 ## 그래프 칸이 화면에 보이지 않을 때
 
 `muwi setup`은 그래프 칸을 설치만 하고 화면에는 넣지 않습니다. 화면에 넣으세요.

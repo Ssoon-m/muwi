@@ -1,8 +1,8 @@
-// Claude Code와 같은 모양의 훅을 쓰는 도구들의 통합. 여러 도구가 그 모양을 따른다:
+// Claude Code와 같은 모양의 훅을 쓰는 도구들의 커넥터. 여러 도구가 그 모양을 따른다:
 //   설정 파일의 사건 표에 { matcher, hooks: [{ type: "command", command }] }를 걸고,
 //   훅은 표준 입력으로 JSON(hook_event_name, session_id, tool_name, tool_input …)을 받고,
 //   표준 출력의 JSON(hookSpecificOutput)이나 종료 코드로 답한다.
-// 도구마다 다른 것(파일 자리, 사건 이름, 도구 이름, 답하는 법)만 표(Shape)로 받아서 통합을 만든다.
+// 도구마다 다른 것(파일 자리, 사건 이름, 도구 이름, 답하는 법)만 표(Shape)로 받아서 커넥터를 만든다.
 // 플러그인으로 붙는 도구(OpenCode, Pi …)도 그 플러그인이 같은 모양의 JSON을 넘기므로 이 번역기를 같이 쓴다.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -122,7 +122,7 @@ export function toShaped(shape: Shape, h: Happened, r: Reply): HookResult {
 export const toolCommand = (root: string, id: string, platform: NodeJS.Platform = process.platform) =>
   `${HOOK_MARK} sh "${shPath(path.join(root, 'hooks', 'tool.sh'), platform)}" ${id}`;
 
-/** 걸 훅들. Claude Code 통합과 같은 두 갈래다 (기록, 셸 명령 앞). 사람이 말할 때와 파일을 고치기 전에는 걸지 않는다 */
+/** 걸 훅들. Claude Code 커넥터와 같은 두 갈래다 (기록, 셸 명령 앞). 사람이 말할 때와 파일을 고치기 전에는 걸지 않는다 */
 export function shapedEntries(shape: Shape, wiring: Wiring, command: string): HookEntry[] {
   const { on, tools } = shape;
   const match = (names: string[]) => (wiring.matcher === 'none' || !names.length ? undefined : wiring.matcher === 'regex' ? `^(${names.join('|')})$` : names.join('|'));
@@ -139,7 +139,7 @@ export function shapedEntries(shape: Shape, wiring: Wiring, command: string): Ho
   ];
 }
 
-/** 설정 파일에 훅을 거는 통합 */
+/** 설정 파일에 훅을 거는 커넥터 */
 export function shaped(shape: Shape, wiring: Wiring): Adapter {
   const bare = wiring.wrap === 'bare';
   return {
@@ -166,7 +166,7 @@ export function canOf(shape: Pick<Shape, 'on' | 'tools' | 'shellReads'>): Can {
   };
 }
 
-/** 훅을 한 줄씩 납작하게 적는 파일에 거는 통합 (flat.ts) */
+/** 훅을 한 줄씩 납작하게 적는 파일에 거는 커넥터 (flat.ts) */
 export function flatShaped(shape: Shape, o: { file: string; matcher: Wiring['matcher']; each?: Record<string, unknown>; bare?: boolean; version?: boolean; matcherAs?: (m: string) => unknown }): Adapter {
   return {
     install(ctx: SetupCtx) {
@@ -194,7 +194,7 @@ export const PLUGIN_SHAPE = {
 const HOOK_SLOT = '__MUWI_HOOK__';
 
 /**
- * 플러그인(확장) 파일로 붙는 도구의 통합. 그 도구의 플러그인 폴더에 우리 파일을 넣는다 (muwi 설치 위치의 connectors/<도구>/).
+ * 플러그인(확장) 파일로 붙는 도구의 커넥터. 그 도구의 플러그인 폴더에 우리 파일을 넣는다 (muwi 설치 위치의 connectors/<도구>/).
  * 플러그인은 그 도구의 사건을 Claude Code와 같은 모양의 JSON으로 바꿔 hooks/tool.sh <도구> [갈래]에 넘기고, 답을 그 도구에 적용한다.
  * to: 설정 폴더 기준으로 넣을 폴더. files: 넣을 파일들 (connectors/<도구>/ 기준)
  */

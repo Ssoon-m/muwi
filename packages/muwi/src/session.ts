@@ -161,10 +161,10 @@ export function recentSessions(dir: string, since: number): SessionLink[] {
   return out.sort((a, b) => (a.seenAt < b.seenAt ? 1 : a.seenAt > b.seenAt ? -1 : 0));
 }
 
-/** 화면에 보여 줄 짧은 이름: 터미널 주소가 있으면 그것, 없으면 세션 id 앞 네 글자 */
+/** 화면에 보여 줄 짧은 이름: 터미널 주소가 있으면 그것, 화면이 지은 이름이면 화면이 정한 것, 그 밖에는 세션 id 앞 네 글자 */
 export function sessionLabel(s: Pick<Session, 'key' | 'terminal' | 'herdrPane'> | null | undefined, key: string | null): string {
   if (!key) return '';
   if (s?.terminal) return s.terminal;
   if (s?.herdrPane) return s.herdrPane;
-  return key.replace(/^(hc|herdr)-/, '').slice(0, 4);
+  return host().label?.(key) ?? key.slice(0, 4);
 }

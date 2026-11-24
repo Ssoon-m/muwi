@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, adoptSpawn, guideUpdate, handleHook, sessionInstructions } from './hook.ts';
 import { host, hostFailure, loadHost } from './host.ts';
-import { Fail, dur, join, needPlan, out, parseArgs, resolveWork, str, type Args } from './kit.ts';
+import { Fail, dur, join, needPlan, out, parseArgs, resolveWork, str, type Args, SCREEN_COMMANDS } from './kit.ts';
 import { fromSubagent, markNode } from './node.ts';
 import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
 import { readSession, sessionKey, sessionLabel } from './session.ts';
@@ -50,8 +50,8 @@ const HELP = `사용법: muwi <명령>
 
   설치와 설정
   muwi setup                         터미널용 muwi 명령과 화면(Herdr 앱의 그래프 칸)을 넣는다
-  muwi setup --tools                 아는 AI 도구와, 깔렸는지, muwi 통합을 넣었는지 본다
-  muwi setup --tool <도구>[,<도구>]   그 AI 도구에 muwi 통합(지침·사용법 skill·훅)을 넣는다
+  muwi setup --tools                 아는 AI 도구와, 깔렸는지, muwi 커넥터를 넣었는지 본다
+  muwi setup --tool <도구>[,<도구>]   그 AI 도구에 muwi 커넥터(지침·사용법 skill·훅)를 넣는다
   muwi setup --all                   이 컴퓨터에 깔린 도구 전부에 넣는다
   muwi setup --remove                setup으로 넣은 것을 뺀다 (muwi layout으로 바꾼 화면도 되돌린다)
   muwi config [<이름> on|off]         설정을 보고 켜고 끈다 (화면이 정하는 설정)
@@ -567,11 +567,11 @@ function cmdSetup(a: Args, dir: string) {
   // 화면이 넣은 것(Herdr 앱의 칸, 바꾼 레이아웃)은 화면이 뺀다
   if (a.flags.remove) return removeSetup(dir, out);
   if (a.flags.tools) {
-    // 아는 도구와, 이 컴퓨터에 깔렸는지, muwi 통합을 넣었는지
+    // 아는 도구와, 이 컴퓨터에 깔렸는지, muwi 커넥터를 넣었는지
     const have = new Set(installedTools().map(t => t.id));
     const done = readInstall(dir)?.tools ?? {};
     for (const t of TOOLS) {
-      const state = done[t.id] ? '통합 넣음' : t.id === 'claude' && !have.has(t.id) ? '없음' : have.has(t.id) ? '깔려 있음' : '없음';
+      const state = done[t.id] ? '커넥터 넣음' : have.has(t.id) ? '깔려 있음' : '없음';
       // 그 도구의 훅이 알려 주지 않는 것 (커넥터의 선언에서 만든다). 비어 있으면 다 알려 준다
       const lacks = gaps(adapterOf(t.id)?.can ?? { subagents: false, start: false, skills: false }).join(' · ');
       out(`${t.id.padEnd(16)} ${t.name.padEnd(18)} ${state.padEnd(6)}${lacks ? `  ${lacks}` : ''}`);
@@ -690,9 +690,6 @@ const help = () => {
   return `${HELP.slice(0, at)}\n${extra}\n${HELP.slice(at)}`;
 };
 
-/** 화면(Herdr)이 더하는 명령. 화면 없이 부르면 무엇이 필요한지 알린다 */
-const HOSTED = new Set(['board', 'layout', 'open', 'run', 'tidy']);
-
 /** 맡은 세션이 처음 실행할 만한 명령들: 맡은 노드의 진행을 적는 명령 */
 const ADOPTS = new Set(['node', 'start', 'done', 'wait', 'block', 'add', 'remove']);
 
@@ -723,7 +720,7 @@ async function run(cmd: string | undefined, a: Args, dir: string) {
     case undefined: case 'help': case '--help': case '-h': return out(help());
     default:
       // 화면이 더하는 명령인데 화면이 없다
-      if (cmd && HOSTED.has(cmd)) {
+      if (cmd && SCREEN_COMMANDS.has(cmd)) {
         const failed = hostFailure();
         if (failed) throw new Fail(`muwi ${cmd}는 화면이 더하는 명령인데, 화면을 불러오지 못했어요: ${failed.from} (${failed.reason}). 화면 패키지를 옮겼으면 그 패키지의 muwi로 muwi setup을 다시 실행하세요.`);
         throw new Fail(`muwi ${cmd}는 Herdr 앱 화면과 함께 쓰는 명령이에요. herdr-muwi로 깔면 생겨요.`);
