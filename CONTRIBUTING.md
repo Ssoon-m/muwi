@@ -28,7 +28,8 @@ node packages/herdr-muwi/bin/muwi.js <명령>           # 깔지 않고 이 저�
 | 경로 | 내용 |
 | --- | --- |
 | `packages/muwi/` | 코어 (npm 이름 `muwi`). 의존 패키지가 없습니다 |
-| `packages/muwi/bin/muwi` | 명령. `src/cli.ts`(배포된 사본은 `src/cli.js`)를 Node로 실행합니다 |
+| `packages/muwi/bin/muwi.js` | npm이 PATH에 거는 `muwi` 명령. `src/cli.ts`(배포된 사본은 `src/cli.js`)를 실행합니다 |
+| `packages/muwi/bin/muwi` | sh 입구. `~/.local/bin/muwi`와 훅이 실제 경로로 부릅니다. 셸 설정이 없는 곳에서도 Node를 찾습니다 |
 | `packages/muwi/src/find-node.sh` | 셸 설정 없이 실행될 때 로그인 셸에 물어 Node 24 이상을 찾고 캐시합니다 (명령과 훅이 함께 씁니다) |
 | `packages/muwi/src/cli.ts`, `src/kit.ts` | 명령 처리, 명령들이 같이 쓰는 것 (화면이 더하는 명령도 쓴다) |
 | `packages/muwi/src/host.ts` | 화면 규격. 화면은 `$MUWI_HOST`나 `setup.json`에 적힌 경로에서 불러옵니다 |

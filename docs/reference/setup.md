@@ -192,12 +192,12 @@ Windows에서도 같은 방법으로 설치합니다. 다른 점은 이렇습니
 | 항목 | Windows에서 |
 | --- | --- |
 | 훅 | Claude Code가 Git Bash로 실행합니다. Git for Windows가 없으면 훅이 돌지 않아 진행이 기록되지 않습니다. 훅이 실패해도 작업은 막지 않습니다 |
-| AI 도구 안의 `muwi` 명령 | npm이 넣은 `muwi`를 씁니다. Git Bash는 sh 입구를, PowerShell과 cmd는 `muwi.cmd`를 씁니다 |
+| AI 도구 안의 `muwi` 명령 | npm이 PATH에 건 `muwi`를 씁니다. npm이 만든 `muwi.cmd`(PowerShell·cmd)와 `muwi`(Git Bash)가 Node로 패키지의 명령을 실행합니다 |
 | 터미널용 명령 | `muwi setup`이 `%USERPROFILE%\.local\bin`에 `muwi`(Git Bash용)와 `muwi.cmd`(PowerShell·cmd용)를 넣습니다. 이 폴더가 PATH에 없으면 추가하세요 |
 | 그래프 칸 | `muwi.cmd`로 기록을 읽습니다 |
 | 줄바꿈 | 저장소의 `.gitattributes`가 스크립트를 LF로 받게 합니다. `core.autocrlf` 설정과 상관없이 Git Bash에서 깨지지 않습니다 |
 
-GitHub Actions의 Windows에서 시험 전체를 돌리고, Git Bash로 훅을, PowerShell과 cmd로 `muwi.cmd`를 실제로 실행해 확인합니다. Windows용 Herdr 앱에서 그래프 칸이 도는지와 실제 Claude Code 세션이 훅을 부르는 것은 아직 확인하지 못했습니다. 문제가 있으면 [이슈](https://github.com/Ssoon-m/muwi/issues)로 알려 주세요.
+GitHub Actions의 Windows에서 시험 전체를 돌리고, 두 패키지를 하나씩 `npm i -g`로 깔아 npm이 만든 `muwi.cmd`로 실행해 봅니다. Git Bash로 훅을, PowerShell과 cmd로 `muwi setup`이 넣은 `muwi.cmd`를 실제로 실행해 확인합니다. Windows용 Herdr 앱에서 그래프 칸이 도는지와 실제 Claude Code 세션이 훅을 부르는 것은 아직 확인하지 못했습니다. 문제가 있으면 [이슈](https://github.com/Ssoon-m/muwi/issues)로 알려 주세요.
 
 ## 업데이트하기
 

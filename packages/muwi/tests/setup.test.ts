@@ -200,15 +200,14 @@ test('muwi setup (Windows): PowerShell·cmd에서 쓸 muwi.cmd를 넣고, 뺄 �
   assert.equal(fs.existsSync(cmd), false);
 });
 
-test('플러그인의 bin/muwi.cmd: CRLF로 cli.ts를 실행한다 (Windows의 PowerShell·cmd)', () => {
-  const file = path.join(ROOT, 'bin', 'muwi.cmd');
-  const text = fs.readFileSync(file, 'utf8');
-  assert.equal(/[^\r]\n/.test(text), false);
-  assert.ok(text.includes('node "%~dp0..\\src\\cli.ts" %*'));
-  if (process.platform === 'win32') {
-    const r = spawnSync('cmd.exe', ['/d', '/c', file, '--version'], { encoding: 'utf8' });
-    assert.match(r.stdout, /^\d+\.\d+\.\d+/, r.stderr);
-  }
+test('npm이 거는 muwi 명령(bin/muwi.js): 다른 폴더에 걸린 링크로 실행해도 패키지의 명령을 찾는다', { skip: process.platform === 'win32' && '링크 대신 npm이 만든 muwi.cmd를 쓴다 (패키지 확인에서 실행해 본다)' }, () => {
+  // npm i -g는 <prefix>/bin/muwi를 패키지의 bin 파일로 가는 링크로 건다. 링크가 있는 폴더를 기준으로 찾으면 실행되지 않는다
+  const bin = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-bin-')), 'bin');
+  fs.mkdirSync(bin);
+  fs.symlinkSync(path.join(ROOT, 'bin', 'muwi.js'), path.join(bin, 'muwi'));
+  const r = spawnSync(process.execPath, [path.join(bin, 'muwi'), '--version'], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version);
 });
 
 test('설치 기록은 setup.json에 적는다: install.json만 보는 옛 훅(0.4.0·0.5.0)이 새 설치를 되돌리지 못한다', () => {
