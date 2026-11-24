@@ -8,7 +8,7 @@ const C = {
   bg: '#1a1c21', side: '#202329', divider: '#2a2e36', canvas: '#1f2228', term: '#16181c',
   text: '#5b6270', faint: '#383d47',
   node: '#272b33', nodeEdge: '#363b45', doingFill: '#2e2a20',
-  blue: '#61afef', yellow: '#e5c07b', red: '#e06c75', green: '#98c379',
+  blue: '#61afef', yellow: '#e5c07b', purple: '#c678dd', green: '#98c379',
 };
 
 type Box = { x: number; y: number; w: number; h: number };
@@ -27,7 +27,7 @@ export function layoutPreview(where: GraphAt = 'bottom'): string {
   // 작업 목록: 응답 대기 · 작업 중 · 새 결과 · 끝 · 끝
   rect({ x: 0, y: 0, w: 80, h: 200 }, C.side);
   rect({ x: 80, y: 0, w: 1.5, h: 200 }, C.divider);
-  const rows: [string, number, string][] = [[C.red, 38, C.text], [C.yellow, 30, C.text], [C.blue, 42, C.text], [C.faint, 34, C.faint], [C.faint, 26, C.faint]];
+  const rows: [string, number, string][] = [[C.purple, 38, C.text], [C.yellow, 30, C.text], [C.blue, 42, C.text], [C.faint, 34, C.faint], [C.faint, 26, C.faint]];
   rows.forEach(([color, w, line], i) => {
     const y = 52 + i * 24;
     dot(18, y, 4, color);

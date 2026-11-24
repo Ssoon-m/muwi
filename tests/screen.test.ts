@@ -335,6 +335,10 @@ test('muwi setup: 그림 없이 만든 muwi 레이아웃(0.5.24까지)에 그림
   assert.equal(screenState(h.records, h.env).edited, false);
   // 이미 있으면 다시 쓰지 않는다
   assert.equal(ensurePreview(h.records, h.env), false);
+  // 옛 판의 그림이면 그림 파일만 새 그림으로 바꾼다
+  fs.writeFileSync(path.join(h.app, 'layouts', 'muwi.svg'), '<svg/>');
+  assert.equal(ensurePreview(h.records, h.env), true);
+  assert.equal(fs.readFileSync(path.join(h.app, 'layouts', 'muwi.svg'), 'utf8'), layoutPreview('top'));
   // 사람이 손으로 고친 복제본에는 넣지 않는다
   old();
   const edited = { ...h.layout('muwi')!, titlebar: 'native' };

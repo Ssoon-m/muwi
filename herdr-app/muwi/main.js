@@ -537,8 +537,8 @@ export default class Muwi extends View {
   }
 
   colors(t) {
-    // 응답 대기는 Herdr가 "사람이 필요함"에 쓰는 색, 막힘은 그와 구별되는 색
-    return { todo: t.input, doing: t.working, waiting: t.blocked, blocked: t.ansi5 ?? t.blocked, done: t.done, stalled: t.muted };
+    // 응답 대기는 보라, 막힘은 빨강 (막힘이 더 나쁜 일이라 경고색을 쓴다). 테마에 보라(ansi5)가 없으면 둘 다 경고색
+    return { todo: t.input, doing: t.working, waiting: t.ansi5 ?? t.blocked, blocked: t.blocked, done: t.done, stalled: t.muted };
   }
 
   render(_cx) {
@@ -743,7 +743,7 @@ export default class Muwi extends View {
       .when(running > 0, (el) => el.child(h_flex().gap(3).items_center().text_size(10.5).text_color(t.working)
         .child(div().frames(SPIN, 90)).child(String(running))))
       .when(waiting > 0, (el) => el.child(
-        h_flex().h(18).px(6).flex_none().items_center().rounded(5).bg(t.blocked).text_size(10.5).font_semibold()
+        h_flex().h(18).px(6).flex_none().items_center().rounded(5).bg(this.colors(t).waiting).text_size(10.5).font_semibold()
           .text_color(t.background).child(`⏸ ${waiting}`)));
   }
 
@@ -1041,7 +1041,9 @@ export default class Muwi extends View {
   agentStatus(t, a) {
     if (a.status === "working") return svg("mods/workspace-chrome/spinner.svg").size(12).mx(1).flex_none().text_color(t.working).spin(900);
     if (a.status === "blocked") {
-      return div().size(14).flex_none().rounded(4).bg(tint(t.blocked, 0.15)).text_size(10.5).font_bold().text_color(t.blocked)
+      // 입력을 기다리는 세션은 응답 대기와 같은 색
+      const ask = this.colors(t).waiting;
+      return div().size(14).flex_none().rounded(4).bg(tint(ask, 0.15)).text_size(10.5).font_bold().text_color(ask)
         .flex().items_center().justify_center().child("!");
     }
     if (a.status === "idle") return div().size(7).mx(3).flex_none().rounded(4).border(1.5).border_color(t.idle ?? t.dim);
