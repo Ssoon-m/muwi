@@ -150,26 +150,33 @@ muwi setup --all                   # 깔려 있는 도구 전부에 넣습니다
 | 사용법 skill | 그 도구의 skill 폴더에 `muwi` skill을 넣습니다 |
 | 훅 또는 플러그인 | 세션 시작, 사람이 말할 때, 파일을 고치거나 서브에이전트를 띄우기 전, skill을 읽은 뒤에 muwi를 부르게 합니다 |
 
-| 도구 | 이름 (`--tool`) | 훅·플러그인을 넣는 곳 | 이 도구에서 안 되는 것 |
-| --- | --- | --- | --- |
-| Claude Code | `claude` | 플러그인. 플러그인 없이 쓰면 `~/.claude/settings.json` | |
-| Codex | `codex` | `~/.codex/hooks.json` | push 앞에서 묻기. 넣은 뒤 Codex에서 `/hooks`로 한 번 믿어 줘야 합니다 |
-| GitHub Copilot CLI | `copilot` | `~/.copilot/hooks/muwi.json` | 말할 때 지침 다시 넣기, 서브에이전트 표시 |
-| Cursor CLI | `cursor` | `~/.cursor/hooks.json` | 말할 때 지침 다시 넣기, push 앞에서 묻기 |
-| Qwen Code | `qwen` | `~/.qwen/settings.json` | |
-| Qoder CLI | `qodercli` | `~/.qoder/settings.json` | |
-| Kimi Code | `kimi` | `~/.kimi-code/config.toml` | push 앞에서 묻기, 서브에이전트 표시 |
-| Antigravity CLI | `antigravity-cli` | `~/.gemini/config/hooks.json` | 말할 때 지침 다시 넣기, 서브에이전트 표시 |
-| Droid | `droid` | `~/.factory/hooks.json` (없으면 `settings.json`) | push 앞에서 묻기, 서브에이전트 표시 |
-| Devin CLI | `devin` | `~/.config/devin/config.json` | push 앞에서 묻기, 서브에이전트 표시 |
-| Grok CLI | `grok` | `~/.grok/hooks/muwi.json` | 말할 때 지침 다시 넣기 |
-| Mastra Code | `mastracode` | `~/.mastracode/hooks.json` | 말할 때 지침 다시 넣기, push 앞에서 묻기, 서브에이전트 표시 |
-| Letta Code | `letta` | `~/.letta/settings.json` | push 앞에서 묻기, 서브에이전트 표시 |
-| OpenCode | `opencode` | `~/.config/opencode/plugins/muwi.js` | push 앞에서 묻기 |
-| Kilo CLI | `kilo` | `~/.config/kilo/plugin/muwi.js` | push 앞에서 묻기 |
-| oh-my-pi | `omp` | `~/.omp/agent/extensions/muwi.ts` | |
-| Pi | `pi` | `~/.pi/agent/extensions/muwi.ts` | 서브에이전트 (Pi에 없습니다) |
-| Hermes Agent | `hermes` | `~/.hermes/plugins/muwi/` | 넣은 뒤 `hermes plugins enable muwi`로 켜 줘야 합니다 |
+| 도구 | 이름 (`--tool`) | 훅·플러그인을 넣는 곳 | 이 도구에서 안 되는 기능 | 넣은 뒤 한 번 할 일 |
+| --- | --- | --- | --- | --- |
+| Claude Code | `claude` | 플러그인. 플러그인 없이 쓰면 `~/.claude/settings.json` |  |  |
+| Codex | `codex` | `~/.codex/hooks.json` | push 앞에서 묻기 | Codex에서 `/hooks`를 열어 muwi 훅을 승인 |
+| GitHub Copilot CLI | `copilot` | `~/.copilot/hooks/muwi.json` | 말할 때 지침 다시 넣기, 서브에이전트 표시 | 열려 있는 Copilot 세션을 다시 켜기 |
+| Cursor CLI | `cursor` | `~/.cursor/hooks.json` | 말할 때 지침 다시 넣기, push 앞에서 묻기 |  |
+| Qwen Code | `qwen` | `~/.qwen/settings.json` |  |  |
+| Qoder CLI | `qodercli` | `~/.qoder/settings.json` |  |  |
+| Kimi Code | `kimi` | `~/.kimi-code/config.toml` | push 앞에서 묻기, 서브에이전트 표시 |  |
+| Antigravity CLI | `antigravity-cli` | `~/.gemini/config/hooks.json` | 말할 때 지침 다시 넣기, 서브에이전트 표시 |  |
+| Droid | `droid` | `~/.factory/hooks.json` (없으면 `settings.json`) | push 앞에서 묻기, 서브에이전트 표시 |  |
+| Devin CLI | `devin` | `~/.config/devin/config.json` | push 앞에서 묻기, 서브에이전트 표시 |  |
+| Grok CLI | `grok` | `~/.grok/hooks/muwi.json` | 말할 때 지침 다시 넣기 |  |
+| Mastra Code | `mastracode` | `~/.mastracode/hooks.json` | 말할 때 지침 다시 넣기, push 앞에서 묻기, 서브에이전트 표시 |  |
+| Letta Code | `letta` | `~/.letta/settings.json` | push 앞에서 묻기, 서브에이전트 표시 |  |
+| OpenCode | `opencode` | `~/.config/opencode/plugins/muwi.js` | push 앞에서 묻기 |  |
+| Kilo CLI | `kilo` | `~/.config/kilo/plugin/muwi.js` | push 앞에서 묻기 |  |
+| oh-my-pi | `omp` | `~/.omp/agent/extensions/muwi.ts` |  |  |
+| Pi | `pi` | `~/.pi/agent/extensions/muwi.ts` | 서브에이전트 표시 (Pi에는 서브에이전트가 없습니다) |  |
+| Hermes Agent | `hermes` | `~/.hermes/plugins/muwi/` |  | `hermes plugins enable muwi`로 플러그인 켜기 |
+
+표의 말뜻은 이렇습니다.
+
+- **push 앞에서 묻기**: `muwi config guard on`으로 켜는 기능입니다. AI가 `git push`나 PR 만들기처럼 되돌릴 수 없는 명령을 실행하려 할 때, 그 도구가 사람에게 "실행할까요?"를 묻게 합니다. 훅이 "사람에게 물어봐"라고 답할 수 없는 도구에서는 이 기능을 켜도 묻지 않습니다. 기본값은 꺼짐이라, 켜지 않았다면 차이가 없습니다.
+- **말할 때 지침 다시 넣기**: muwi를 업데이트해서 지침이 바뀌면, 열려 있는 세션에 사람이 다음 말을 걸 때 새 지침을 넣어 주는 기능입니다. 안 되는 도구는 세션을 새로 열어야 새 지침을 받습니다.
+- **서브에이전트 표시**: 노드를 서브에이전트가 했을 때 그래프에 "서브"로 나오고, 그 서브에이전트가 읽은 skill이 그 노드에 붙는 것입니다. 안 되는 도구에서는 그 세션이 한 것으로 적힙니다.
+- **넣은 뒤 한 번 할 일**: 그 도구가 새로 들어온 훅이나 플러그인을 바로 돌리지 않는 경우입니다. Codex는 보안 때문에 새 훅을 사람이 승인하기 전에는 돌리지 않습니다. Codex 화면에서 `/hooks`를 입력해 muwi 훅을 승인하면 그 뒤로 돕니다. 승인하기 전에도 계획과 진행 기록은 되고, 읽은 skill 기록과 계획 알림만 빠집니다.
 
 표에 없는 것은 그 도구에서도 됩니다: 계획·진행 기록, 그래프, 계획 없이 고칠 때 알림, 읽은 skill 기록, 모델 기록, 새 세션에 맡기기.
 
