@@ -518,7 +518,7 @@ export function removeLayout(dir: string, env: NodeJS.ProcessEnv = process.env):
 }
 
 /**
- * 그림 없이 만든 muwi 레이아웃(0.5.24까지)에 설정 화면의 그림을 넣는다. muwi setup이 부른다.
+ * 그림 없이 만든 muwi 레이아웃(0.5.24까지)에 설정 화면의 그림을 넣고, 이미 있으면 지금 판의 그림으로 맞춘다. muwi setup이 부른다.
  * 우리가 쓴 그대로인 복제본에만 넣고, 사람이 손으로 고친 복제본은 그대로 둔다. 그래프 자리는 기록대로. 넣었으면 true
  */
 export function ensurePreview(dir: string, env: NodeJS.ProcessEnv = process.env): boolean {
@@ -526,7 +526,12 @@ export function ensurePreview(dir: string, env: NodeJS.ProcessEnv = process.env)
   if (!record) return false;
   const file = readTree(env, record.name);
   if (!file || !untouched(record, file)) return false;
-  if (file.tree.preview && fs.existsSync(previewPath(env, record.name))) return false;
+  if (file.tree.preview && fs.existsSync(previewPath(env, record.name))) {
+    // 그림이 이미 있으면 그림 파일만 지금 판의 그림으로 맞춘다 (색 같은 것이 바뀌었을 때). 레이아웃 파일은 건드리지 않는다
+    const want = layoutPreview(record.graphAt ?? 'bottom');
+    if (fs.readFileSync(previewPath(env, record.name), 'utf8') === want) return false;
+    return drawPreview(env, record.name, record.graphAt ?? 'bottom');
+  }
   const tree = withPreview(env, record.name, file.tree, record.graphAt ?? 'bottom');
   if (!tree.preview || writeLayout(env, record.name, tree, file.text)) return false;
   writeJson(recordFile(dir), { ...record, hash: treeHash(tree), hashKind: 'tree' });

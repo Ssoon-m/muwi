@@ -671,7 +671,7 @@ function cmdSetup(a: Args, dir: string) {
   else out('이미 열려 있는 Claude Code 세션은 다시 시작해야 훅이 적용돼요.');
   if (install.herdr) {
     // 그림 없이 만든 muwi 레이아웃이면 Herdr 설정 화면에 보일 그림을 넣는다
-    if (ensurePreview(dir)) out('Herdr 설정 화면(Look > Layout)에 muwi 레이아웃 그림을 넣었어요.');
+    if (ensurePreview(dir)) out('Herdr 설정 화면(Look > Layout)의 muwi 레이아웃 그림을 새로 그렸어요.');
     const screen = screenState(dir);
     // 안내를 꺼 뒀으면 화면이 이미 muwi일 때만 알린다
     if (readConfig(dir).layout || screen.muwi) out(describeScreen(screen));
