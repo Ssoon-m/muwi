@@ -34,12 +34,6 @@ const EDITS: Record<string, any> = {
   letta: { event_type: 'PreToolUse', conversation_id: 's1', agent_id: 'agent-letta', tool_name: 'Edit', tool_input: { file_path: FILE } },
 };
 
-test('도구 표: 이름이 겹치지 않고, 훅이 있는 도구마다 통합이 있다', () => {
-  assert.equal(new Set(TOOLS.map(t => t.id)).size, TOOLS.length);
-  for (const id of Object.keys(ADAPTERS)) assert.ok(toolById(id), `${id}가 도구 표에 없다`);
-  for (const id of Object.keys(EDITS)) assert.ok(ADAPTERS[id], `${id}의 통합이 없다`);
-});
-
 test('도구 표: 환경 변수로 도구를 알아보고, 도구마다 띄우는 명령과 이어 가는 명령을 낸다', () => {
   assert.equal(detectTool({ CLAUDECODE: '1' } as NodeJS.ProcessEnv), 'claude');
   assert.equal(detectTool({ CODEX_THREAD_ID: 'x' } as NodeJS.ProcessEnv), 'codex');
@@ -63,18 +57,18 @@ for (const id of Object.keys(ADAPTERS)) {
   });
 }
 
-for (const [id, payload] of Object.entries(EDITS)) {
-  test(`${id} 커넥터: 파일을 고치려는 입력에는 아무 답도 하지 않는다 (muwi는 AI가 하려는 일을 막지 않는다)`, () => {
-    const dir = tmp('rec');
+test('어느 도구에서도 파일을 고치려는 입력에는 아무 답도 하지 않는다 (muwi는 AI가 하려는 일을 막지 않는다)', () => {
+  const dir = tmp('rec');
+  for (const [id, payload] of Object.entries(EDITS)) {
     // 고치기 전의 입력은 코어가 볼 일이 아니다
-    assert.equal(ADAPTERS[id].from(payload, 'record', ENV(tmp('home'))), null);
+    assert.equal(ADAPTERS[id].from(payload, 'record', ENV(tmp('home'))), null, id);
     const r = handleHook(payload, dir, 'record', ENV(tmp('home')), ROOT, id);
     assert.ok(!r.code, `${id}: 종료 코드로 막았다 (${r.code})`);
     assert.ok(!r.stderr, `${id}: 표준 오류로 답했다`);
     // 답이 늘 JSON이어야 하는 도구는 빈 JSON을, 나머지는 아무것도 내지 않는다
     assert.ok(!r.stdout || r.stdout === '{}', `${id}: ${r.stdout}`);
-  });
-}
+  }
+});
 
 test('세션: 셸 명령에 세션 id를 넘겨주지 않는 도구는 훅도 터미널을 세션으로 보고, 그 도구의 대화 id는 따로 적는다', () => {
   const herdr = { HOME: tmp('home'), HC_TERMINAL_ID: 't9' } as NodeJS.ProcessEnv;
@@ -192,7 +186,9 @@ test('muwi hook --from <도구>: 그 도구의 형식으로 읽고 답한다 (�
   assert.deepEqual([run(['--from', 'nope'], EDITS.claude).status, run(['--from', 'nope'], EDITS.claude).stdout], [0, '']);
 });
 
-test('커넥터 규격: 모든 도구에 커넥터가 있고, 그 도구의 훅이 알려 주는 것을 선언한다', () => {
+test('커넥터 규격: 도구 표와 커넥터가 하나씩 짝이고, 커넥터는 그 도구의 훅이 알려 주는 것을 선언한다', () => {
+  assert.equal(new Set(TOOLS.map(t => t.id)).size, TOOLS.length);
+  for (const id of Object.keys(ADAPTERS)) assert.ok(toolById(id), `${id}가 도구 표에 없다`);
   for (const t of TOOLS) {
     const a = adapterOf(t.id);
     assert.ok(a, `${t.id}에 커넥터가 없어요`);
