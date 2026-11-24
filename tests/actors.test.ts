@@ -690,10 +690,47 @@ test('하는 노드가 없는 작업은 그 세션이 하는 일로 보인다: �
   // 세션이 다른 작업으로 갔다: 이 작업을 맡은 세션이 없다
   attach(s.dir, 'lead', 'other', ENV);
   assert.deepEqual(shown(herdr('working')), ['stalled', 'gone']);
-  // 노드를 하는 중이면 세션 상태와 상관없이 노드로 정한다
+  // 노드를 하는 중이면 between은 없다 (세션이 멈췄을 때는 아래 시험의 quiet로 정한다)
   at(3); s.node('impl', 'doing', 'lead');
-  const v = loadView(s.dir, s.work, herdr('done'))!;
+  const v = loadView(s.dir, s.work, herdr('working'))!;
   assert.deepEqual([v.state, v.between], ['doing', undefined]);
+});
+
+test('하는 중이라고 적힌 노드도 그 세션이 일을 멈췄으면 멈춘 것으로 보인다: 입력을 기다리거나 멈췄으면 응답 대기', () => {
+  const s = setup([{ id: 'a' }, { id: 'b' }]);
+  at(1); touchSession(s.dir, 'lead', {}, { HC_TERMINAL_ID: 't3' } as NodeJS.ProcessEnv); s.node('a', 'doing', 'lead');
+  const shown = (env: NodeJS.ProcessEnv) => {
+    const v = loadView(s.dir, s.work, env)!;
+    return [v.state, v.quiet, ...v.nodes.map(n => n.quiet)];
+  };
+  const one = (status: string) => fakeHc([{ address: 't3', status }], { t3: 'lead' });
+  assert.deepEqual(shown(one('working')), ['doing', undefined, undefined, undefined]);
+  // 사용 한도에 걸렸거나 권한 확인에서 멈췄다
+  assert.deepEqual(shown(one('blocked')), ['waiting', 'asking', 'asking', undefined]);
+  // 노드를 끝냈다고 적지 않은 채 말을 끝냈다
+  assert.deepEqual(shown(one('done')), ['waiting', 'stopped', 'stopped', undefined]);
+  assert.deepEqual(shown(one('idle')), ['waiting', 'stopped', 'stopped', undefined]);
+  // Herdr 밖이라 세션이 무얼 하는지 모르면 적힌 대로 작업 중이다
+  assert.deepEqual(shown({ MUWI_HC: '/no/such/hc' } as NodeJS.ProcessEnv), ['doing', undefined, undefined, undefined]);
+  // 세션이 닫혔으면 멈춘 것이 아니라 닫힌 것이다
+  const gone = loadView(s.dir, s.work, fakeHc([]))!;
+  assert.deepEqual([gone.state, gone.quiet, gone.nodes[0].closed, gone.nodes[0].quiet], ['stalled', undefined, true, undefined]);
+
+  // 다른 세션이 하는 노드가 하나라도 일하고 있으면 작업은 작업 중이다. 멈춘 노드만 멈춘 것으로 보인다
+  at(2); touchSession(s.dir, 'worker', {}, { HC_TERMINAL_ID: 't4' } as NodeJS.ProcessEnv); s.node('b', 'doing', 'worker');
+  const two = (a: string, b: string) => fakeHc([{ address: 't3', status: a }, { address: 't4', status: b }], { t3: 'lead', t4: 'worker' });
+  assert.deepEqual(shown(two('done', 'working')), ['doing', undefined, 'stopped', undefined]);
+  // 둘 다 멈췄고 하나가 입력을 기다린다
+  assert.deepEqual(shown(two('done', 'blocked')), ['waiting', 'asking', 'stopped', 'asking']);
+
+  // 목록에도 같은 것이 나간다. 그래프 칸이 지금 상태를 다시 볼 수 있게 그 세션의 터미널도 준다
+  const board = loadBoard(s.dir, two('done', 'blocked')).works.find(w => w.work === s.work)!;
+  assert.deepEqual([board.state, board.quiet], ['waiting', 'asking']);
+  assert.deepEqual(board.active.map(n => [n.id, n.quiet, n.terminal]), [['a', 'stopped', 't3'], ['b', 'asking', 't4']]);
+
+  // AI가 기다린다고 적은 노드가 있으면 그것으로 응답 대기다 (quiet가 아니다)
+  at(3); s.node('b', 'waiting', 'worker', '어느 쪽으로 할까요');
+  assert.deepEqual(shown(two('working', 'done')), ['waiting', undefined, undefined, undefined]);
 });
 
 test('작업 목록은 그 작업을 한 대화들을 알려 준다: 계획을 낸 대화 먼저, 나머지는 최근에 본 순', () => {
