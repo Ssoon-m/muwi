@@ -52,6 +52,7 @@ node packages/herdr-app/bin/muwi.js <명령>           # 깔지 않고 이 저�
 | `packages/herdr-app/app/muwi/` | Herdr 앱의 그래프 칸 |
 | `packages/*/tests/` | 테스트. 코어의 테스트는 화면 없이(또는 시험용 화면으로) 돕니다 |
 | `scripts/build.mjs`, `scripts/check-package.mjs` | 배포할 패키지 만들기, 만든 패키지를 npm으로 깔아서 확인하기 |
+| `scripts/release.mjs`, `.github/workflows/release.yml` | 릴리스: 버전 커밋과 태그 만들기(`pnpm release`), 태그를 받아 npm에 올리기 |
 | `docs/` | 문서 |
 
 ## 설계 원칙
@@ -114,16 +115,41 @@ node packages/herdr-app/bin/muwi.js <명령>           # 깔지 않고 이 저�
 
 ## 버전 올리기
 
-1. `packages/core/package.json`과 `packages/herdr-app/package.json`의 버전을 같이 올리세요. 두 패키지는 늘 같은 버전입니다.
-2. [CHANGELOG.md](CHANGELOG.md)에 새 버전을 적으세요.
-3. `pnpm test`와 `pnpm check:package`가 통과하는지 보세요.
-4. main에 올린 뒤 `v<버전>` 태그를 만들고 push하세요.
-5. 배포할 패키지를 만들고 코어부터 npm에 올리세요 (`@muwi/herdr-app`이 같은 버전의 `@muwi/core`를 받습니다).
+두 패키지는 늘 같은 버전으로 함께 올립니다. 한쪽만 바뀌어도 둘 다 올립니다. 업데이트 뒤 그래프 칸을 다시 맞추는 것과 `muwi --version`이 코어의 버전을 보기 때문입니다.
+
+버그 수정은 끝자리(0.7.0 → 0.7.1), 기능 추가나 동작이 바뀌는 변경은 가운데 자리(0.7.0 → 0.8.0)를 올립니다.
+
+1. CHANGELOG에 새 버전을 정리하세요. 평소에는 CHANGELOG를 고치지 않고, 릴리스할 때 지난 릴리스 이후의 커밋을 보고 한 번에 적습니다. `pnpm release <버전>`을 먼저 실행하면 그 커밋들을 패키지별로 보여 줍니다.
+
+   ```markdown
+   ## 0.7.1 (2026-11-25)
+
+   ### @muwi/herdr-app
+
+   #### 수정
+
+   - 좁은 칸에서 노드 이름이 잘리던 것을 고쳤습니다.
+   ```
+
+   패키지별 소제목(`### @muwi/core`, `### @muwi/herdr-app`, 둘 다 해당하면 `### 공통`) 아래를 `#### 추가`, `#### 변경`, `#### 뺌`, `#### 수정`으로 나눕니다. 코드가 아니라 쓰는 사람이 겪는 변화로 적습니다.
+
+2. CHANGELOG.md만 고친 채로 main에서 실행하세요.
 
    ```sh
-   pnpm build
-   npm publish packages/core/dist
-   npm publish packages/herdr-app/dist
+   pnpm release 0.7.1 --dry-run   # 무엇을 할지만 보기
+   pnpm release 0.7.1
    ```
+
+   두 `package.json`의 버전을 올리고, `chore: <버전>` 커밋과 `v<버전>` 태그를 만들어 push합니다. main이 원격보다 뒤처졌거나, CHANGELOG에 그 버전의 항목이 없거나, CHANGELOG.md 말고 커밋하지 않은 변경이 있으면 멈춥니다.
+
+3. 태그를 받은 GitHub Actions([release.yml](.github/workflows/release.yml))가 나머지를 합니다.
+   - 태그, 두 패키지 버전, CHANGELOG가 맞는지 확인합니다.
+   - `pnpm test`와 `pnpm check:package`를 돌립니다.
+   - 코어부터 npm에 올립니다. 토큰 없이 Trusted Publishing으로 올리고 provenance를 붙입니다. 이미 올라간 패키지는 건너뛰므로, 중간에 멈췄으면 그 실행을 다시 돌리면 됩니다.
+   - CHANGELOG의 그 섹션으로 GitHub 릴리스를 만듭니다.
+
+   `0.8.0-beta.1`처럼 `-`가 붙은 시험판은 `latest`가 아니라 `beta` 같은 이름의 태그로 올라갑니다.
+
+npm에서는 두 패키지 모두 Settings > Trusted Publisher에 이 저장소(`Ssoon-m/muwi`)의 `release.yml`이 등록돼 있어야 합니다.
 
 설치한 사용자는 `npm i -g @muwi/herdr-app@latest`로 받습니다.
