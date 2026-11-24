@@ -416,6 +416,12 @@ function betweenOf(work: string, sessions: Record<string, SessionInfo>, closed: 
   return 'unknown';
 }
 
+/** 이 작업을 한 대화들: 계획을 낸 대화 먼저, 나머지는 최근에 본 순 */
+function talksOf(v: WorkView): string[] {
+  const rest = Object.entries(v.sessions).filter(([k]) => k !== v.lead).sort((a, b) => (b[1].seenAt ?? '').localeCompare(a[1].seenAt ?? '')).map(([k]) => k);
+  return v.lead ? [v.lead, ...rest] : rest;
+}
+
 /** 사건 기록에 나온 세션들의 정보를 세션 파일에서 읽는다 */
 export function sessionsOf(dir: string, events: Event[]): Record<string, SessionInfo> {
   const out: Record<string, SessionInfo> = {};
@@ -453,6 +459,8 @@ const ORDER: Record<WorkState, number> = { waiting: 0, blocked: 1, doing: 2, sta
 export const PAST_DAYS = 7;
 
 export type WorkSummary = Pick<WorkView, 'work' | 'title' | 'request' | 'state' | 'between' | 'unread' | 'updatedAt' | 'counts'> & {
+  /** 이 작업을 한 대화(세션)들: 계획을 낸 대화 먼저, 나머지는 최근에 본 순. 그래프 칸이 누를 때 그 대화로 간다 */
+  talks?: string[];
   /** 지금 눈여겨볼 노드들: 사람을 기다리는 것, 막힌 것, 하는 중인 것. closed: 그 노드를 하던 세션이 닫혔다 */
   active: { id: string; title: string; status: NodeStatus; note?: string; closed?: boolean }[];
   /** 지난 작업: 끝났거나 멈춘 채로 오래됐다. 목록에서 접어 둔다 */
@@ -501,6 +509,7 @@ export function loadBoard(dir: string, env: NodeJS.ProcessEnv = process.env): { 
         request: v.request,
         state: v.state,
         ...(v.between ? { between: v.between } : {}),
+        talks: talksOf(v),
         ...(v.unread ? { unread: true } : {}),
         updatedAt: v.updatedAt,
         counts: v.counts,

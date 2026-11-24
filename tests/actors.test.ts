@@ -696,6 +696,14 @@ test('하는 노드가 없는 작업은 그 세션이 하는 일로 보인다: �
   assert.deepEqual([v.state, v.between], ['doing', undefined]);
 });
 
+test('작업 목록은 그 작업을 한 대화들을 알려 준다: 계획을 낸 대화 먼저, 나머지는 최근에 본 순', () => {
+  const s = setup([{ id: 'a' }, { id: 'b', after: ['a'] }, { id: 'c', after: ['b'] }]);
+  at(1); s.node('a', 'doing', 'old'); s.node('a', 'done', 'old');
+  at(2); s.node('b', 'doing', 'new'); s.node('b', 'done', 'new');
+  const w = loadBoard(s.dir).works.find(x => x.work === s.work)!;
+  assert.deepEqual(w.talks, ['lead', 'new', 'old']);
+});
+
 test('세션이 시작될 때 터미널에 그 세션의 이름을 붙인다', () => {
   const s = setup([{ id: 'impl' }]);
   const fake = fakeHerdr(null);
