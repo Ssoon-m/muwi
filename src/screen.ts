@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { herdrApp } from './herdr.ts';
+import { layoutPreview } from './preview.ts';
 import { readJson, writeJson } from './store.ts';
 
 export const LAYOUT_NAME = 'muwi';
@@ -71,7 +72,7 @@ function stable(v: unknown): unknown {
   if (v && typeof v === 'object') return Object.fromEntries(Object.keys(v as object).sort().map(k => [k, stable((v as Record<string, unknown>)[k])]));
   return v;
 }
-const treeHash = (tree: LayoutNode) => hashOf(JSON.stringify(stable(tree)));
+export const treeHash = (tree: LayoutNode) => hashOf(JSON.stringify(stable(tree)));
 
 /** 복제본이 우리가 마지막으로 쓴 그대로인가. 예전 기록(hashKind 없음)은 파일 글자로 비교한다 */
 function untouched(record: LayoutRecord, file: { tree: LayoutNode; text: string }): boolean {
@@ -81,6 +82,27 @@ function untouched(record: LayoutRecord, file: { tree: LayoutNode; text: string 
 const herdrHome = (env: NodeJS.ProcessEnv) => env.HERDR_APP_HOME || path.join(env.HOME || os.homedir(), '.config', 'herdr-app');
 const layoutsDir = (env: NodeJS.ProcessEnv) => path.join(herdrHome(env), 'layouts');
 const layoutPath = (env: NodeJS.ProcessEnv, name: string) => path.join(layoutsDir(env), `${name}.json`);
+/** Herdr 설정 화면이 이 레이아웃의 그림으로 보여 줄 파일 (레이아웃 파일 옆) */
+const previewPath = (env: NodeJS.ProcessEnv, name: string) => path.join(layoutsDir(env), `${name}.svg`);
+
+/** 설정 화면에 보일 그림을 그래프 칸의 자리대로 그려 둔다. 못 그렸으면 false */
+function drawPreview(env: NodeJS.ProcessEnv, name: string, where: GraphAt): boolean {
+  try {
+    fs.writeFileSync(previewPath(env, name), layoutPreview(where));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 그림을 그려 두고 레이아웃 나무에 그 그림을 적는다 ("preview": "layouts/<이름>.svg", Herdr 폴더에서 본 경로).
+ * 그림이 없으면 설정 화면은 빈 틀만 그린다. 그림을 못 그려도 레이아웃은 그대로 쓴다
+ */
+function withPreview(env: NodeJS.ProcessEnv, name: string, tree: LayoutNode, where: GraphAt): LayoutNode {
+  const { preview: _old, ...rest } = tree;
+  return drawPreview(env, name, where) ? { ...rest, preview: `layouts/${name}.svg` } : rest;
+}
 
 function walk(node: LayoutNode, visit: (n: LayoutNode) => void) {
   visit(node);
@@ -353,11 +375,13 @@ export function applyLayout(dir: string, env: NodeJS.ProcessEnv = process.env, o
 
   // 복제하면 원래 레이아웃에서 사람이 고른 것(테마, 칸 크기)도 따라온다. 파일을 고쳐도 그것은 남는다
   const placed = placeMuwi(copy.tree, where);
+  const tree = withPreview(env, name, placed.tree, where);
   // 앱이 받아들이지 않았으면 원래대로 돌린다
-  const problem = writeLayout(env, name, placed.tree);
+  const problem = writeLayout(env, name, tree);
   if (problem) {
     switchTo(env, base);
     fs.rmSync(file, { force: true });
+    fs.rmSync(previewPath(env, name), { force: true });
     throw new ScreenError(`Herdr 앱이 바꾼 레이아웃을 받아들이지 않아 원래대로 돌렸어요: ${problem}`);
   }
   // 복제하면 앱이 그 레이아웃으로 바꾼다. 혹시 바꾸지 않았으면 바꾼다
@@ -367,7 +391,7 @@ export function applyLayout(dir: string, env: NodeJS.ProcessEnv = process.env, o
     name,
     base,
     ...(copy.tree.cloned_from?.version ? { version: copy.tree.cloned_from.version } : state.version ? { version: state.version } : {}),
-    hash: treeHash(placed.tree),
+    hash: treeHash(tree),
     hashKind: 'tree',
     shape: PLACE_VERSION,
     list: placed.list,
@@ -396,9 +420,12 @@ function rebuild(dir: string, env: NodeJS.ProcessEnv, state: Screen, where: Grap
   const before = readTree(env, record.name);
   const version = state.version ?? before?.tree.cloned_from?.version ?? record.version;
   // Herdr가 복제할 때처럼 어디서 복제했는지 적는다 (다음 업데이트를 알아보는 데 쓴다)
-  const tree: LayoutNode = { ...placed.tree, cloned_from: { name: record.base, ...(version ? { version } : {}) } };
+  const tree = withPreview(env, record.name, { ...placed.tree, cloned_from: { name: record.base, ...(version ? { version } : {}) } }, where);
   const problem = writeLayout(env, record.name, tree, before?.text);
-  if (problem) throw new ScreenError(`Herdr 앱이 새 모양을 받아들이지 않아 원래대로 돌렸어요: ${problem}`);
+  if (problem) {
+    drawPreview(env, record.name, was);
+    throw new ScreenError(`Herdr 앱이 새 모양을 받아들이지 않아 원래대로 돌렸어요: ${problem}`);
+  }
   fitGraph(env, was, where);
   const next: LayoutRecord = {
     ...record,
@@ -446,10 +473,15 @@ function moveGraph(dir: string, env: NodeJS.ProcessEnv, record: LayoutRecord, wh
   const graph = trailTo(placed.tree, n => n.id === GRAPH_ID)?.at(-1);
   if (!graph) throw new ScreenError('그래프 칸을 옮길 자리를 찾지 못했어요.');
   if (content) graph.content = content; // 사이드바 목록이 있으니 그래프만 그리는 모양 그대로
-  const problem = writeLayout(env, record.name, placed.tree, file.text);
-  if (problem) throw new ScreenError(`Herdr 앱이 옮긴 레이아웃을 받아들이지 않아 원래대로 돌렸어요: ${problem}`);
+  // 설정 화면의 그림도 새 자리대로
+  const tree = withPreview(env, record.name, placed.tree, where);
+  const problem = writeLayout(env, record.name, tree, file.text);
+  if (problem) {
+    drawPreview(env, record.name, record.graphAt ?? 'bottom');
+    throw new ScreenError(`Herdr 앱이 옮긴 레이아웃을 받아들이지 않아 원래대로 돌렸어요: ${problem}`);
+  }
   fitGraph(env, record.graphAt ?? 'bottom', where);
-  writeJson(recordFile(dir), { ...record, graphAt: where, hash: treeHash(placed.tree), hashKind: 'tree', at: new Date().toISOString() });
+  writeJson(recordFile(dir), { ...record, graphAt: where, hash: treeHash(tree), hashKind: 'tree', at: new Date().toISOString() });
   return { name: record.name, base: record.base, list: record.list, graph: true, graphAt: where, moved: true };
 }
 
@@ -478,10 +510,27 @@ export function removeLayout(dir: string, env: NodeJS.ProcessEnv = process.env):
   if (current && !untouched(record, current)) result.kept = file;
   else if (current && !stillShown) {
     fs.rmSync(file, { force: true });
+    fs.rmSync(previewPath(env, record.name), { force: true });
     result.deleted = true;
   } else if (stillShown) result.kept = file;
   fs.rmSync(recordFile(dir), { force: true });
   return result;
+}
+
+/**
+ * 그림 없이 만든 muwi 레이아웃(0.5.24까지)에 설정 화면의 그림을 넣는다. muwi setup이 부른다.
+ * 우리가 쓴 그대로인 복제본에만 넣고, 사람이 손으로 고친 복제본은 그대로 둔다. 그래프 자리는 기록대로. 넣었으면 true
+ */
+export function ensurePreview(dir: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  const record = readLayoutRecord(dir);
+  if (!record) return false;
+  const file = readTree(env, record.name);
+  if (!file || !untouched(record, file)) return false;
+  if (file.tree.preview && fs.existsSync(previewPath(env, record.name))) return false;
+  const tree = withPreview(env, record.name, file.tree, record.graphAt ?? 'bottom');
+  if (!tree.preview || writeLayout(env, record.name, tree, file.text)) return false;
+  writeJson(recordFile(dir), { ...record, hash: treeHash(tree), hashKind: 'tree' });
+  return true;
 }
 
 /** 앱이 닫혀 있을 때 마지막으로 보던 레이아웃 (shared.json) */
