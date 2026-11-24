@@ -15,12 +15,19 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      # pnpm 버전은 package.json의 packageManager를 따른다
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - run: npm test
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      # 배포할 패키지(.js로 바꾼 사본)를 하나씩 npm i -g로 깔아서, npm이 PATH에 건 muwi로 돌려 본다 (Windows는 npm이 만든 muwi.cmd)
+      # node_modules 안에서는 .ts가 실행되지 않는다. Windows의 훅은 Claude Code처럼 Git Bash의 sh로 실행한다
+      - name: 패키지 확인
+        run: pnpm check:package
 
-      # Windows의 Claude Code는 훅 명령을 Git Bash로 실행하고, ${CLAUDE_PLUGIN_ROOT}는 C:/... 모양으로 넘긴다. 같은 방식으로 불러 본다
+      # Windows의 Claude Code는 훅 명령을 Git Bash로 실행한다. 경로는 C:/... 모양으로 적는다. 같은 방식으로 불러 본다 (저장소의 코드)
       - name: 훅 (Git Bash)
         if: runner.os == 'Windows'
         shell: bash
@@ -28,37 +35,32 @@ jobs:
           root=$(cygpath -m "$GITHUB_WORKSPACE")
           export MUWI_DIR="$RUNNER_TEMP/muwi-records"
           start='{"session_id":"ci-windows","hook_event_name":"SessionStart","source":"startup","cwd":"'"$root"'"}'
-          out=$(printf '%s' "$start" | sh "$root/hooks/hook.sh")
+          core="$root/packages/muwi"
+          out=$(printf '%s' "$start" | sh "$core/hooks/hook.sh")
           echo "$out"
           case "$out" in *hookSpecificOutput*muwi*) ;; *) echo "SessionStart 훅이 지침을 돌려주지 않았어요"; exit 1 ;; esac
-          # 계획 없이 파일을 고치려 하면 알림을 돌려준다 (nudge)
-          edit='{"session_id":"ci-windows","hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"C:\\work\\app.ts"},"cwd":"'"$root"'"}'
-          printf '%s' "$edit" | sh "$root/hooks/hook.sh" nudge
           # Git Bash의 muwi 명령
-          sh "$root/bin/muwi" --version
-          # 플러그인 없이 설치(setup --claude)하면 settings.json에 넣는 훅 명령도, 적힌 그대로 Git Bash로 실행해 본다
+          sh "$core/bin/muwi" --version
+          # Claude Code 커넥터(setup --tool claude)가 settings.json에 넣는 훅 명령도, 적힌 그대로 Git Bash로 실행해 본다
           export CLAUDE_CONFIG_DIR="$RUNNER_TEMP/claude-config"
-          node "$root/src/cli.ts" setup --claude
+          node "$core/src/cli.ts" setup --tool claude
           cmd=$(node -e 'const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); console.log(s.hooks.SessionStart[0].hooks[0].command)' "$CLAUDE_CONFIG_DIR/settings.json")
           echo "$cmd"
           out=$(printf '%s' "$start" | bash -c "$cmd")
-          case "$out" in *hookSpecificOutput*muwi*) ;; *) echo "setup --claude의 훅 명령이 지침을 돌려주지 않았어요"; exit 1 ;; esac
-          node "$root/src/cli.ts" setup --remove
+          case "$out" in *hookSpecificOutput*muwi*) ;; *) echo "setup --tool claude의 훅 명령이 지침을 돌려주지 않았어요"; exit 1 ;; esac
+          node "$core/src/cli.ts" setup --remove
 
-      - name: muwi.cmd (PowerShell)
+      # muwi setup이 넣는 PowerShell·cmd용 muwi.cmd
+      - name: muwi.cmd (PowerShell, cmd)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $v = & .\bin\muwi.cmd --version
-          if ($LASTEXITCODE -ne 0 -or "$v" -notmatch '^\d+\.\d+\.\d+') { throw "bin\muwi.cmd --version: $v" }
-          node src/cli.ts setup
+          node packages/muwi/bin/muwi.js setup
           if ($LASTEXITCODE -ne 0) { throw "muwi setup failed" }
-          $v = & "$env:USERPROFILE\.local\bin\muwi.cmd" --version
-          if ($LASTEXITCODE -ne 0 -or "$v" -notmatch '^\d+\.\d+\.\d+') { throw "~\.local\bin\muwi.cmd --version: $v" }
-          node src/cli.ts setup --remove
-          if (Test-Path "$env:USERPROFILE\.local\bin\muwi.cmd") { throw "setup --remove left muwi.cmd" }
-
-      - name: muwi.cmd (cmd)
-        if: runner.os == 'Windows'
-        shell: cmd
-        run: bin\muwi.cmd --version
+          $cmd = "$env:USERPROFILE\.local\bin\muwi.cmd"
+          $v = & $cmd --version
+          if ($LASTEXITCODE -ne 0 -or "$v" -notmatch '^\d+\.\d+\.\d+') { throw "muwi.cmd --version (PowerShell): $v" }
+          $v = cmd /d /c "`"$cmd`" --version"
+          if ($LASTEXITCODE -ne 0 -or "$v" -notmatch '^\d+\.\d+\.\d+') { throw "muwi.cmd --version (cmd): $v" }
+          node packages/muwi/bin/muwi.js setup --remove
+          if (Test-Path $cmd) { throw "setup --remove left muwi.cmd" }

@@ -6,7 +6,7 @@ AI에게 일을 맡기면 AI가 그 일의 진행 계획을 스스로 짜고, �
 
 ![muwi 그래프: 서브에이전트가 조사를 끝내고, 새 세션 둘이 화면 구현(작업 중)과 API 연결(응답 대기)을 맡은 작업. 오른쪽은 고른 노드의 기록](docs/panel.png)
 
-muwi는 Claude Code와 [Herdr 앱](https://herdr.dev)에서 동작합니다. Claude Code 플러그인이 AI의 계획과 진행을 기록하고, Herdr 앱이 그 기록을 그래프로 보여 줍니다. Codex, Gemini CLI, Cursor CLI, Copilot CLI, OpenCode 같은 다른 AI 도구에도 커넥터를 넣어 같이 쓸 수 있습니다. 어느 도구에서나 같은 방법으로 기록합니다. 리뷰는 Codex가, 구현은 Claude Code가 맡아도 작업 하나의 그래프 하나로 보입니다.
+muwi는 AI 도구와 [Herdr 앱](https://herdr.dev)에서 동작합니다. AI 도구(Claude Code, Codex, Gemini CLI, Cursor CLI, Copilot CLI, OpenCode 등)에 커넥터를 넣으면 AI가 자기 계획과 진행을 muwi에 적고, Herdr 앱이 그 기록을 그래프로 보여 줍니다. 어느 도구에서나 같은 방법으로 기록합니다. 리뷰는 Codex가, 구현은 Claude Code가 맡아도 작업 하나의 그래프 하나로 보입니다.
 
 ## muwi를 쓰면 좋은 점
 
@@ -42,15 +42,28 @@ muwi에는 AI가 순서에서 벗어나는 것을 막는 기능이 없습니다.
 
 ## 설치하기
 
-Claude Code, [Herdr 앱](https://herdr.dev), Node 24 이상이 필요합니다. Windows에서는 Git for Windows도 필요합니다 ([Windows에서 쓰기](docs/reference/setup.md#windows에서-쓰기)).
+Node 24 이상과 npm이 필요하고, 그래프로 보려면 [Herdr 앱](https://herdr.dev)이 필요합니다. Windows에서는 Git for Windows도 필요합니다 ([Windows에서 쓰기](docs/reference/setup.md#windows에서-쓰기)).
 
-1. 터미널에서 플러그인을 설치하세요.
+muwi는 패키지 두 개로 나뉩니다. 둘 다 `muwi` 명령을 내므로 하나만 까세요.
+
+| 패키지 | 들어 있는 것 |
+| --- | --- |
+| `herdr-muwi` | `muwi`의 모든 것에 더해 Herdr 앱의 작업 목록과 그래프 칸, 새 세션에 맡기기(`muwi run`), 레이아웃 바꾸기 |
+| `muwi` | 기록, 명령(`muwi plan`, `muwi show`…), AI에게 주는 지침, AI 도구 커넥터. 그래프 없이 기록만 쓸 때 |
+
+1. 설치하세요.
 
    ```sh
-   claude plugin install muwi --marketplace Ssoon-m/muwi
+   npm i -g herdr-muwi
    ```
 
-2. Claude Code 세션을 새로 열고 `muwi setup`을 실행하세요. AI에게 "muwi setup 실행해줘"라고 해도 됩니다. 터미널용 `muwi` 명령과 Herdr 앱의 그래프 칸이 설치됩니다.
+2. AI 도구에 커넥터를 넣으세요. 터미널용 `muwi` 명령과 Herdr 앱의 그래프 칸도 같이 들어갑니다.
+
+   ```sh
+   muwi setup --all            # 이 컴퓨터에 깔린 AI 도구 전부. 하나만이면 --tool claude
+   ```
+
+   커넥터는 그 도구에 AI에게 주는 지침, 사용법 skill, 진행을 지켜보는 훅을 넣습니다. 넣을 수 있는 도구는 `muwi setup --tools`에 나옵니다. 이미 열려 있던 AI 세션은 새로 여세요.
 
 3. Herdr 앱 화면에 muwi를 넣으세요. AI에게 "muwi 화면으로 바꿔줘"라고 해도 됩니다.
 
@@ -59,12 +72,6 @@ Claude Code, [Herdr 앱](https://herdr.dev), Node 24 이상이 필요합니다. 
    ```
 
    사이드바의 Agents 자리에 작업 목록이, 터미널 아래에 그래프가 생깁니다. 지금 레이아웃을 복제해서 바꾸므로 원래 화면은 그대로 남고, `muwi layout --remove`로 언제든 돌아갈 수 있습니다. 화면을 바꾸지 않고 보려면 `muwi open`으로 터미널 옆에 그래프 칸을 여세요.
-
-4. 다른 AI 도구도 같이 쓴다면 그 도구에 커넥터를 넣으세요. 넣을 수 있는 도구는 `muwi setup --tools`에 나옵니다.
-
-   ```sh
-   muwi setup --tool codex     # 여러 개는 쉼표로: --tool codex,cursor. 깔려 있는 도구 전부는 --all
-   ```
 
 처음이라면 [시작하기](docs/getting-started.md)를 따라 해 보세요. 설치되는 항목과 제거 방법, 도구마다 되는 것은 [설치와 설정](docs/reference/setup.md)에 있습니다.
 
@@ -140,4 +147,4 @@ AI가 기록에서 원인을 찾습니다. 예를 들어 브랜치를 만든 노
 
 ## 라이선스
 
-[MIT](LICENSE). 그래프 배치에 쓰는 `src/vendor/elk.bundled.cjs`는 [elkjs](https://github.com/kieler/elkjs) 0.12.1의 배포 파일 원본이고 EPL-2.0입니다 (`src/vendor/elkjs-LICENSE.md`).
+[MIT](LICENSE). herdr-muwi가 그래프 배치에 쓰는 [elkjs](https://github.com/kieler/elkjs)는 의존 패키지로 받고, 라이선스는 EPL-2.0입니다.

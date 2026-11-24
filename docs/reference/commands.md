@@ -4,6 +4,8 @@
 
 사용자가 직접 쓰는 명령은 [보기](#보기)와 [설치와 설정](#설치와-설정)입니다. 나머지는 AI가 일하면서 실행합니다. 사용자가 직접 실행해도 같은 방식으로 기록됩니다.
 
+`muwi open`, `muwi layout`, `muwi run`, `muwi tidy`, `muwi board`는 Herdr 화면(`herdr-muwi`)이 더하는 명령입니다. 코어 `muwi`만 깔았으면 "herdr-muwi로 깔면 생겨요"라고 알립니다.
+
 ## 작업을 고르는 규칙
 
 명령은 다음 순서로 작업을 정합니다.
@@ -30,7 +32,7 @@
 
 `--json`을 붙이면 같은 내용을 JSON으로 출력합니다.
 
-## Herdr 앱 화면
+## Herdr 앱 화면 (`herdr-muwi`)
 
 | 명령 | 설명 |
 | --- | --- |
@@ -45,14 +47,13 @@
 
 | 명령 | 설명 |
 | --- | --- |
-| `muwi setup` | 터미널용 `muwi` 명령과 Herdr 앱의 그래프 칸을 설치합니다 |
-| `muwi setup --claude` | 플러그인 없이 쓸 때 Claude Code 훅과 사용법 skill도 설치합니다 |
-| `muwi setup --tools` | 아는 AI 도구와, 이 컴퓨터에 깔렸는지, muwi 통합을 넣었는지 보여 줍니다 |
-| `muwi setup --tool <도구>[,<도구>]` | 그 AI 도구에 muwi 통합(지침, 사용법 skill, 훅 또는 플러그인)을 넣습니다. `--codex`는 `--tool codex`와 같습니다 |
-| `muwi setup --all` | 깔려 있는 AI 도구 전부에 통합을 넣습니다. Claude Code는 플러그인이 넣어 주므로 뺍니다 |
+| `muwi setup` | 터미널용 `muwi` 명령과 화면(Herdr 앱의 그래프 칸)을 설치합니다. 전에 커넥터를 넣은 도구는 새 버전에 맞춥니다 |
+| `muwi setup --tools` | 아는 AI 도구와, 이 컴퓨터에 깔렸는지, 커넥터를 넣었는지 보여 줍니다 |
+| `muwi setup --tool <도구>[,<도구>]` | 그 AI 도구에 커넥터(지침, 사용법 skill, 훅 또는 그 도구의 플러그인 파일)를 넣습니다. `--claude`, `--codex`는 `--tool claude`, `--tool codex`와 같습니다 |
+| `muwi setup --all` | 깔려 있는 AI 도구 전부에 커넥터를 넣습니다 |
 | `muwi setup --remove` | `muwi setup`으로 설치한 것을 지웁니다. `muwi layout`으로 바꾼 화면도 되돌립니다 |
-| `muwi config` | 현재 설정을 보여 줍니다 |
-| `muwi config layout on\|off` | 화면에 muwi 칸이 없을 때 `muwi layout`을 권하는 안내를 켜거나 끕니다. 기본값은 `on`입니다 |
+| `muwi config` | 현재 설정을 보여 줍니다. 설정은 화면이 정합니다 (화면 없이 쓰면 설정이 없습니다) |
+| `muwi config layout on\|off` | (`herdr-muwi`) 화면에 muwi 칸이 없을 때 `muwi layout`을 권하는 안내를 켜거나 끕니다. 기본값은 `on`입니다 |
 
 각 항목이 무엇을 설치하고 설정하는지는 [설치와 설정](setup.md)에 있습니다.
 
@@ -136,7 +137,7 @@
 
 `start`를 기다리던 노드, 잠시 멈춘 노드, 다른 세션이 하던 노드에 실행하면 같은 회차로 이어집니다.
 
-## 새 세션에 맡기기
+## 새 세션에 맡기기 (`herdr-muwi`)
 
 Herdr 앱의 터미널 안에서만 동작합니다.
 
@@ -164,7 +165,8 @@ Herdr 앱의 터미널 안에서만 동작합니다.
 | `MUWI_DIR` | `~/.muwi` | 기록 폴더입니다 |
 | `MUWI_WORK` | 없음 | 명령이 다룰 작업 이름입니다. `--work`와 같습니다 |
 | `MUWI_SESSION` | Claude Code의 세션 id | 세션 이름을 직접 정합니다 |
+| `MUWI_HOST` | `muwi setup`이 적어 둔 화면 | 화면 모듈의 경로. `herdr-muwi`의 `muwi` 명령이 자기 화면으로 정합니다 |
 
 ## 내부 명령
 
-`muwi board`와 `muwi hook`은 그래프 칸과 훅이 쓰는 명령입니다. 직접 쓸 일이 없습니다.
+`muwi board`(`herdr-muwi`)와 `muwi hook`은 그래프 칸과 훅이 쓰는 명령입니다. 직접 쓸 일이 없습니다.
