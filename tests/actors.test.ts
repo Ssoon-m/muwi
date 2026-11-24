@@ -11,6 +11,7 @@ import { terminalName } from '../src/herdr.ts';
 import { parsePlan, diffPlan, carryStatus, addNode } from '../src/plan.ts';
 import { closedSessions } from '../src/live.ts';
 import { attach, readSession, touchSession } from '../src/session.ts';
+import { modelIn } from '../src/integrations/tools.ts';
 import { appendEvent, clock, readEvents, readPlan, writePlan, type NodeStatus, type Plan, type RunBy } from '../src/store.ts';
 import { PAST_DAYS, loadBoard, loadView } from '../src/view.ts';
 
@@ -391,6 +392,24 @@ test('맡긴 세션은 세션 시작을 알려 주지 않는 도구에서도 붙
   assert.equal(done.code, 0, done.err);
   const node = JSON.parse(muwi(['show', 'shop-1', '--json']).out).nodes.find((n: any) => n.id === 'impl');
   assert.deepEqual([node.status, node.who.kind, node.who.session], ['done', 'session', 'worker']);
+});
+
+test('모델의 fallback: muwi run으로 띄울 때 명령에 준 모델을 그 세션의 모델로 적는다 (훅이 모델을 알려 주지 않는 도구)', () => {
+  const { fake, muwi } = bench();
+  // 띄우는 명령에 모델을 정해 줬다. 터미널의 이름표와 기록에 남긴다
+  const r = muwi(['run', 'impl', '목록 화면에 링크를 추가해줘', '--agent', 'codex --model gpt-x']);
+  assert.equal(r.code, 0, r.err);
+  assert.match(fake.calls(), /\[--label\] \[muwi\.model=gpt-x\]/);
+  const spawn = JSON.parse(muwi(['show', 'shop-1', '--json']).out).nodes.find((n: any) => n.id === 'impl').spawn;
+  assert.equal(spawn.terminal, 't7');
+  // 그 터미널에서 뜬 세션: 훅이 모델을 알려 주지 않아도 첫 muwi 명령에서 이름표의 모델을 물려받는다
+  const labeled = fakeHerdr({ 'muwi.work': 'shop-1', 'muwi.node': 'impl', 'muwi.model': 'gpt-x' });
+  const worker = { MUWI_SESSION: 'worker', HC_TERMINAL_ID: 't7', MUWI_HC: labeled.hc, MUWI_HERDR_APP: labeled.app };
+  assert.equal(muwi(['node', 'impl', 'done', '링크 추가함'], worker).code, 0);
+  const who = JSON.parse(muwi(['show', 'shop-1', '--json']).out).nodes.find((n: any) => n.id === 'impl').who;
+  assert.deepEqual([who.kind, who.session, who.model], ['session', 'worker', 'gpt-x']);
+  // 모델을 주는 여러 모양을 읽는다. 없으면 적지 않는다 (짐작하지 않는다)
+  assert.deepEqual([modelIn(['codex', '--model', 'a']), modelIn(['gemini', '-m', 'b']), modelIn(['qwen', '--model=c']), modelIn(['claude']), modelIn(['x', '--model', '--other'])], ['a', 'b', 'c', undefined, undefined]);
 });
 
 test('muwi run: Herdr 밖이거나 없는 노드면 띄우지 않고 이유를 말한다', () => {

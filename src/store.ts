@@ -74,7 +74,7 @@ export type EventBody =
   /** 서브에이전트가 시작하고 끝난 것. 훅이 적는다. node·attempt: 뜰 때 그 세션이 하고 있던 노드 (그 노드를 도운 것으로 본다) */
   | ({ type: 'agent'; agent: string; what: 'start' | 'stop'; kind?: string } & Where)
   /** 노드를 맡길 새 세션을 띄웠다 (muwi run). terminal은 Herdr 터미널 주소, task는 그 세션에 맡긴 말 */
-  | { type: 'spawn'; node: string; terminal: string; name?: string; show?: ShowIn; task?: string; /** 새 세션을 띄운 폴더 */ cwd?: string }
+  | { type: 'spawn'; node: string; terminal: string; name?: string; show?: ShowIn; task?: string; /** 새 세션을 띄운 폴더 */ cwd?: string; /** 띄우는 명령에 준 모델 */ model?: string }
   /** muwi run으로 뜬 세션이 맡은 노드에 붙었다. 그 터미널에서 나중에 시작한 다른 대화는 다시 붙이지 않는다 */
   | { type: 'join'; node: string; terminal: string }
   | { type: 'flag'; node?: string; text: string }

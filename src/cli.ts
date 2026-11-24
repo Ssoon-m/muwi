@@ -4,7 +4,7 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { LABEL_NODE, LABEL_WORK, hc, herdrApp, terminalName, type Ran } from './herdr.ts';
+import { LABEL_MODEL, LABEL_NODE, LABEL_WORK, hc, herdrApp, terminalName, type Ran } from './herdr.ts';
 import { layoutFor, layoutProblems, type Fit, type Flow } from './layout.ts';
 import { ROOT, adoptSpawn, guideUpdate, handleHook, sessionInstructions } from './hook.ts';
 import { fromSubagent, markNode } from './node.ts';
@@ -14,7 +14,7 @@ import { resumeFacts } from './resume.ts';
 import { checkMod, installedTools, newestPlugin, olderThan, readInstall, refreshSetup, removeSetup, runSetup } from './setup.ts';
 import { adapterOf } from './integrations/index.ts';
 import { gaps } from './integrations/types.ts';
-import { TOOLS, launchCommand, toolById } from './integrations/tools.ts';
+import { TOOLS, launchCommand, modelIn, toolById } from './integrations/tools.ts';
 import { GRAPH_AT, ScreenError, applyLayout, ensurePreview, removeLayout, screenState, type GraphAt, type Screen } from './screen.ts';
 import {
   SCHEMA, SHOW_IN, appendEvent, checkWorkName, clock, listWorks, nowIso, readConfig, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
@@ -948,6 +948,8 @@ function cmdRun(a: Args, dir: string) {
   const given = other ? undefined : asked;
   const agent = (given ?? template[0]).trim().split(/\s+/).filter(Boolean);
   if (!agent.length) throw new Fail('--agent에 띄울 명령이 없어요');
+  // 띄우는 명령에 모델을 정해 줬으면 적어 둔다 (--agent "codex --model gpt-5"). 그 세션의 훅이 모델을 알려 주지 않아도 노드에 모델이 남는다
+  const model = modelIn(agent);
   const brief = `${task.trim()}\n\n(muwi) 작업 ${work}의 노드 ${id}(${node.title})를 맡았어요. 시작은 자동으로 적혀요. 끝나면 muwi node ${id} done "<결과 한 줄>"을 적고, hc send ${lead} "<결과나 막힌 점>"으로 알려요.`;
 
   // 이름은 Herdr의 목록에서 어느 노드인지 보이게 노드 id로 짓는다. 이미 있는 이름이면 뒤에 몇 글자를 붙인다
@@ -959,7 +961,7 @@ function cmdRun(a: Args, dir: string) {
     // 맡길 일은 명령 이름 바로 뒤에 둔다. 뒤에 두면 값을 여러 개 받는 옵션(--allowedTools 등)이 삼킨다
     // --agent로 준 명령은 그 모양 그대로. 주지 않았으면 그 도구가 첫 말을 받는 자리에 넣는다 (qwen -i "<첫 말>" 같은 것)
     const argv = given ? [agent[0], brief, ...agent.slice(1)] : template.map(part => (part === '{prompt}' ? brief : part));
-    started = hc(['run', '--bg', '--json', '--name', candidate, '--cwd', cwd, '--label', `${LABEL_WORK}=${work}`, '--label', `${LABEL_NODE}=${id}`, '--', ...argv]);
+    started = hc(['run', '--bg', '--json', '--name', candidate, '--cwd', cwd, '--label', `${LABEL_WORK}=${work}`, '--label', `${LABEL_NODE}=${id}`, ...(model ? ['--label', `${LABEL_MODEL}=${model}`] : []), '--', ...argv]);
     if (started.ok) break;
   }
   if (!started?.ok) throw new Fail(`새 세션을 띄우지 못했어요: ${(started?.err || started?.out || 'hc 명령이 없어요').trim()}`);
@@ -985,7 +987,7 @@ function cmdRun(a: Args, dir: string) {
 
   // 맡긴 말도 남긴다. 나중에 "맡긴 쪽이 무엇을 모르고 일했나"를 볼 수 있게
   // 띄운 폴더도 남긴다. 새 세션이 기록을 남기기 전에 닫혀도 어디서 이어 하면 되는지 알려 줄 수 있게 (worktree에 띄웠을 때)
-  appendEvent(dir, work, { type: 'spawn', node: id, terminal, name, ...(show ? { show } : {}), task: task.trim().slice(0, 2000), cwd: path.resolve(cwd) }, sessionKey());
+  appendEvent(dir, work, { type: 'spawn', node: id, terminal, name, ...(show ? { show } : {}), task: task.trim().slice(0, 2000), cwd: path.resolve(cwd), ...(model ? { model } : {}) }, sessionKey());
   join(dir, work);
   out(`새 세션을 띄웠어요: ${name} (${terminal}) → 노드 ${id}${placed ? ` · ${placed}` : ''}`);
   if (!sent) out(`맡길 일이 아직 전달되지 않았어요. hc read ${terminal}로 화면을 보고(폴더 신뢰 확인이 떠 있을 수 있어요) 풀어 준 뒤 hc send ${terminal} "<맡길 일>"로 다시 보내요.`);

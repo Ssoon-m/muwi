@@ -88,6 +88,19 @@ export function sessionFromEnv(env: NodeJS.ProcessEnv): string | null {
 /** 첫 말과 함께 새 대화를 띄우는 명령 ({prompt} 자리는 그대로 둔다). 모르는 도구면 Claude Code */
 export const launchCommand = (tool: string | undefined): string[] => (toolById(tool) ?? TOOLS[0]).launch;
 
+/**
+ * 띄우는 명령에 준 모델: --model x, --model=x, -m x. 없으면 undefined.
+ * 훅이 모델을 알려 주지 않는 도구에서도, muwi run으로 맡길 때 모델을 정해 줬으면 그 세션의 모델을 정확히 적을 수 있다
+ */
+export function modelIn(argv: string[]): string | undefined {
+  for (let i = 0; i < argv.length; i++) {
+    const eq = argv[i].match(/^--model=(.+)$/);
+    if (eq) return eq[1];
+    if ((argv[i] === '--model' || argv[i] === '-m') && argv[i + 1] && !argv[i + 1].startsWith('-')) return argv[i + 1];
+  }
+  return undefined;
+}
+
 /** 하던 대화를 다시 여는 명령. 그 도구가 이어 가기를 모르면 null */
 export function resumeCommand(tool: string | undefined, session: string): string[] | null {
   const t = toolById(tool);
