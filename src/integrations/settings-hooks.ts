@@ -58,15 +58,21 @@ function readSettings(file: string): Settings {
   return settings;
 }
 
-/** 설정 파일에 우리 훅을 넣는다 (없으면 만든다). 처음 고칠 때 원본을 .muwi.bak으로 남긴다 */
-export function installEntries(file: string, entries: HookEntry[]) {
+/**
+ * 설정 파일에 우리 훅을 넣는다 (없으면 만든다). 처음 고칠 때 원본을 .muwi.bak으로 남긴다.
+ * bare: 사건 표가 "hooks" 아래가 아니라 파일 맨 위에 있는 도구 (hooks.json)
+ */
+export function installEntries(file: string, entries: HookEntry[], bare = false) {
   const settings = readSettings(file);
   backup(file);
-  writeText(file, JSON.stringify(addHooks(settings, entries), null, 2) + '\n');
+  const next = bare ? (addHooks({ hooks: settings as Record<string, HookGroup[]> }, entries).hooks ?? {}) : addHooks(settings, entries);
+  writeText(file, JSON.stringify(next, null, 2) + '\n');
 }
 
 /** 설정 파일에서 우리 훅만 뺀다 */
-export function uninstallEntries(file: string) {
+export function uninstallEntries(file: string, bare = false) {
   if (!fs.existsSync(file)) return;
-  writeText(file, JSON.stringify(removeHooks(readSettings(file)), null, 2) + '\n');
+  const settings = readSettings(file);
+  const next = bare ? (removeHooks({ hooks: settings as Record<string, HookGroup[]> }).hooks ?? {}) : removeHooks(settings);
+  writeText(file, JSON.stringify(next, null, 2) + '\n');
 }
