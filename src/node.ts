@@ -45,7 +45,9 @@ export function markNode(dir: string, work: string, id: string, status: NodeStat
         type: 'node', node: id, status,
         ...(node.note ? { note: node.note } : {}),
         ...(node.attempt ? { attempt: node.attempt } : {}),
-        ...(status === 'doing' ? { ...(agent ? { agent } : {}), seen: Boolean(session?.hooked) } : {}),
+        // 시작할 때의 모델을 노드에 적어 둔다. 세션이 도중에 모델을 바꿔도 앞에서 한 노드의 기록은 그대로 남는다.
+        // 서브에이전트는 세션과 다른 모델을 쓸 수 있어서 세션의 모델로 적지 않는다
+        ...(status === 'doing' ? { ...(agent ? { agent } : {}), seen: Boolean(session?.hooked), ...(!agent && session?.model ? { model: session.model } : {}) } : {}),
       }, key, at);
     }
     return plan;

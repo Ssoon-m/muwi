@@ -27,6 +27,8 @@ export type Actor = {
   /** me: 대화가 직접 했다. session: muwi run으로 뜬 새 세션이 했다. subagent: 서브에이전트가 했다 */
   kind: 'me' | 'session' | 'subagent';
   session?: string;
+  /** 이 회차를 시작할 때 그 세션이 쓰던 모델. 서브에이전트가 한 회차에는 없다 */
+  model?: string;
   /** 이 회차에 있었던 서브에이전트. own: 노드를 직접 시작했다. 아니면 그 세션이 이 노드를 하는 동안 떠서 도왔다 */
   agents: { id: string; kind?: string; own?: boolean }[];
 };
@@ -149,7 +151,7 @@ export type WorkView = {
   counts: Record<NodeStatus, number> & { total: number };
 };
 
-type Doer = { session: string | null; agent?: string };
+type Doer = { session: string | null; agent?: string; model?: string };
 type Draft = {
   n: number;
   startedAt?: string;
@@ -216,7 +218,9 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
         delete d.endedAt;
         if (d.openFrom === null) d.openFrom = ms(e.at);
         const last = d.doers[d.doers.length - 1];
-        if (!last || last.session !== e.session || last.agent !== e.agent) d.doers.push({ session: e.session, ...(e.agent ? { agent: e.agent } : {}) });
+        if (!last || last.session !== e.session || last.agent !== e.agent) d.doers.push({ session: e.session, ...(e.agent ? { agent: e.agent } : {}), ...(e.model ? { model: e.model } : {}) });
+        // 같은 쪽이 다시 시작하면서 모델이 바뀌었으면 마지막 것
+        else if (e.model) last.model = e.model;
         if (e.agent) {
           owners.add(e.agent);
           seenAgents.add(e.agent);
@@ -288,6 +292,7 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
         who = {
           kind,
           ...(owner.session ? { session: owner.session } : {}),
+          ...(owner.model ? { model: owner.model } : {}),
           agents: [
             ...own.map(id => ({ id, ...(kinds.get(id) ? { kind: kinds.get(id) } : {}), own: true })),
             ...helped.map(id => ({ id, ...(kinds.get(id) ? { kind: kinds.get(id) } : {}) })),
