@@ -78,6 +78,8 @@ export type NodeView = PlanNode & {
   instant: boolean;
   /** 끝나지 않았는데 이 노드를 하던 세션이 닫혔다. 하다가 멈춘 것이다 (끝났는지는 알 수 없다) */
   closed?: boolean;
+  /** 하는 중이라고 적혀 있는데 이 노드를 하던 세션이 일을 멈췄다. 그래프는 돌지 않는 것으로 그린다 */
+  quiet?: Quiet;
   /** 시작했다가 잠시 멈췄다 (앞에 먼저 할 노드가 끼어드는 등). 다시 시작하면 같은 회차로 이어진다 */
   paused?: boolean;
   /** 앞 노드가 끝나기 전에 시작했다 (그래프 흐름보다 순서를 앞당겼다) */
@@ -98,6 +100,14 @@ export type WorkState = 'waiting' | 'blocked' | 'doing' | 'stalled' | 'done';
  * gone: 이 작업을 맡은 세션이 없다(멈춤. 닫혔거나 다른 작업으로 갔다), unknown: 세션이 무얼 하는지 알 수 없다(Herdr 밖. 작업 중으로 본다)
  */
 export type Between = 'working' | 'asking' | 'stopped' | 'gone' | 'unknown';
+/**
+ * 하는 중이라고 적힌 노드를 하던 세션이 일을 멈춘 모습. 노드의 상태는 AI가 적은 것이라, 세션이 멈추면(사용 한도, 권한 확인, 말을 끝냄) 적어 줄 쪽이 없어 계속 작업 중으로 남는다.
+ * 그래서 세션이 지금 무얼 하는지는 Herdr에 묻는다. 도구가 무엇이든 Herdr가 아는 세션이면 된다.
+ * asking: 세션이 입력을 기다린다, stopped: 세션이 멈춰서 다음 말을 기다린다. 둘 다 사람이 말해야 다시 움직인다 (응답 대기)
+ */
+export type Quiet = 'asking' | 'stopped';
+/** Herdr가 알려 준 세션 상태가 일을 멈춘 것이면 어떻게 멈췄는지. 일하는 중이거나 모르면(Herdr 밖) 없다 */
+export const quietOf = (status?: string): Quiet | undefined => (!status || status === 'working' ? undefined : status === 'blocked' ? 'asking' : 'stopped');
 const BETWEEN_STATE: Record<Between, WorkState> = { working: 'doing', asking: 'waiting', stopped: 'waiting', gone: 'stalled', unknown: 'doing' };
 
 export type SessionInfo = {
@@ -128,9 +138,12 @@ export type WorkView = {
   updatedAt: string;
   /**
    * waiting: 사람의 응답을 기다리는 노드가 있다 > blocked: 막힌 노드가 있다 > doing > stalled: 하던 세션이 닫혀 멈췄다 > done: 모두 끝.
-   * 하는 노드가 없으면 그 작업에 붙어 있는 세션이 하는 일로 정한다 (between)
+   * 하는 노드가 없으면 그 작업에 붙어 있는 세션이 하는 일로 정한다 (between).
+   * 하는 노드가 있어도 그 세션들이 모두 일을 멈췄으면 응답 대기다 (quiet)
    */
   state: WorkState;
+  /** 하는 노드를 하던 세션들이 모두 일을 멈춰서 응답 대기가 됐다. 하나라도 입력을 기다리면 asking */
+  quiet?: Quiet;
   /** 하는 노드가 없을 때(앞 노드를 끝내고 다음 노드를 아직 시작하지 않음), 그 작업에 붙어 있는 세션이 하는 일 */
   between?: Between;
   /** 새 결과: 모두 끝났는데 사람이 아직 보지 않았다 (끝난 뒤에 viewed 기록이 없다) */
@@ -356,6 +369,9 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
       else view.runUnknown = true;
     }
     if ((n.status === 'doing' || n.status === 'waiting' || n.status === 'blocked') && last?.who?.session && closed.has(last.who.session)) view.closed = true;
+    // 서브에이전트가 하는 노드도 그 세션의 상태로 본다. 뒤에서 도는 서브에이전트를 기다리는 세션은 Herdr가 일하는 중으로 알려 준다
+    const quiet = n.status === 'doing' && !view.closed && last?.who?.session ? quietOf(sessions[last.who.session]?.status) : undefined;
+    if (quiet) view.quiet = quiet;
     if (n.status === 'todo' && (n.attempt ?? 0) > 0) view.paused = true;
     if ((n.status === 'doing' || n.status === 'waiting') && (n.after ?? []).some(p => plan.nodes.find(x => x.id === p)?.status !== 'done')) view.early = true;
     if (mine.length) view.spawn = mine[mine.length - 1];
@@ -366,10 +382,15 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
   for (const n of nodes) counts[n.status] += 1;
   // 작업의 상태는 살아 있는 세션이 하는 노드로 정한다. 닫힌 세션이 남긴 "응답 대기"가 목록 맨 위에 붙어 있지 않게
   const alive = (status: NodeStatus) => nodes.some(n => n.status === status && !n.closed);
+  // 하는 노드를 하던 세션이 모두 일을 멈췄으면 응답 대기다. 하나라도 일하고 있거나 알 수 없으면 작업 중으로 둔다
+  const doing = nodes.filter(n => n.status === 'doing' && !n.closed);
+  const quiet: Quiet | undefined =
+    alive('waiting') || alive('blocked') || !doing.length || doing.some(n => !n.quiet) ? undefined
+    : doing.some(n => n.quiet === 'asking') ? 'asking' : 'stopped';
   const base: WorkState | null =
     alive('waiting') ? 'waiting'
     : alive('blocked') ? 'blocked'
-    : alive('doing') ? 'doing'
+    : alive('doing') ? (quiet ? 'waiting' : 'doing')
     : nodes.some(n => n.closed) ? 'stalled'
     : counts.total > 0 && counts.done === counts.total ? 'done'
     : null;
@@ -396,6 +417,7 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
     updatedAt: lastAt > plan.updatedAt ? lastAt : plan.updatedAt,
     state,
     ...(between ? { between } : {}),
+    ...(quiet ? { quiet } : {}),
     ...(unread ? { unread: true } : {}),
     nodes,
     edges: plan.nodes.flatMap(n => n.after.filter(a => byId.has(a)).map(a => ({ from: a, to: n.id }))),
@@ -469,11 +491,14 @@ const ORDER: Record<WorkState, number> = { waiting: 0, blocked: 1, doing: 2, sta
 /** 이만큼 지나도록 바뀐 것이 없으면 "지난 작업"으로 접는다. 지우지는 않는다 */
 export const PAST_DAYS = 7;
 
-export type WorkSummary = Pick<WorkView, 'work' | 'title' | 'request' | 'state' | 'between' | 'unread' | 'updatedAt' | 'counts'> & {
+export type WorkSummary = Pick<WorkView, 'work' | 'title' | 'request' | 'state' | 'between' | 'quiet' | 'unread' | 'updatedAt' | 'counts'> & {
   /** 이 작업을 한 대화(세션)들: 계획을 낸 대화 먼저, 나머지는 최근에 본 순. 그래프 칸이 누를 때 그 대화로 간다 */
   talks?: string[];
-  /** 지금 눈여겨볼 노드들: 사람을 기다리는 것, 막힌 것, 하는 중인 것. closed: 그 노드를 하던 세션이 닫혔다 */
-  active: { id: string; title: string; status: NodeStatus; note?: string; closed?: boolean }[];
+  /**
+   * 지금 눈여겨볼 노드들: 사람을 기다리는 것, 막힌 것, 하는 중인 것. closed: 그 노드를 하던 세션이 닫혔다.
+   * quiet: 그 노드를 하던 세션이 일을 멈췄다. terminal: 그 세션의 터미널 (그래프 칸이 지금 상태를 다시 볼 때 쓴다)
+   */
+  active: { id: string; title: string; status: NodeStatus; note?: string; closed?: boolean; quiet?: Quiet; terminal?: string }[];
   /** 지난 작업: 끝났거나 멈춘 채로 오래됐다. 목록에서 접어 둔다 */
   past: boolean;
   /** 이 작업으로 갈 때 열 Herdr 터미널. 모르면 없다 */
@@ -512,7 +537,7 @@ export function loadBoard(dir: string, env: NodeJS.ProcessEnv = process.env): { 
       if (!v) continue;
       // 살아 있는 세션이 하고 있는 작업은 오래돼도 접지 않는다
       // 세션이 무얼 하는지 모르는 작업(Herdr 밖)도 오래 그대로면 접는다
-      const quiet = v.state === 'done' || v.state === 'stalled' || v.between === 'unknown';
+      const still = v.state === 'done' || v.state === 'stalled' || v.between === 'unknown';
       const terminal = terminalOf(v);
       works.push({
         work: v.work,
@@ -520,15 +545,22 @@ export function loadBoard(dir: string, env: NodeJS.ProcessEnv = process.env): { 
         request: v.request,
         state: v.state,
         ...(v.between ? { between: v.between } : {}),
+        ...(v.quiet ? { quiet: v.quiet } : {}),
         talks: talksOf(v),
         ...(v.unread ? { unread: true } : {}),
         updatedAt: v.updatedAt,
         counts: v.counts,
         active: v.nodes
           .filter(n => n.status === 'waiting' || n.status === 'blocked' || n.status === 'doing')
-          .map(n => ({ id: n.id, title: n.title, status: n.status, ...(n.note ? { note: n.note } : {}), ...(n.closed ? { closed: true } : {}) })),
+          .map(n => {
+            const at = n.session ? v.sessions[n.session]?.terminal : undefined;
+            return {
+              id: n.id, title: n.title, status: n.status, ...(n.note ? { note: n.note } : {}), ...(n.closed ? { closed: true } : {}),
+              ...(n.quiet ? { quiet: n.quiet } : {}), ...(n.status === 'doing' && !n.closed && at ? { terminal: at } : {}),
+            };
+          }),
         // 아직 안 본 결과는 오래돼도 접지 않는다
-        past: quiet && !v.unread && now - Date.parse(v.updatedAt) > PAST_DAYS * 86_400_000,
+        past: still && !v.unread && now - Date.parse(v.updatedAt) > PAST_DAYS * 86_400_000,
         ...(terminal ? { terminal } : {}),
       });
     } catch (e: any) {
