@@ -4,7 +4,7 @@ muwi가 하지 못하는 것과, 기록을 읽을 때 조심할 점입니다. �
 
 ## 환경
 
-- **Claude Code에서 씁니다.** Codex에는 `muwi setup --codex`로 지침만 넣을 수 있습니다. 훅이 없어서 읽은 skill이 기록되지 않고 계획 알림도 없습니다.
+- **Claude Code와, 통합을 넣은 AI 도구에서 씁니다.** 도구마다 훅이 주는 만큼만 됩니다. 도구별로 안 되는 것은 [설치와 설정](setup.md#다른-ai-도구에-넣기)의 표에 있습니다. 훅도 플러그인도 없는 도구는 지침을 넣어 계획과 진행만 기록할 수 있습니다.
 - **그래프 보기, 새 세션 띄우기, 닫힌 세션 알아채기는 Herdr 앱 안에서만 됩니다.** 다른 환경에서는 `muwi status`와 `muwi show`로 글만 봅니다.
 - **Node 24 이상이 필요합니다.** npm 패키지는 없습니다.
 - **Windows는 CI에서 확인한 만큼만 보장합니다.** 시험 전체, Git Bash로 훅 실행, PowerShell·cmd의 `muwi.cmd`를 확인합니다. Windows용 Herdr 앱의 그래프 칸과 실제 Claude Code 세션의 훅 호출은 확인하지 못했습니다. Git for Windows가 없으면 훅이 돌지 않습니다.

@@ -132,15 +132,50 @@ git clone https://github.com/Ssoon-m/muwi.git ~/muwi
 
 `--claude`는 훅을 `~/.claude/settings.json`에, 사용법 skill을 `~/.claude/skills/muwi`에 넣습니다. 고치기 전의 설정은 `settings.json.muwi.bak`으로 남기고, 다른 훅은 건드리지 않습니다.
 
-## Codex에 설치하기
+## 다른 AI 도구에 넣기
+
+muwi는 Claude Code 말고도 Herdr가 지원하는 AI 도구에서 씁니다. 도구마다 "통합"을 넣으면 그 도구의 세션도 같은 기록에 적히고 같은 그래프에 나옵니다. 리뷰는 Codex 세션이, 구현은 Claude Code 세션이 맡아도 작업 하나의 그래프 하나입니다.
 
 ```sh
-muwi setup --codex
+muwi setup --tools                 # 아는 도구, 이 컴퓨터에 깔렸는지, 통합을 넣었는지
+muwi setup --tool codex            # 그 도구에 통합을 넣습니다. 여러 개는 쉼표로: --tool codex,cursor
+muwi setup --all                   # 깔려 있는 도구 전부에 넣습니다 (Claude Code는 플러그인이 넣어 주므로 뺍니다)
 ```
 
-`~/.codex/AGENTS.md`에 지침을, `~/.codex/skills/muwi`에 사용법 skill을 넣습니다.
+통합이 넣는 것은 세 가지입니다. 넣은 것은 `~/.muwi/setup.json`에 적어 두고, `muwi setup --remove`가 우리 것만 뺍니다. 남의 훅과 지침은 건드리지 않고, 처음 고치는 파일은 `.muwi.bak`으로 원본을 남깁니다.
 
-Codex에는 훅이 없습니다. AI가 계획과 진행을 기록할 수는 있지만, 읽은 skill이 기록되지 않고 계획 알림도 없습니다.
+| 넣는 것 | 설명 |
+| --- | --- |
+| 지침 | 그 도구가 늘 읽는 지침 파일(`AGENTS.md` 등)에 muwi 지침을 구간 표시로 넣습니다. 그런 파일이 없는 도구는 세션이 시작될 때 훅이 넣습니다 |
+| 사용법 skill | 그 도구의 skill 폴더에 `muwi` skill을 넣습니다 |
+| 훅 또는 플러그인 | 세션 시작, 사람이 말할 때, 파일을 고치거나 서브에이전트를 띄우기 전, skill을 읽은 뒤에 muwi를 부르게 합니다 |
+
+| 도구 | 이름 (`--tool`) | 훅·플러그인을 넣는 곳 | 이 도구에서 안 되는 것 |
+| --- | --- | --- | --- |
+| Claude Code | `claude` | 플러그인. 플러그인 없이 쓰면 `~/.claude/settings.json` | |
+| Codex | `codex` | `~/.codex/hooks.json` | push 앞에서 묻기. 넣은 뒤 Codex에서 `/hooks`로 한 번 믿어 줘야 합니다 |
+| GitHub Copilot CLI | `copilot` | `~/.copilot/hooks/muwi.json` | 말할 때 지침 다시 넣기, 서브에이전트 표시 |
+| Cursor CLI | `cursor` | `~/.cursor/hooks.json` | 말할 때 지침 다시 넣기, push 앞에서 묻기 |
+| Qwen Code | `qwen` | `~/.qwen/settings.json` | |
+| Qoder CLI | `qodercli` | `~/.qoder/settings.json` | |
+| Kimi Code | `kimi` | `~/.kimi-code/config.toml` | push 앞에서 묻기, 서브에이전트 표시 |
+| Antigravity CLI | `antigravity-cli` | `~/.gemini/config/hooks.json` | 말할 때 지침 다시 넣기, 서브에이전트 표시 |
+| Droid | `droid` | `~/.factory/hooks.json` (없으면 `settings.json`) | push 앞에서 묻기, 서브에이전트 표시 |
+| Devin CLI | `devin` | `~/.config/devin/config.json` | push 앞에서 묻기, 서브에이전트 표시 |
+| Grok CLI | `grok` | `~/.grok/hooks/muwi.json` | 말할 때 지침 다시 넣기 |
+| Mastra Code | `mastracode` | `~/.mastracode/hooks.json` | 말할 때 지침 다시 넣기, push 앞에서 묻기, 서브에이전트 표시 |
+| Letta Code | `letta` | `~/.letta/settings.json` | push 앞에서 묻기, 서브에이전트 표시 |
+| OpenCode | `opencode` | `~/.config/opencode/plugins/muwi.js` | push 앞에서 묻기 |
+| Kilo CLI | `kilo` | `~/.config/kilo/plugin/muwi.js` | push 앞에서 묻기 |
+| oh-my-pi | `omp` | `~/.omp/agent/extensions/muwi.ts` | |
+| Pi | `pi` | `~/.pi/agent/extensions/muwi.ts` | 서브에이전트 (Pi에 없습니다) |
+| Hermes Agent | `hermes` | `~/.hermes/plugins/muwi/` | 넣은 뒤 `hermes plugins enable muwi`로 켜 줘야 합니다 |
+
+표에 없는 것은 그 도구에서도 됩니다: 계획·진행 기록, 그래프, 계획 없이 고칠 때 알림, 읽은 skill 기록, 모델 기록, 새 세션에 맡기기.
+
+- **"말할 때 지침 다시 넣기"가 안 되는 도구**는 muwi를 업데이트한 뒤 열려 있던 세션을 새로 열어야 새 지침을 받습니다.
+- **셸 명령에 세션 id를 넘겨주지 않는 도구**(Claude Code, Codex, Kimi Code, Pi, oh-my-pi, Hermes 말고는 모두)는 Herdr의 터미널을 세션으로 봅니다. 같은 터미널에서 새 대화를 열면 앞 대화와 같은 세션으로 적힙니다.
+- 통합은 각 도구의 공식 문서와 Herdr가 그 도구에 넣는 통합을 따라 만들었습니다. 도구가 훅의 모양을 바꾸면 muwi도 따라 고쳐야 합니다.
 
 ## Windows에서 쓰기
 

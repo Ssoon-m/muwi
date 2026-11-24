@@ -98,7 +98,7 @@ muwi run impl "목록 화면에 상세 링크를 추가해줘. 범위는 src/pro
 
 - 그 세션은 뜨면서 이 작업의 그 노드에 붙고, 시작이 적힌다. 끝과 기다림은 그 세션이 적는다 (그 세션에 방법이 전달된다).
 - `--show pane`은 이 터미널 오른쪽(`--down`이면 아래)에, `--show tab`은 새 tab에 놓는다. 주지 않으면 계획의 `show`를 따르고, 그것도 없으면 칸 없이 띄운다. 칸이 없어도 Herdr의 에이전트 목록과 그래프에는 보인다. 사용자의 키보드 포커스는 옮기지 않는다.
-- `--cwd`는 그 세션이 일할 폴더(worktree 등), `--agent`는 띄울 명령이다 (기본 `claude`. 예: `--agent "claude --model sonnet"`). `--name`은 Herdr 목록에 보일 이름이고 기본은 노드 id다.
+- `--cwd`는 그 세션이 일할 폴더(worktree 등), `--agent`는 띄울 도구나 명령이다. 주지 않으면 지금 세션과 같은 도구로 띄운다. 다른 도구에 맡기려면 도구 이름을 준다 (`--agent codex`. 리뷰는 Codex, 구현은 Claude Code처럼 나눠도 같은 계획과 그래프에 적힌다). 명령을 직접 줄 수도 있다 (`--agent "claude --model sonnet"`). `--name`은 Herdr 목록에 보일 이름이고 기본은 노드 id다.
 - 기다릴 때는 `hc wait --children any`(끝나거나 물어볼 게 생기면 돌아온다), 화면을 볼 때는 `hc read <주소>`, 말을 걸 때는 `hc send <주소> "…"`. 자세한 것은 `hc --skill`에 있다.
 
 ### 맡길 때 지시에 넣을 것
