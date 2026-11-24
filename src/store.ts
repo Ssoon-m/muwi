@@ -67,13 +67,14 @@ export type EventBody =
    * attempt: 몇 번째 회차의 일인지. agent: 서브에이전트가 한 것이면 그 id.
    * seen: (시작할 때) 이 세션을 훅이 보고 있었는지. false면 이 회차에서 읽은 skill은 관찰하지 못한 것이다
    */
-  | { type: 'node'; node: string; status: NodeStatus; note?: string; attempt?: number; agent?: string; seen?: boolean }
+  /** model: 그 노드를 시작할 때 그 세션이 쓰던 모델 (도구의 훅이 알려 줄 때) */
+  | { type: 'node'; node: string; status: NodeStatus; note?: string; attempt?: number; agent?: string; declared?: boolean; seen?: boolean; model?: string }
   /** agent: 서브에이전트가 읽었으면 그 id. node·attempt: 읽을 때 하고 있던 노드 (없으면 어느 노드도 하고 있지 않았다) */
   | ({ type: 'skill'; skill: string; via: 'tool' | 'file'; carried?: boolean; agent?: string } & Where)
   /** 서브에이전트가 시작하고 끝난 것. 훅이 적는다. node·attempt: 뜰 때 그 세션이 하고 있던 노드 (그 노드를 도운 것으로 본다) */
   | ({ type: 'agent'; agent: string; what: 'start' | 'stop'; kind?: string } & Where)
   /** 노드를 맡길 새 세션을 띄웠다 (muwi run). terminal은 Herdr 터미널 주소, task는 그 세션에 맡긴 말 */
-  | { type: 'spawn'; node: string; terminal: string; name?: string; show?: ShowIn; task?: string; /** 새 세션을 띄운 폴더 */ cwd?: string }
+  | { type: 'spawn'; node: string; terminal: string; name?: string; show?: ShowIn; task?: string; /** 새 세션을 띄운 폴더 */ cwd?: string; /** 띄우는 명령에 준 모델 */ model?: string }
   /** muwi run으로 뜬 세션이 맡은 노드에 붙었다. 그 터미널에서 나중에 시작한 다른 대화는 다시 붙이지 않는다 */
   | { type: 'join'; node: string; terminal: string }
   | { type: 'flag'; node?: string; text: string }
@@ -233,19 +234,17 @@ export function listWorks(dir: string): string[] {
 
 /** 켜고 끄는 것 (muwi config). 파일이 없으면 기본값 */
 export type Config = {
-  /** 계획을 적지 않은 세션이 파일을 고치거나 서브에이전트를 띄우려 할 때 알린다 */
-  nudge: boolean;
-  /** push·PR·댓글 앞에서 사람에게 묻는다 */
-  guard: boolean;
   /** Herdr 앱 화면에 muwi 칸이 없을 때 넣자고 안내한다 (muwi setup, 그래프 칸) */
   layout: boolean;
 };
-export const DEFAULT_CONFIG: Config = { nudge: true, guard: false, layout: true };
+export const DEFAULT_CONFIG: Config = { layout: true };
 const configFile = (dir: string) => path.join(dir, 'config.json');
 
 export function readConfig(dir: string): Config {
   try {
-    return { ...DEFAULT_CONFIG, ...(readJson<Partial<Config>>(configFile(dir)) ?? {}) };
+    // 0.6.0에서 뺀 nudge, guard 같은 옛 값은 읽지 않는다
+    const saved = readJson<Partial<Config>>(configFile(dir)) ?? {};
+    return { layout: saved.layout ?? DEFAULT_CONFIG.layout };
   } catch {
     return { ...DEFAULT_CONFIG };
   }

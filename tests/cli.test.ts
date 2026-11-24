@@ -140,7 +140,7 @@ test('새 결과: 끝났는데 안 본 작업은 status에 새 결과로 보이�
   muwi(['node', 'a', 'start']);
   muwi(['node', 'a', 'done', '결과']);
   assert.match(muwi(['status']).out, /새 결과\s+nr\s+1\/1/);
-  assert.match(muwi(['show']).out, /nr · 끝 · 아직 안 봄 \(1\/1 끝\)/);
+  assert.match(muwi(['show']).out, /nr · 끝 · 아직 안 봄 \(1\/1 끝 · 작업 \d+s\)/);
   assert.match(muwi(['viewed', '--work', 'nr']).out, /nr: 본 것으로 적었어요/);
   assert.match(muwi(['status']).out, /끝\s+nr\s+1\/1/);
   // 이미 봤으면 다시 적지 않는다
@@ -156,7 +156,7 @@ test('muwi show·status·board: 사람이 읽는 글과 화면이 읽는 JSON', 
   muwi(['node', 'impl', 'wait', 'A안과 B안 중 어느 쪽?']);
   muwi(['flag', 'read', '미정 항목을 놓침']);
   const show = muwi(['show']).out;
-  assert.match(show, /w · 연수원명 클릭 시 상세 이동 · 응답 대기 \(1\/3 끝\)/);
+  assert.match(show, /w · 연수원명 클릭 시 상세 이동 · 응답 대기 \(1\/3 끝 · 작업 \d+s\)/);
   assert.match(show, /읽은 skill: spec-reader/);
   assert.match(show, /기다리는 것: A안과 B안 중 어느 쪽\?/);
   assert.match(show, /⚑ 문제 표시 .*미정 항목을 놓침/);
@@ -210,18 +210,23 @@ test('muwi hook: 깨진 입력에도 조용히 끝난다 (세션을 방해하지
   assert.equal(r.code, 0);
   assert.equal(r.out, '');
   assert.match(fs.readFileSync(path.join(dir, '.hook-errors.log'), 'utf8'), /JSON/);
-  // push 앞에서 묻기는 켰을 때만
+  // 셸 명령은 막지 않는다. 무엇을 승인받고 할지는 muwi가 정하지 않는다 (push 앞에서 묻기는 0.6.0에서 뺐다).
+  // 0.5.x의 훅 설정이 부르는 이름(guard)도 그대로 받아서 조용히 지나간다
   const push = JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git push origin HEAD' } });
+  assert.equal(muwi(['hook', 'command'], { input: push }).out, '');
   assert.equal(muwi(['hook', 'guard'], { input: push }).out, '');
-  assert.match(muwi(['config', 'guard', 'on']).out, /guard\s+on/);
-  assert.equal(JSON.parse(muwi(['hook', 'guard'], { input: push }).out).hookSpecificOutput.permissionDecision, 'ask');
+  const gone = muwi(['config', 'guard', 'on']);
+  assert.notEqual(gone.code, 0);
+  assert.match(gone.err, /0\.6\.0에서 뺐어요/);
+  assert.equal(muwi(['hook', 'guard'], { input: push }).out, '');
   const editing = JSON.stringify({ session_id: 'new-session', hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: '/repo/src/a.ts' } });
-  assert.equal(JSON.parse(muwi(['hook', 'nudge'], { input: editing }).out).hookSpecificOutput.permissionDecision, 'deny');
-  assert.equal(JSON.parse(muwi(['hook', 'nudge'], { input: editing }).out).hookSpecificOutput.permissionDecision, 'deny');
-  // 계획 없이 진행한다고 밝히면 그친다
-  assert.match(muwi(['skip']).err, /사용법/);
-  assert.match(muwi(['skip', '오타 수정'], { session: 'new-session' }).out, /계획 없이 진행해요: 오타 수정/);
+  // 계획 없는 세션의 파일 수정도 막지 않는다 (0.5.x의 계획 알림은 0.6.0에서 뺐다). 옛 훅 설정이 부르는 nudge도 조용히 지나간다
   assert.equal(muwi(['hook', 'nudge'], { input: editing }).out, '');
+  assert.equal(muwi(['hook'], { input: editing }).out, '');
+  // 옛 지침을 받은 세션이 muwi skip을 불러도 실패하지 않는다
+  const skip = muwi(['skip', '오타 수정'], { session: 'new-session' });
+  assert.equal(skip.code, 0);
+  assert.match(skip.out, /적지 않아도 돼요/);
 });
 
 test('이름 없이 낸 계획은 이 세션이 하던 작업만 바꾼다 (같은 폴더의 남의 작업을 덮어쓰지 않는다)', () => {
@@ -237,10 +242,10 @@ test('이름 없이 낸 계획은 이 세션이 하던 작업만 바꾼다 (같�
 test('muwi config·version·setup', () => {
   const { dir, muwi } = bench();
   assert.match(muwi(['--version']).out, /^\d+\.\d+\.\d+\n$/);
-  assert.match(muwi(['config']).out, /nudge\s+on[\s\S]*guard\s+off[\s\S]*layout\s+on/);
+  assert.match(muwi(['config']).out, /^layout\s+on/);
   assert.match(muwi(['config', 'layout', 'off']).out, /layout\s+off/);
-  assert.match(muwi(['config', 'nudge', 'off']).out, /nudge\s+off/);
-  assert.match(muwi(['config', 'nudge', 'maybe']).err, /사용법: muwi config/);
+  assert.match(muwi(['config', 'layout', 'maybe']).err, /사용법: muwi config/);
+  assert.match(muwi(['config', 'nudge', 'off']).err, /계획 알림\(nudge\)은 0\.6\.0에서 뺐어요/);
   // 빈 홈 폴더에 setup: 터미널용 명령만 생긴다
   const setup = muwi(['setup']);
   assert.equal(setup.code, 0, setup.err);
@@ -266,11 +271,11 @@ test('hook.sh: 볼 것만 넘기고, 세션 시작에는 지침을 돌려준다'
   hook({ session_id: 's1', hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: { file_path: '/repo/src/app.ts' } });
   hook({ session_id: 's1', hook_event_name: 'PostToolUse', tool_name: 'Skill', tool_input: { skill: 'team-rules' }, tool_response: { success: true } });
   assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(path.join(dir, '.sessions', 's1.json'), 'utf8')).loaded), ['team-rules']);
-  // 계획 없는 세션의 파일 수정은 돌려보내고, 건너뛴다고 밝힌 뒤에는 조용히 지나간다
+  // 계획 없는 세션의 파일 수정에도 답하지 않는다 (0.5.x의 훅 설정이 부르는 nudge 갈래는 조용히 지나간다)
   const edit = { session_id: 's1', hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: '/repo/src/app.ts' } };
-  assert.equal(JSON.parse(hook(edit, 'nudge')).hookSpecificOutput.permissionDecision, 'deny');
-  fs.writeFileSync(path.join(dir, '.sessions', 's1.ok'), '');
   assert.equal(hook(edit, 'nudge'), '');
+  // 사람이 말할 때의 입력은 넘기지 않는다
+  assert.equal(hook({ session_id: 's1', hook_event_name: 'UserPromptSubmit', prompt: '다음 일' }), '');
 });
 
 test('출력을 받는 쪽이 먼저 닫아도 (muwi show | head) 오류를 쏟지 않는다', SH, () => {
@@ -345,4 +350,78 @@ test('그래프 흐름: 하던 노드 앞에 먼저 할 노드가 끼어들면 �
   assert.deepEqual([again.status, again.attempts, again.paused], ['doing', 1, undefined]);
   // 직접 멈출 수도 있다
   assert.match(muwi(['node', 'check', 'pause']).out, /check 잠시 멈춤/);
+});
+
+test('서브에이전트가 스스로 밝힌다 (--sub): 그 노드는 서브에이전트가 한 것으로 적히고, --work를 붙여도 부모 세션이 붙은 작업은 그대로다', () => {
+  const { dir, muwi } = bench();
+  // 부모 세션이 작업 둘을 적었다. 지금 붙어 있는 것은 나중에 적은 b다
+  muwi(['plan', '--work', 'a', PLAN]);
+  muwi(['plan', '--work', 'b', PLAN]);
+  const attached = () => JSON.parse(fs.readFileSync(path.join(dir, '.sessions', 'lead.json'), 'utf8')).work;
+  assert.equal(attached(), 'b');
+  // 서브에이전트는 세션 id가 부모와 같다. 맡은 노드를 --sub로 시작한다 (훅이 서브에이전트를 알려 주지 않는 도구에서도 된다)
+  const start = muwi(['node', 'read', 'start', '--sub', '--work', 'a']);
+  assert.equal(start.code, 0, start.err);
+  assert.equal(attached(), 'b');
+  const who = () => JSON.parse(muwi(['show', 'a', '--json']).out).nodes.find((n: any) => n.id === 'read').who;
+  assert.equal(who().kind, 'subagent');
+  assert.match(who().agents[0].id, /^sub-[0-9a-f]{8}$/);
+  // 끝을 적을 때 --sub를 빼먹어도 서브에이전트가 맡은 노드라 부모는 옮겨지지 않는다
+  const done = muwi(['node', 'read', 'done', '결과', '--work', 'a']);
+  assert.equal(done.code, 0, done.err);
+  assert.equal(attached(), 'b');
+  assert.equal(who().kind, 'subagent');
+  assert.match(muwi(['show', 'a']).out, /서브에이전트/);
+  // 부모 세션이 직접 --work를 붙여 적으면 전처럼 그 작업에 붙는다
+  muwi(['node', 'impl', 'start', '--work', 'a']);
+  assert.equal(attached(), 'a');
+});
+
+test('지침: muwi guide가 원본을 보여 주고, muwi가 업데이트되면 부모 세션의 다음 적는 명령 끝에 새 지침이 한 번 붙는다', () => {
+  const { dir, muwi } = bench();
+  assert.match(muwi(['guide']).out, /## 작업 진행 방식 \(muwi\)/);
+  muwi(['plan', '--work', 'a', PLAN]);
+  // 지침이 그대로면 아무것도 붙지 않는다
+  assert.doesNotMatch(muwi(['node', 'read', 'start']).out, /업데이트됐다/);
+  // 이 세션이 옛 지침을 받은 것으로 해 둔다 (muwi가 그 뒤에 업데이트됐다)
+  const file = path.join(dir, '.sessions', 'lead.json');
+  const old = () => fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, 'utf8')), instructions: 'old-guide' }));
+  old();
+  // 읽기만 하는 명령에는 붙이지 않는다
+  assert.doesNotMatch(muwi(['status']).out, /업데이트됐다/);
+  // 서브에이전트의 명령에는 붙이지 않는다 (부모가 받아야 한다)
+  assert.doesNotMatch(muwi(['node', 'impl', 'start', '--sub']).out, /업데이트됐다/);
+  // 부모 세션의 다음 적는 명령에 붙는다. 한 번만
+  const told = muwi(['node', 'read', 'done', '읽음']).out;
+  assert.match(told, /✓ read 끝[\s\S]*muwi가 업데이트됐다 \(\d+\.\d+\.\d+\)[\s\S]*## 작업 진행 방식 \(muwi\)/);
+  assert.doesNotMatch(muwi(['node', 'check', 'start']).out, /업데이트됐다/);
+});
+
+test('계획은 선으로 이어진 그래프다: muwi add에 자리를 주지 않으면 맨 끝 노드 뒤에 잇고, 계획에 끊긴 노드가 있으면 알려 준다', () => {
+  const { dir, muwi } = bench();
+  muwi(['plan', '--work', 'a', PLAN]);
+  const after = (id: string) => JSON.parse(fs.readFileSync(path.join(dir, 'a', 'plan.json'), 'utf8')).nodes.find((n: any) => n.id === id).after;
+  // 자리를 주지 않았다: 뒤에 아무것도 없는 노드(check) 뒤에 잇는다. 따로 떨어진 노드가 되지 않는다
+  const added = muwi(['add', 'pr', 'PR 올리기', '--why', '리뷰 받기']);
+  assert.equal(added.code, 0, added.err);
+  assert.deepEqual(after('pr'), ['check']);
+  assert.match(added.out, /자리를 주지 않아 check 뒤에 이었어요/);
+  assert.doesNotMatch(added.out, /이어지지 않은 노드/);
+  // 자리를 주면 그대로
+  muwi(['add', 'lint', 'lint', '--after', 'impl', '--why', '먼저 확인']);
+  assert.deepEqual(after('lint'), ['impl']);
+  // 끝이 둘이면(pr, lint) 둘 다의 뒤에 잇는다
+  muwi(['add', 'wrap', '정리', '--why', '마무리']);
+  assert.deepEqual(after('wrap').sort(), ['lint', 'pr']);
+  // 일부러 따로 두는 노드: --alone. 그래도 끊겨 있다고 알려 준다 (막지는 않는다)
+  const alone = muwi(['add', 'memo', '따로 할 일', '--alone', '--why', '순서 없음']);
+  assert.equal(alone.code, 0, alone.err);
+  assert.deepEqual(after('memo'), []);
+  assert.match(alone.out, /다른 노드와 이어지지 않은 노드가 있어요: memo/);
+  // 계획을 통째로 낼 때도 after를 빼먹은 노드를 알려 준다
+  const lost = muwi(['plan', '--work', 'b', JSON.stringify({ title: 't', nodes: [{ id: 'x', title: 'X' }, { id: 'y', title: 'Y', after: ['x'] }, { id: 'z', title: 'Z' }] })]);
+  assert.match(lost.out, /다른 노드와 이어지지 않은 노드가 있어요: z/);
+  // 선이 하나도 없는 계획(순서 없이 늘어놓은 할 일)은 그대로 둔다
+  const flat = muwi(['plan', '--work', 'c', JSON.stringify({ title: 't', nodes: [{ id: 'x', title: 'X' }, { id: 'y', title: 'Y' }] })]);
+  assert.doesNotMatch(flat.out, /이어지지 않은 노드/);
 });

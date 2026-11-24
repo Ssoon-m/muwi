@@ -11,6 +11,7 @@ import { terminalName } from '../src/herdr.ts';
 import { parsePlan, diffPlan, carryStatus, addNode } from '../src/plan.ts';
 import { closedSessions } from '../src/live.ts';
 import { attach, readSession, touchSession } from '../src/session.ts';
+import { modelIn } from '../src/integrations/tools.ts';
 import { appendEvent, clock, readEvents, readPlan, writePlan, type NodeStatus, type Plan, type RunBy } from '../src/store.ts';
 import { PAST_DAYS, loadBoard, loadView } from '../src/view.ts';
 
@@ -39,13 +40,13 @@ function setup(nodes: { id: string; after?: string[]; run?: RunBy }[], work = 'w
     attach(dir, session, work, ENV);
   };
   /** Claude Code가 훅에 넘기는 입력을 흉내 낸다 */
-  const hook = (payload: Record<string, unknown>, mode: 'record' | 'guard' | 'nudge' = 'record', session = 'lead', env: NodeJS.ProcessEnv = ENV) =>
+  const hook = (payload: Record<string, unknown>, mode: 'record' | 'command' = 'record', session = 'lead', env: NodeJS.ProcessEnv = ENV) =>
     handleHook({ session_id: session, ...payload }, dir, mode, env, path.resolve(import.meta.dirname, '..'));
   const sub = {
     start: (agent: string, session = 'lead') => hook({ hook_event_name: 'SubagentStart', agent_id: agent, agent_type: 'general-purpose' }, 'record', session),
     stop: (agent: string, session = 'lead') => hook({ hook_event_name: 'SubagentStop', agent_id: agent, agent_type: 'general-purpose' }, 'record', session),
     reads: (agent: string, skill: string, session = 'lead') => hook({ hook_event_name: 'PostToolUse', tool_name: 'Skill', tool_input: { skill }, agent_id: agent, agent_type: 'general-purpose' }, 'record', session),
-    runs: (agent: string, command: string, session = 'lead') => hook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, agent_id: agent }, 'guard', session),
+    runs: (agent: string, command: string, session = 'lead') => hook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, agent_id: agent }, 'command', session),
   };
   const reads = (skill: string, session = 'lead') => hook({ hook_event_name: 'PostToolUse', tool_name: 'Skill', tool_input: { skill } }, 'record', session);
   // 빈 환경을 준다: Herdr에 물어보지 않는다 (테스트가 이 컴퓨터의 터미널 상태에 기대지 않게)
@@ -302,8 +303,6 @@ test('muwi run으로 뜬 세션은 시작할 때 맡은 작업에 붙고 노드�
   assert.equal(s.of('impl').status, 'doing');
   assert.deepEqual(s.of('impl').who, { kind: 'session', session: 'child', agents: [] });
   assert.equal(s.view().sessions.child.terminal, 't7');
-  // 붙은 세션은 계획 없이 파일을 고친다는 알림을 받지 않는다
-  assert.equal(s.hook({ hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: '/repo/src/a.ts' } }, 'nudge', 'child', env).stdout, undefined);
 
   // 사람을 기다리는 중에 대화가 요약돼 다시 시작해도 상태는 그대로 둔다
   at(5); s.node('impl', 'waiting', 'child');
@@ -315,7 +314,6 @@ test('muwi run으로 뜬 세션은 시작할 때 맡은 작업에 붙고 노드�
   at(7); const later = s.hook({ hook_event_name: 'SessionStart', source: 'clear' }, 'record', 'unrelated', env);
   assert.doesNotMatch(JSON.parse(later.stdout!).hookSpecificOutput.additionalContext, /이 세션이 맡은 노드/);
   assert.equal(readSession(s.dir, 'unrelated')!.work, undefined);
-  assert.ok(JSON.parse(s.hook({ hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: '/repo/src/a.ts' } }, 'nudge', 'unrelated', env).stdout!));
   assert.equal(readEvents(s.dir, s.work).filter(e => e.type === 'join').length, 1);
 });
 
@@ -386,6 +384,34 @@ test('muwi run: 놓을 곳과 띄울 명령은 부르는 쪽이 고른다. 정�
   assert.match(fake.calls(), /\[terminal\.keep\] \[\{"terminal":"t7","place":"down"\}\]/);
 });
 
+test('맡긴 세션은 세션 시작을 알려 주지 않는 도구에서도 붙는다: 그 세션의 첫 muwi 명령에서 맡은 노드에 붙는다', () => {
+  const { muwi } = bench();
+  assert.equal(muwi(['run', 'impl', '목록 화면에 링크를 추가해줘']).code, 0);
+  // 맡은 세션(터미널 t7)이 훅 없이 바로 끝을 적는다. --work를 붙이지 않아도 터미널의 이름표로 맡은 작업을 안다
+  const done = muwi(['node', 'impl', 'done', '링크 추가함'], { MUWI_SESSION: 'worker', HC_TERMINAL_ID: 't7' });
+  assert.equal(done.code, 0, done.err);
+  const node = JSON.parse(muwi(['show', 'shop-1', '--json']).out).nodes.find((n: any) => n.id === 'impl');
+  assert.deepEqual([node.status, node.who.kind, node.who.session], ['done', 'session', 'worker']);
+});
+
+test('모델의 fallback: muwi run으로 띄울 때 명령에 준 모델을 그 세션의 모델로 적는다 (훅이 모델을 알려 주지 않는 도구)', () => {
+  const { fake, muwi } = bench();
+  // 띄우는 명령에 모델을 정해 줬다. 터미널의 이름표와 기록에 남긴다
+  const r = muwi(['run', 'impl', '목록 화면에 링크를 추가해줘', '--agent', 'codex --model gpt-x']);
+  assert.equal(r.code, 0, r.err);
+  assert.match(fake.calls(), /\[--label\] \[muwi\.model=gpt-x\]/);
+  const spawn = JSON.parse(muwi(['show', 'shop-1', '--json']).out).nodes.find((n: any) => n.id === 'impl').spawn;
+  assert.equal(spawn.terminal, 't7');
+  // 그 터미널에서 뜬 세션: 훅이 모델을 알려 주지 않아도 첫 muwi 명령에서 이름표의 모델을 물려받는다
+  const labeled = fakeHerdr({ 'muwi.work': 'shop-1', 'muwi.node': 'impl', 'muwi.model': 'gpt-x' });
+  const worker = { MUWI_SESSION: 'worker', HC_TERMINAL_ID: 't7', MUWI_HC: labeled.hc, MUWI_HERDR_APP: labeled.app };
+  assert.equal(muwi(['node', 'impl', 'done', '링크 추가함'], worker).code, 0);
+  const who = JSON.parse(muwi(['show', 'shop-1', '--json']).out).nodes.find((n: any) => n.id === 'impl').who;
+  assert.deepEqual([who.kind, who.session, who.model], ['session', 'worker', 'gpt-x']);
+  // 모델을 주는 여러 모양을 읽는다. 없으면 적지 않는다 (짐작하지 않는다)
+  assert.deepEqual([modelIn(['codex', '--model', 'a']), modelIn(['gemini', '-m', 'b']), modelIn(['qwen', '--model=c']), modelIn(['claude']), modelIn(['x', '--model', '--other'])], ['a', 'b', 'c', undefined, undefined]);
+});
+
 test('muwi run: Herdr 밖이거나 없는 노드면 띄우지 않고 이유를 말한다', () => {
   const { fake, muwi } = bench();
   const outside = muwi(['run', 'impl', '구현해줘'], { HC_TERMINAL_ID: '' });
@@ -411,7 +437,7 @@ test('muwi tidy: 끝난 노드를 맡았던 세션만, 라벨이 맞을 때만 �
   assert.match(fake.calls(), /hc \[kill\] \[t7\]\nhc \[rm\] \[t7\]/);
 });
 
-test('hook.sh: 서브에이전트의 시작·끝, 서브에이전트가 실행한 muwi 명령, 사람이 새로 건 말을 넘긴다', SH, () => {
+test('hook.sh: 서브에이전트의 시작·끝과 서브에이전트가 실행한 muwi 명령을 넘긴다', SH, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-hooksh-'));
   const sh = path.resolve(import.meta.dirname, '../hooks/hook.sh');
   const run = (payload: object, mode: string[] = []) =>
@@ -422,9 +448,9 @@ test('hook.sh: 서브에이전트의 시작·끝, 서브에이전트가 실행�
   attach(dir, 's1', 'w1', {} as NodeJS.ProcessEnv);
   markNode(dir, 'w1', 'main', 'doing', undefined, 's1', {} as NodeJS.ProcessEnv);
   run({ hook_event_name: 'SubagentStart', session_id: 's1', agent_id: 'ag9', agent_type: 'Explore' });
-  run({ hook_event_name: 'PreToolUse', session_id: 's1', tool_name: 'Bash', tool_input: { command: 'muwi node rev start' }, agent_id: 'ag9' }, ['guard']);
+  run({ hook_event_name: 'PreToolUse', session_id: 's1', tool_name: 'Bash', tool_input: { command: 'muwi node rev start' }, agent_id: 'ag9' }, ['command']);
   assert.equal(readSession(dir, 's1')!.starting!.rev.agent, 'ag9');
-  run({ hook_event_name: 'PreToolUse', session_id: 's1', tool_name: 'Bash', tool_input: { command: 'ls -la' }, agent_id: 'ag9' }, ['guard']);
+  run({ hook_event_name: 'PreToolUse', session_id: 's1', tool_name: 'Bash', tool_input: { command: 'ls -la' }, agent_id: 'ag9' }, ['command']);
   // 서브에이전트가 muwi node rev start를 실행한다 (명령에는 세션 id만 있다)
   markNode(dir, 'w1', 'rev', 'doing', undefined, 's1', {} as NodeJS.ProcessEnv);
   run({ hook_event_name: 'PostToolUse', session_id: 's1', tool_name: 'Read', tool_input: { file_path: '/x/skills/team-rules/SKILL.md' }, agent_id: 'ag9' });
@@ -436,12 +462,6 @@ test('hook.sh: 서브에이전트의 시작·끝, 서브에이전트가 실행�
     : e.type);
   assert.deepEqual(events, ['node:main:doing:', 'agent:start:ag9:main', 'node:rev:doing:ag9', 'skill:team-rules:ag9:rev', 'agent:stop:ag9:']);
   assert.equal(readSession(dir, 's1')!.starting!.rev, undefined);
-
-  // 사람이 새로 말을 걸면 "이번 요청은 확인이 끝났다"는 표시가 지워진다
-  const ok = path.join(dir, '.sessions', 's1.ok');
-  assert.ok(fs.existsSync(ok));
-  run({ hook_event_name: 'UserPromptSubmit', session_id: 's1', prompt: '다른 일 해줘' });
-  assert.ok(!fs.existsSync(ok));
 });
 
 test('Node가 낮으면 무엇이 필요한지 알린다 (조용히 실패하지 않는다)', SH, () => {
@@ -538,11 +558,13 @@ test('적는 명령은 작업을 짐작하지 않는다. 같은 폴더에 남의
   const { dir, muwi } = bench();
   // 어제의 다른 대화가 남겨 둔 작업 (같은 폴더)
   assert.equal(muwi(['plan', '--work', 'old-100', '--request', 'x', '{"nodes":[{"id":"pr","title":"PR"}]}'], { MUWI_SESSION: 'yesterday' }).code, 0);
-  const r = muwi(['add', 'fix', '리뷰 반영', '--after', 'pr', '--why', '리뷰'], { MUWI_SESSION: 'today' });
+  // 오늘의 대화는 muwi run으로 뜬 세션이 아니다 (터미널에 맡은 노드의 이름표가 없다)
+  const today = { MUWI_SESSION: 'today', HC_TERMINAL_ID: '' };
+  const r = muwi(['add', 'fix', '리뷰 반영', '--after', 'pr', '--why', '리뷰'], today);
   assert.equal(r.code, 1);
   assert.match(r.err, /어느 작업인지 알 수 없어요\. --work <이름>을 붙여요\. 이 폴더의 작업: .*old-100\(진행 중\)/);
   assert.equal(readPlan(dir, 'old-100')!.nodes.length, 1);
-  assert.match(muwi(['node', 'pr', 'start'], { MUWI_SESSION: 'today' }).err, /어느 작업인지 알 수 없어요/);
+  assert.match(muwi(['node', 'pr', 'start'], today).err, /어느 작업인지 알 수 없어요/);
   // 보기만 하는 명령은 짐작해도 된다
   assert.equal(muwi(['show'], { MUWI_SESSION: 'today', MUWI_DIR: dir }).code, 1); // 폴더에 끝나지 않은 작업이 둘이라 고르지 못한다
   assert.match(muwi(['show', 'old-100'], { MUWI_SESSION: 'today' }).out, /old-100/);
@@ -590,7 +612,7 @@ test('muwi show: 다시 한 노드는 회차별로, 훅이 보지 못한 세션�
   const { dir, muwi } = bench();
   const hook = (payload: object) => spawnSync(process.execPath, [CLI, 'hook'], { input: JSON.stringify(payload), encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir } });
   // 훅이 한 번도 돌지 않은 세션
-  assert.equal(muwi(['node', 'read', 'start'], { MUWI_SESSION: 'bare' }).code, 1); // 붙은 작업이 없다
+  assert.equal(muwi(['node', 'read', 'start'], { MUWI_SESSION: 'bare', HC_TERMINAL_ID: '' }).code, 1); // 붙은 작업이 없다
   assert.equal(muwi(['node', 'read', 'start', '--work', 'shop-1'], { MUWI_SESSION: 'bare' }).code, 0);
   assert.equal(muwi(['node', 'read', 'done', '요구사항 2건'], { MUWI_SESSION: 'bare' }).code, 0);
   // 훅이 보고 있는 세션: 처음엔 skill 없이, 다시 할 때는 읽고
@@ -690,10 +712,47 @@ test('하는 노드가 없는 작업은 그 세션이 하는 일로 보인다: �
   // 세션이 다른 작업으로 갔다: 이 작업을 맡은 세션이 없다
   attach(s.dir, 'lead', 'other', ENV);
   assert.deepEqual(shown(herdr('working')), ['stalled', 'gone']);
-  // 노드를 하는 중이면 세션 상태와 상관없이 노드로 정한다
+  // 노드를 하는 중이면 between은 없다 (세션이 멈췄을 때는 아래 시험의 quiet로 정한다)
   at(3); s.node('impl', 'doing', 'lead');
-  const v = loadView(s.dir, s.work, herdr('done'))!;
+  const v = loadView(s.dir, s.work, herdr('working'))!;
   assert.deepEqual([v.state, v.between], ['doing', undefined]);
+});
+
+test('하는 중이라고 적힌 노드도 그 세션이 일을 멈췄으면 멈춘 것으로 보인다: 입력을 기다리거나 멈췄으면 응답 대기', () => {
+  const s = setup([{ id: 'a' }, { id: 'b' }]);
+  at(1); touchSession(s.dir, 'lead', {}, { HC_TERMINAL_ID: 't3' } as NodeJS.ProcessEnv); s.node('a', 'doing', 'lead');
+  const shown = (env: NodeJS.ProcessEnv) => {
+    const v = loadView(s.dir, s.work, env)!;
+    return [v.state, v.quiet, ...v.nodes.map(n => n.quiet)];
+  };
+  const one = (status: string) => fakeHc([{ address: 't3', status }], { t3: 'lead' });
+  assert.deepEqual(shown(one('working')), ['doing', undefined, undefined, undefined]);
+  // 사용 한도에 걸렸거나 권한 확인에서 멈췄다
+  assert.deepEqual(shown(one('blocked')), ['waiting', 'asking', 'asking', undefined]);
+  // 노드를 끝냈다고 적지 않은 채 말을 끝냈다
+  assert.deepEqual(shown(one('done')), ['waiting', 'stopped', 'stopped', undefined]);
+  assert.deepEqual(shown(one('idle')), ['waiting', 'stopped', 'stopped', undefined]);
+  // Herdr 밖이라 세션이 무얼 하는지 모르면 적힌 대로 작업 중이다
+  assert.deepEqual(shown({ MUWI_HC: '/no/such/hc' } as NodeJS.ProcessEnv), ['doing', undefined, undefined, undefined]);
+  // 세션이 닫혔으면 멈춘 것이 아니라 닫힌 것이다
+  const gone = loadView(s.dir, s.work, fakeHc([]))!;
+  assert.deepEqual([gone.state, gone.quiet, gone.nodes[0].closed, gone.nodes[0].quiet], ['stalled', undefined, true, undefined]);
+
+  // 다른 세션이 하는 노드가 하나라도 일하고 있으면 작업은 작업 중이다. 멈춘 노드만 멈춘 것으로 보인다
+  at(2); touchSession(s.dir, 'worker', {}, { HC_TERMINAL_ID: 't4' } as NodeJS.ProcessEnv); s.node('b', 'doing', 'worker');
+  const two = (a: string, b: string) => fakeHc([{ address: 't3', status: a }, { address: 't4', status: b }], { t3: 'lead', t4: 'worker' });
+  assert.deepEqual(shown(two('done', 'working')), ['doing', undefined, 'stopped', undefined]);
+  // 둘 다 멈췄고 하나가 입력을 기다린다
+  assert.deepEqual(shown(two('done', 'blocked')), ['waiting', 'asking', 'stopped', 'asking']);
+
+  // 목록에도 같은 것이 나간다. 그래프 칸이 지금 상태를 다시 볼 수 있게 그 세션의 터미널도 준다
+  const board = loadBoard(s.dir, two('done', 'blocked')).works.find(w => w.work === s.work)!;
+  assert.deepEqual([board.state, board.quiet], ['waiting', 'asking']);
+  assert.deepEqual(board.active.map(n => [n.id, n.quiet, n.terminal]), [['a', 'stopped', 't3'], ['b', 'asking', 't4']]);
+
+  // AI가 기다린다고 적은 노드가 있으면 그것으로 응답 대기다 (quiet가 아니다)
+  at(3); s.node('b', 'waiting', 'worker', '어느 쪽으로 할까요');
+  assert.deepEqual(shown(two('working', 'done')), ['waiting', undefined, undefined, undefined]);
 });
 
 test('작업 목록은 그 작업을 한 대화들을 알려 준다: 계획을 낸 대화 먼저, 나머지는 최근에 본 순', () => {

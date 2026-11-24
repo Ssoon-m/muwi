@@ -25,14 +25,13 @@ test('훅 넣기: 남의 훅은 그대로 두고 우리 것만 한 벌 넣는다
   assert.deepEqual(once.hooks!.PostToolUse, [{ matcher: 'Skill|Read', hooks: [ours()] }]);
   assert.deepEqual(once.hooks!.PreToolUse, [
     theirs,
-    { matcher: 'Edit|Write|MultiEdit|NotebookEdit|Agent|Task', hooks: [ours(' nudge')] },
-    { matcher: 'Bash', hooks: [ours(' guard')] },
+    { matcher: 'Bash', hooks: [ours(' command')] },
   ]);
   assert.deepEqual(removeHooks(once), start);
   // 설치 위치가 바뀌어도 옛 위치의 우리 훅을 알아보고 바꾼다
   const moved = mergeHooks(once, hookCommandFor('/somewhere/else'));
   assert.equal(JSON.stringify(moved).includes('/Users/me/tools/muwi'), false);
-  assert.equal(moved.hooks!.PreToolUse.length, 3);
+  assert.equal(moved.hooks!.PreToolUse.length, 2); // 남의 훅 하나와 우리 것 하나 (셸 명령 앞)
   assert.deepEqual(removeHooks(mergeHooks({ theme: 'dark' }, HOOK)), { theme: 'dark' });
 });
 
@@ -124,13 +123,14 @@ test('muwi setup: Herdr 앱 칸을 넣고, --codex를 주면 Codex 지침·skill
   assert.deepEqual(fs.readdirSync(mod).sort(), ['arc.svg', 'main.js', 'mod.json']);
   const agents = fs.readFileSync(path.join(h.dir, '.codex', 'AGENTS.md'), 'utf8');
   assert.match(agents, /^# 내 Codex 규칙\n\n<!-- muwi:start/);
-  assert.ok(fs.existsSync(path.join(h.dir, '.codex', 'skills', 'muwi', 'SKILL.md')));
+  // 사용법 skill은 Codex가 읽는 ~/.agents/skills에 넣는다
+  assert.ok(fs.existsSync(path.join(h.dir, '.agents', 'skills', 'muwi', 'SKILL.md')));
 
   removeSetup(h.records);
   assert.equal(fs.existsSync(mod), false);
   assert.equal(fs.existsSync(path.join(h.dir, '.local', 'bin', 'muwi')), false);
   assert.equal(fs.readFileSync(path.join(h.dir, '.codex', 'AGENTS.md'), 'utf8'), '# 내 Codex 규칙\n');
-  assert.equal(fs.existsSync(path.join(h.dir, '.codex', 'skills', 'muwi')), false);
+  assert.equal(fs.existsSync(path.join(h.dir, '.agents', 'skills', 'muwi')), false);
   assert.equal(readInstall(h.records), null);
 });
 

@@ -4,20 +4,23 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { LABEL_NODE, LABEL_WORK, hc, herdrApp, terminalName, type Ran } from './herdr.ts';
+import { LABEL_MODEL, LABEL_NODE, LABEL_WORK, hc, herdrApp, terminalName, type Ran } from './herdr.ts';
 import { layoutFor, layoutProblems, type Fit, type Flow } from './layout.ts';
-import { ROOT, handleHook } from './hook.ts';
-import { markNode } from './node.ts';
+import { ROOT, adoptSpawn, guideUpdate, handleHook, sessionInstructions } from './hook.ts';
+import { fromSubagent, markNode } from './node.ts';
 import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
-import { attach, markSettled, readSession, recentSessions, sessionKey, sessionLabel, touchSession } from './session.ts';
+import { attach, readSession, recentSessions, sessionKey, sessionLabel, touchSession } from './session.ts';
 import { resumeFacts } from './resume.ts';
-import { checkMod, newestPlugin, olderThan, refreshSetup, removeSetup, runSetup } from './setup.ts';
+import { checkMod, installedTools, newestPlugin, olderThan, readInstall, refreshSetup, removeSetup, runSetup } from './setup.ts';
+import { adapterOf } from './integrations/index.ts';
+import { gaps } from './integrations/types.ts';
+import { TOOLS, launchCommand, modelIn, toolById } from './integrations/tools.ts';
 import { GRAPH_AT, ScreenError, applyLayout, ensurePreview, removeLayout, screenState, type GraphAt, type Screen } from './screen.ts';
 import {
   SCHEMA, SHOW_IN, appendEvent, checkWorkName, clock, listWorks, nowIso, readConfig, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
   type Config, type NodeStatus, type Plan, type RunBy, type ShowIn,
 } from './store.ts';
-import { PAST_DAYS, loadBoard, loadView, type Actor, type Between, type NodeView, type Try, type WorkView } from './view.ts';
+import { PAST_DAYS, loadBoard, loadView, type Actor, type Between, type NodeView, type Quiet, type Try, type WorkView } from './view.ts';
 
 const HELP = `사용법: muwi <명령>
 
@@ -25,6 +28,7 @@ const HELP = `사용법: muwi <명령>
   muwi plan --work <이름> --request "<시킨 말>" '<계획 JSON>'    새 작업의 계획을 적는다
   muwi plan --why "<바꾼 이유>" '<계획 JSON>'                    계획을 바꾼다 (같은 id의 노드는 상태를 잇는다)
   muwi add <id> "<제목>" [--after a,b] [--before c] --why "…"   노드 하나를 끼워 넣는다 (--run, --show도 받는다)
+                                       자리를 주지 않으면 맨 끝 노드 뒤에 잇는다. 어느 노드와도 잇지 않으려면 --alone
   muwi remove <id> --why "…"                                   노드 하나를 뺀다
       계획 JSON: {"title": "한 줄 설명", "nodes": [{"id": "read", "title": "티켓 읽기"},
                                                   {"id": "impl", "title": "구현", "after": ["read"]}]}
@@ -39,19 +43,19 @@ const HELP = `사용법: muwi <명령>
   muwi tidy [<작업>]                    끝난 노드를 맡았던 새 세션의 터미널을 닫는다 (사람이 정리하라고 할 때)
 
   진행
-  muwi node <id> start                 노드를 시작한다
+  muwi node <id> start [--sub]         노드를 시작한다. 서브에이전트가 맡은 노드를 시작할 때는 --sub를 붙인다 (서브에이전트가 한 것으로 적힌다)
   muwi node <id> done ["<결과 한 줄>"]   노드를 끝낸다
   muwi node <id> wait "<물어볼 것>"     사람의 결정을 기다린다
   muwi node <id> block "<이유>"         막혔다
   muwi node <id> pause                 하던 노드를 잠시 멈춘다 (다른 노드를 먼저 할 때). 다시 start하면 같은 회차로 이어진다
   muwi flag [<id>] "<메모>"             문제 지점을 표시한다
   muwi viewed [--work <작업>]          끝난 작업을 본 것으로 적는다 (새 결과에서 뺀다. 그래프 칸이 그 작업을 보여 줄 때 적는다)
-  muwi skip "<이유>"                   이 세션은 계획 없이 진행한다 (한 곳만 고치는 일, 기록할 작업이 아닐 때)
 
   보기
   muwi status [--all] [--json]         작업 목록 (응답 대기·막힘·새 결과가 위). 오래된 작업은 접어 두고, --all이면 다 보여 준다
   muwi show [<작업>] [--json]           작업 하나의 기록: 노드, 읽은 skill, 계획이 바뀐 이유, 문제 표시
   muwi session                         이 세션이 붙어 있는 작업과 읽은 skill
+  muwi guide                           작업 진행 방식(지침)을 보여 준다. muwi가 업데이트되면 muwi 명령의 출력 끝에도 한 번 나온다
   muwi open [--right]                  Herdr 앱에서 그래프 칸을 이 터미널 아래(--right면 오른쪽)에 연다
 
   Herdr 앱 화면
@@ -63,11 +67,12 @@ const HELP = `사용법: muwi <명령>
 
   설치와 설정
   muwi setup                         터미널용 muwi 명령과 Herdr 앱 그래프 칸을 넣는다
+  muwi setup --tools                 아는 AI 도구와, 깔렸는지, muwi 통합을 넣었는지 본다
+  muwi setup --tool <도구>[,<도구>]   그 AI 도구에 muwi 통합(지침·사용법 skill·훅)을 넣는다
+  muwi setup --all                   이 컴퓨터에 깔린 도구 전부에 넣는다 (Claude Code는 플러그인이 넣어 주므로 뺀다)
   muwi setup --claude                플러그인 없이 쓸 때: Claude Code 훅과 사용법 skill도 넣는다
-  muwi setup --codex                 Codex에 지침과 사용법 skill을 넣는다 (훅이 없어 계획 기록만 된다)
   muwi setup --remove                setup으로 넣은 것을 뺀다 (muwi layout으로 바꾼 화면도 되돌린다)
-  muwi config [nudge|guard|layout on|off]
-                                     계획 알림(nudge), push·PR 앞에서 묻기(guard), 화면 바꾸기 안내(layout)를 켜고 끈다
+  muwi config [layout on|off]        화면 바꾸기 안내(layout)를 켜고 끈다
   muwi --version
 
 작업은 --work <이름>으로 고른다. 없으면 이 세션이 붙어 있는 작업을 쓴다.
@@ -92,7 +97,7 @@ process.stdout.on('error', (e: NodeJS.ErrnoException) => {
   throw e;
 });
 
-const VALUED = new Set(['work', 'request', 'title', 'why', 'by', 'file', 'after', 'before', 'result', 'run', 'show', 'name', 'agent', 'cwd', 'graph', 'fit']);
+const VALUED = new Set(['work', 'request', 'title', 'why', 'by', 'file', 'after', 'before', 'result', 'run', 'show', 'name', 'agent', 'cwd', 'graph', 'fit', 'from', 'event', 'tool']);
 
 function parseArgs(argv: string[]) {
   const pos: string[] = [];
@@ -195,6 +200,8 @@ const MARK: Record<NodeStatus, string> = { todo: '○', doing: '●', waiting: '
 const STATE_NAME: Record<WorkView['state'], string> = { waiting: '응답 대기', blocked: '막힘', doing: '작업 중', stalled: '멈춤', done: '끝' };
 /** 하는 노드가 없을 때 그 작업의 세션이 하는 일 (세션이 무얼 하는지 모르면 적지 않는다) */
 const BETWEEN_NAME: Partial<Record<Between, string>> = { working: '다음 노드 준비 중', asking: '세션이 입력을 기다림', stopped: '세션이 멈춤', gone: '맡은 세션이 없음' };
+/** 하는 중이라고 적힌 노드를 하던 세션이 일을 멈췄을 때 */
+const QUIET_NAME: Record<Quiet, string> = { asking: '세션이 입력을 기다림', stopped: '세션이 멈춤' };
 
 const RUN_NAME: Record<RunBy, string> = { me: '직접', subagent: '서브에이전트', session: '새 세션' };
 const runTag = (n: { run?: RunBy; show?: ShowIn }) => (n.run ? `${RUN_NAME[n.run]}${n.show ? `, ${n.show}` : ''}` : '');
@@ -206,6 +213,20 @@ function printPlan(plan: Plan) {
     const mark = n.status === 'todo' && (n.attempt ?? 0) > 0 ? '⏸' : MARK[n.status];
     out(`  ${mark} ${n.id.padEnd(width)}  ${n.title}${n.after.length ? `  ← ${n.after.join(', ')}` : ''}${n.run ? `  [${runTag(n)}]` : ''}`);
   }
+  const alone = loneNodes(plan);
+  if (alone.length) {
+    out(`⚠ 다른 노드와 이어지지 않은 노드가 있어요: ${alone.join(', ')}. 그래프에 선 없이 따로 떨어져 보여요.`);
+    out('  순서가 있으면 계획을 다시 내서 그 노드의 after에 앞 노드를 적어요 (muwi plan --why "…"). 일부러 따로 둔 것이면 그대로 둬요.');
+  }
+}
+
+/**
+ * 계획은 방향 있는 선으로 이어진 그래프다. 선이 있는 계획에서 어느 노드와도 이어지지 않은 노드는 대개 after를 빼먹은 것이다.
+ * 선이 하나도 없는 계획(순서 없이 할 일을 늘어놓은 것)은 그대로 둔다
+ */
+export function loneNodes(plan: Pick<Plan, 'nodes'>): string[] {
+  if (!plan.nodes.some(n => n.after.length)) return [];
+  return plan.nodes.filter(n => !n.after.length && !plan.nodes.some(m => m.after.includes(n.id))).map(n => n.id);
 }
 
 /** 진행 중이었는데 앞에 끝나지 않은 노드가 새로 생겨 잠시 멈춰야 하는 노드 */
@@ -285,6 +306,30 @@ function pausePlanned(dir: string, work: string, paused: Paused[], say: (line: s
   }
 }
 
+/** 이번 명령을 서브에이전트가 실행했다 (바뀐 지침은 부모 세션의 명령에만 붙인다) */
+let bySubagent = false;
+
+/**
+ * muwi가 업데이트돼 지침이 바뀌었으면 이 명령의 출력 끝에 새 지침을 붙인다. 세션을 새로 열지 않아도 된다.
+ * 적는 명령(plan, node …)에만 붙인다. 훅으로 말을 넣을 수 없는 도구에서도 닿는 길이다
+ */
+function tellGuide(dir: string) {
+  const key = sessionKey();
+  if (!key || bySubagent) return;
+  const text = guideUpdate(dir, key);
+  if (text) out(`\n${text}`);
+}
+
+/** 지침의 원본. 지침 파일이나 훅으로 받지 못한 세션이 직접 읽을 수 있다 */
+function cmdGuide(dir: string) {
+  const guide = sessionInstructions(ROOT);
+  if (!guide) throw new Fail('지침 파일을 읽지 못했어요 (hooks/instructions.md)');
+  out(guide);
+  const key = sessionKey();
+  // 지금 판을 읽었다고 적어 둔다 (같은 것을 다시 붙이지 않게)
+  if (key) guideUpdate(dir, key);
+}
+
 function join(dir: string, work: string) {
   const key = sessionKey();
   if (key) attach(dir, key, work);
@@ -334,7 +379,8 @@ function cmdPlan(a: Args, dir: string) {
 function warnUnhooked(dir: string) {
   const key = sessionKey();
   const session = key ? readSession(dir, key) : null;
-  if (!session || session.tool !== 'claude' || session.hooked) return;
+  // 훅이 있는 도구인데 이 세션에서는 돌지 않았다
+  if (!session || !adapterOf(session.tool) || session.hooked) return;
   out('※ 이 세션에서는 muwi 훅이 돌지 않아요 (muwi를 설치하기 전에 연 세션일 수 있어요). 계획과 진행은 적히지만 읽은 skill과 서브에이전트가 한 일은 기록되지 않아요. 사용자에게 알리고, 기록이 필요하면 세션을 새로 열어 달라고 해요.');
 }
 
@@ -345,16 +391,24 @@ function cmdAdd(a: Args, dir: string) {
   const after = (str(a, 'after') ?? '').split(',').map(s => s.trim()).filter(Boolean);
   const before = str(a, 'before');
   const fresh = { id, title, after, ...(str(a, 'run') ? { run: str(a, 'run') } : {}), ...(str(a, 'show') ? { show: str(a, 'show') } : {}) } as NodeInput;
+  /** 자리를 주지 않아서 맨 끝 노드 뒤에 이었으면 그 노드들 */
+  let tail: string[] = [];
   const { plan, paused } = savePlan(dir, work, old => {
     if (!old) throw new Fail(`작업이 없어요: ${work} (muwi status로 목록을 봐요)`);
     if (old.nodes.some(n => n.id === id)) throw new Fail(`이미 있는 노드예요: ${id}`);
     if (before && !old.nodes.some(n => n.id === before)) throw new Fail(`--before의 ${before}는 없는 노드예요. 있는 노드: ${old.nodes.map(n => n.id).join(', ')}`);
+    // 자리를 주지 않은 노드는 맨 끝 노드(뒤에 아무것도 없는 노드) 뒤에 잇는다. 나중에 넣는 노드는 대개 하던 일 다음에 할 일이다.
+    // 잇지 않으면 그래프에 선 없이 따로 떨어진 노드가 된다. 일부러 그렇게 두려면 --alone
+    if (!after.length && !before && !a.flags.alone) {
+      tail = old.nodes.filter(n => !old.nodes.some(m => m.after.includes(n.id))).map(n => n.id);
+      fresh.after = tail;
+    }
     const { plan: input, problems } = parsePlan(addNode(old, fresh, before));
     if (!input) throw new Fail(`노드를 넣지 못했어요:\n${problems.map(p => `  - ${p}`).join('\n')}`, 2);
     return input;
   }, a);
   join(dir, work);
-  out(`노드를 넣었어요: ${id} (${work}, 노드 ${plan.nodes.length}개)`);
+  out(`노드를 넣었어요: ${id} (${work}, 노드 ${plan.nodes.length}개)${tail.length ? `. 자리를 주지 않아 ${tail.join(', ')} 뒤에 이었어요 (따로 두려면 --alone)` : ''}`);
   pausePlanned(dir, work, paused);
   printPlan(readPlan(dir, work) ?? plan);
 }
@@ -391,12 +445,15 @@ function cmdNode(id: string | undefined, action: string | undefined, text: strin
   if (status === 'blocked' && !note) throw new Fail('왜 막혔는지 적어요: muwi node <id> block "<이유>"');
   const work = resolveWork(a, dir);
   const key = sessionKey();
-  const result = markNode(dir, work, id, status, note, key);
+  // 서브에이전트가 실행한 명령이면 부모 세션이 붙은 작업을 바꾸지 않는다 (--work를 붙여 적어도). 부모에게 갈 말도 받지 않는다
+  const sub = fromSubagent(dir, work, id, key, Boolean(a.flags.sub));
+  const result = markNode(dir, work, id, status, note, key, process.env, { sub: Boolean(a.flags.sub) });
   if (!result) {
     const plan = needPlan(dir, work);
     throw new Fail(`없는 노드예요: ${id}. 있는 노드: ${plan.nodes.map(n => n.id).join(', ')}. 새 노드면 muwi add로 먼저 넣어요.`);
   }
-  join(dir, work);
+  if (sub) bySubagent = true;
+  else join(dir, work);
   const done = result.nodes.filter(n => n.status === 'done').length;
   const label = { doing: '시작', done: '끝', waiting: '응답 대기', blocked: '막힘', todo: '잠시 멈춤 (다시 start하면 같은 회차로 이어져요)' }[status];
   out(`${status === 'todo' ? '⏸' : MARK[status]} ${id} ${label} (${work}, ${done}/${result.nodes.length} 끝)`);
@@ -449,7 +506,9 @@ function whoText(v: WorkView, who: Actor): string {
   const own = who.agents.filter(x => x.own);
   const helped = who.agents.filter(x => !x.own);
   if (who.kind === 'subagent') return own.length ? count(own) : `${count(helped)} · 세션 ${label(who.session)}이 시작함`;
-  const base = who.kind === 'session' ? `새 세션 ${label(who.session)}` : `세션 ${label(who.session)}`;
+  // 이 회차를 시작할 때의 모델 (노드마다 적힌 것)
+  const model = who.model ? ` (${who.model})` : '';
+  const base = who.kind === 'session' ? `새 세션 ${label(who.session)}${model}` : `세션 ${label(who.session)}${model}`;
   return [base, own.length ? count(own) : '', helped.length ? `${count(helped)}가 도움` : ''].filter(Boolean).join(' + ');
 }
 
@@ -490,11 +549,14 @@ function skillsLine(t: Pick<Try, 'skills' | 'seen' | 'instant'>, started: boolea
 }
 
 function printShow(v: WorkView) {
-  const between = v.between ? BETWEEN_NAME[v.between] : undefined;
-  out(`${v.work}${v.title ? ` · ${v.title}` : ''} · ${STATE_NAME[v.state]}${between ? ` · ${between}` : ''}${v.unread ? ' · 아직 안 봄' : ''} (${v.counts.done}/${v.counts.total} 끝)`);
+  const between = v.between ? BETWEEN_NAME[v.between] : v.quiet ? QUIET_NAME[v.quiet] : undefined;
+  out(`${v.work}${v.title ? ` · ${v.title}` : ''} · ${STATE_NAME[v.state]}${between ? ` · ${between}` : ''}${v.unread ? ' · 아직 안 봄' : ''} (${v.counts.done}/${v.counts.total} 끝${v.spentMs > 0 ? ` · 작업 ${dur(v.spentMs)}` : ''})`);
   if (v.request) out(`요청: ${v.request}`);
   if (v.helpers.sessions || v.helpers.subagents) {
-    const lead = v.lead ? v.sessions[v.lead]?.label ?? sessionLabel(null, v.lead) : '';
+    const who = v.lead ? v.sessions[v.lead] : undefined;
+    // 어느 도구의 어떤 모델이 계획을 냈는지 (훅이 알려 준 만큼)
+    const made = [toolById(who?.tool)?.name, who?.model].filter(Boolean).join(' · ');
+    const lead = v.lead ? `${who?.label ?? sessionLabel(null, v.lead)}${made ? ` (${made})` : ''}` : '';
     out(`같이 한 쪽: ${[lead ? `계획을 낸 세션 ${lead}` : '', v.helpers.sessions ? `새 세션 ${v.helpers.sessions}` : '', v.helpers.subagents ? `서브에이전트 ${v.helpers.subagents}` : ''].filter(Boolean).join(' · ')}`);
   }
   out('');
@@ -502,7 +564,7 @@ function printShow(v: WorkView) {
   const width = Math.max(...v.nodes.map(n => n.id.length));
   for (const n of v.nodes) {
     // 하던 세션이 닫혔으면 그렇게 적는다. 상태는 그대로 두지만 지금 하고 있는 쪽이 없다
-    const who = [whoLine(v, n), n.closed ? '세션이 닫힘' : ''].filter(Boolean).join(' · ');
+    const who = [whoLine(v, n), n.closed ? '세션이 닫힘' : n.quiet ? QUIET_NAME[n.quiet] : ''].filter(Boolean).join(' · ');
     const flow = n.paused ? '잠시 멈춤' : n.early ? '순서 앞당김 (앞 노드가 끝나기 전에 시작)' : '';
     const meta = [flow, n.attempts > 1 ? `${n.attempts}회차` : '', n.spentMs > 0 ? dur(n.spentMs) : '', who].filter(Boolean).join(' · ');
     out(`  ${n.paused ? '⏸' : MARK[n.status]} ${n.id.padEnd(width)}  ${n.title}${n.after.length ? `  ← ${n.after.join(', ')}` : ''}${meta ? `  (${meta})` : ''}`);
@@ -582,8 +644,8 @@ function cmdStatus(a: Args, dir: string) {
   for (const w of board.works) {
     if (w.past && !a.flags.all) continue;
     // 끝났는데 사람이 아직 안 본 작업은 "새 결과"로 보여 준다
-    out(`${(w.unread ? '새 결과' : STATE_NAME[w.state]).padEnd(7)} ${w.work}  ${w.counts.done}/${w.counts.total}${w.title ? `  ${w.title}` : ''}`);
-    for (const n of w.active) out(`          ${MARK[n.status]} ${n.id}  ${n.title}${n.closed ? ' (세션이 닫힘)' : ''}${n.note ? ` : ${n.note}` : ''}`);
+    out(`${(w.unread ? '새 결과' : STATE_NAME[w.state]).padEnd(7)} ${w.work}  ${w.counts.done}/${w.counts.total}${w.spentMs > 0 ? ` · ${dur(w.spentMs)}` : ''}${w.title ? `  ${w.title}` : ''}`);
+    for (const n of w.active) out(`          ${MARK[n.status]} ${n.id}  ${n.title}${n.closed ? ' (세션이 닫힘)' : n.quiet ? ` (${QUIET_NAME[n.quiet]})` : ''}${n.note ? ` : ${n.note}` : ''}`);
     // 하는 노드가 없으면 그 작업의 세션이 무얼 하는지
     const between = w.between ? BETWEEN_NAME[w.between] : undefined;
     if (between) out(`          · ${between}`);
@@ -619,15 +681,22 @@ function cmdHook(a: Args, dir: string) {
   // 훅이 실패해도 세션은 계속돼야 한다. 문제는 파일에만 남긴다
   try {
     const text = fs.readFileSync(0, 'utf8');
-    const mode = a.pos[0] === 'guard' || a.pos[0] === 'nudge' ? a.pos[0] : 'record';
+    // guard: 0.5.x까지의 훅 설정이 셸 명령 앞의 훅을 부르던 이름
+    // 0.5.x의 훅 설정이 부르던 갈래: 계획 없이 고칠 때 알림(nudge)은 0.6.0에서 뺐다
+    if (a.pos[0] === 'nudge') return;
+    const mode = a.pos[0] === 'command' || a.pos[0] === 'guard' ? 'command' : 'record';
     const payload = JSON.parse(text);
+    // 입력에 사건 이름을 넣지 않는 도구는 훅 명령이 알려 준다 (--event)
+    const named = str(a, 'event');
+    if (named && payload && typeof payload === 'object' && !payload.hook_event_name) payload.hook_event_name = named;
     // 이 세션이 시작된 뒤에 더 새 muwi가 설치됐으면 그 버전이 이 훅을 처리하게 넘긴다.
     // 세션을 새로 열지 않아도 새 동작(지침, 기록 방식)이 적용된다. 훅이 걸리는 시점(hooks.json)만은 세션을 새로 열어야 바뀐다
     if (!process.env.MUWI_HOOK_PASSED) {
       const newest = newestPlugin();
       if (newest && olderThan(version(), newest.version) && path.resolve(newest.root) !== path.resolve(ROOT)) {
         // 새 버전의 cli.ts를 지금 Node로 바로 실행한다 (bin/muwi는 sh 스크립트라 Windows에서 바로 실행되지 않는다)
-        const r = spawnSync(process.execPath, [path.join(newest.root, 'src', 'cli.ts'), 'hook', ...a.pos], {
+        const from = str(a, 'from');
+        const r = spawnSync(process.execPath, [path.join(newest.root, 'src', 'cli.ts'), 'hook', ...a.pos, ...(from ? ['--from', from] : [])], {
           input: text, encoding: 'utf8', env: { ...process.env, MUWI_HOOK_PASSED: '1' }, timeout: 30_000,
         });
         if (r.status === 0) {
@@ -639,9 +708,13 @@ function cmdHook(a: Args, dir: string) {
     }
     // 플러그인이 업데이트돼 설치 위치가 바뀌었으면, 전에 setup으로 넣어 둔 명령과 그래프 칸을 새 위치로 맞춘다.
     // 새 세션이 열릴 때뿐 아니라 열려 있는 세션에 말을 걸 때도 맞춘다 (더 낮은 버전으로는 맞추지 않는다)
-    if (payload?.hook_event_name === 'SessionStart' || payload?.hook_event_name === 'UserPromptSubmit') refreshSetup({ root: ROOT, version: version(), dir });
-    const result = handleHook(payload, dir, mode);
+    const result = handleHook(payload, dir, mode, process.env, ROOT, str(a, 'from') ?? 'claude', h => {
+      if (h.kind === 'session-start' || h.kind === 'prompt') refreshSetup({ root: ROOT, version: version(), dir });
+    });
     if (result.stdout) out(result.stdout);
+    // 종료 코드와 표준 오류로 답을 받는 도구가 있다 (막을 때 2와 이유)
+    if (result.stderr) process.stderr.write(result.stderr);
+    if (result.code) process.exitCode = result.code;
   } catch (e: any) {
     try {
       fs.mkdirSync(dir, { recursive: true });
@@ -662,7 +735,26 @@ function cmdSetup(a: Args, dir: string) {
     if (fs.existsSync(`${dir}/layout.json`)) layoutRemoved(guardScreen(() => removeLayout(dir)));
     return removeSetup(dir, out);
   }
-  const install = runSetup({ root: ROOT, version: version(), dir, claude: Boolean(a.flags.claude), codex: Boolean(a.flags.codex), log: out });
+  if (a.flags.tools) {
+    // 아는 도구와, 이 컴퓨터에 깔렸는지, muwi 통합을 넣었는지
+    const have = new Set(installedTools().map(t => t.id));
+    const done = readInstall(dir)?.tools ?? {};
+    for (const t of TOOLS) {
+      const state = done[t.id] ? '통합 넣음' : t.id === 'claude' && !have.has(t.id) ? '없음' : have.has(t.id) ? '깔려 있음' : '없음';
+      // 그 도구의 훅이 알려 주지 않는 것 (커넥터의 선언에서 만든다). 비어 있으면 다 알려 준다
+      const lacks = gaps(adapterOf(t.id)?.can ?? { subagents: false, start: false, skills: false }).join(' · ');
+      out(`${t.id.padEnd(16)} ${t.name.padEnd(18)} ${state.padEnd(6)}${lacks ? `  ${lacks}` : ''}`);
+    }
+    out('넣기: muwi setup --tool <도구>[,<도구>] 또는 muwi setup --all. Claude Code는 플러그인이 넣어 줘요.');
+    return;
+  }
+  // --tool codex,cursor처럼 고르거나, --all로 이 컴퓨터에 깔린 도구 전부에 넣는다. --claude, --codex는 옛 이름
+  const picked = (str(a, 'tool') ?? '').split(',').map(x => x.trim()).filter(Boolean);
+  const unknown = picked.filter(id => !toolById(id));
+  if (unknown.length) throw new Fail(`모르는 도구예요: ${unknown.join(', ')}. 아는 도구: ${TOOLS.map(t => t.id).join(', ')}`);
+  // Claude Code는 플러그인이 넣어 주므로 --all에는 넣지 않는다 (둘 다 넣으면 훅이 두 번 돈다)
+  const all = a.flags.all ? installedTools().map(t => t.id).filter(id => id !== 'claude') : [];
+  const install = runSetup({ root: ROOT, version: version(), dir, tools: [...picked, ...all], claude: Boolean(a.flags.claude), codex: Boolean(a.flags.codex), log: out });
   if (install.herdr) {
     const checked = checkMod(install.herdr);
     if (checked && checked !== 'ok') out(`Herdr 앱 칸 점검에서 문제가 나왔어요:\n${checked}`);
@@ -731,16 +823,20 @@ function cmdLayout(a: Args, dir: string) {
   out(`되돌리려면 muwi layout --remove (${r.base} 레이아웃으로 돌아가요)`);
 }
 
-const CONFIG_KEYS: (keyof Config)[] = ['nudge', 'guard', 'layout'];
+const CONFIG_KEYS: (keyof Config)[] = ['layout'];
 const CONFIG_ABOUT: Record<keyof Config, string> = {
-  nudge: '계획을 적지 않은 세션이 파일을 고치거나 서브에이전트를 띄우려 할 때 알린다',
-  guard: 'push·PR·댓글 앞에서 사람에게 묻는다',
   layout: 'Herdr 앱 화면에 muwi 칸이 없을 때 넣자고 안내한다 (muwi setup, 그래프 칸)',
 };
 
 function cmdConfig(a: Args, dir: string) {
   const [key, value] = a.pos;
   const config = readConfig(dir);
+  if (key === 'guard') {
+    throw new Fail('push·PR 앞에서 묻기(guard)는 0.6.0에서 뺐어요. 무엇을 승인받고 할지는 muwi가 정하지 않아요. 그 도구의 권한 설정이나 직접 둔 훅을 쓰세요.');
+  }
+  if (key === 'nudge') {
+    throw new Fail('계획 알림(nudge)은 0.6.0에서 뺐어요. muwi는 계획이 없어도 AI가 하려는 일을 막지 않아요. 계획을 적을지는 AI가 일의 크기를 보고 정해요.');
+  }
   if (key !== undefined) {
     if (!CONFIG_KEYS.includes(key as keyof Config) || (value !== 'on' && value !== 'off')) {
       throw new Fail(`사용법: muwi config [${CONFIG_KEYS.join('|')}] on|off`);
@@ -843,8 +939,17 @@ function cmdRun(a: Args, dir: string) {
   const show = (str(a, 'show') ?? node.show) as ShowIn | undefined;
   if (show !== undefined && !SHOW_IN.includes(show)) throw new Fail(`--show는 ${SHOW_IN.join(' 또는 ')}이에요`);
   const cwd = str(a, 'cwd') ?? process.cwd();
-  const agent = (str(a, 'agent') ?? 'claude').trim().split(/\s+/).filter(Boolean);
+  // 띄울 명령을 주지 않으면 맡기는 세션과 같은 도구로 띄운다
+  const me = sessionKey();
+  // --agent codex처럼 도구 이름을 주면 그 도구가 첫 말을 받는 모양으로 띄운다. 그 밖의 값은 명령으로 보고 그대로 실행한다
+  const asked = str(a, 'agent')?.trim();
+  const other = toolById(asked);
+  const template = other ? other.launch : launchCommand(me ? readSession(dir, me)?.tool : undefined);
+  const given = other ? undefined : asked;
+  const agent = (given ?? template[0]).trim().split(/\s+/).filter(Boolean);
   if (!agent.length) throw new Fail('--agent에 띄울 명령이 없어요');
+  // 띄우는 명령에 모델을 정해 줬으면 적어 둔다 (--agent "codex --model gpt-5"). 그 세션의 훅이 모델을 알려 주지 않아도 노드에 모델이 남는다
+  const model = modelIn(agent);
   const brief = `${task.trim()}\n\n(muwi) 작업 ${work}의 노드 ${id}(${node.title})를 맡았어요. 시작은 자동으로 적혀요. 끝나면 muwi node ${id} done "<결과 한 줄>"을 적고, hc send ${lead} "<결과나 막힌 점>"으로 알려요.`;
 
   // 이름은 Herdr의 목록에서 어느 노드인지 보이게 노드 id로 짓는다. 이미 있는 이름이면 뒤에 몇 글자를 붙인다
@@ -854,7 +959,9 @@ function cmdRun(a: Args, dir: string) {
   for (const candidate of [base, `${base.slice(0, 27)}-${Date.now().toString(36).slice(-4)}`]) {
     name = candidate;
     // 맡길 일은 명령 이름 바로 뒤에 둔다. 뒤에 두면 값을 여러 개 받는 옵션(--allowedTools 등)이 삼킨다
-    started = hc(['run', '--bg', '--json', '--name', candidate, '--cwd', cwd, '--label', `${LABEL_WORK}=${work}`, '--label', `${LABEL_NODE}=${id}`, '--', agent[0], brief, ...agent.slice(1)]);
+    // --agent로 준 명령은 그 모양 그대로. 주지 않았으면 그 도구가 첫 말을 받는 자리에 넣는다 (qwen -i "<첫 말>" 같은 것)
+    const argv = given ? [agent[0], brief, ...agent.slice(1)] : template.map(part => (part === '{prompt}' ? brief : part));
+    started = hc(['run', '--bg', '--json', '--name', candidate, '--cwd', cwd, '--label', `${LABEL_WORK}=${work}`, '--label', `${LABEL_NODE}=${id}`, ...(model ? ['--label', `${LABEL_MODEL}=${model}`] : []), '--', ...argv]);
     if (started.ok) break;
   }
   if (!started?.ok) throw new Fail(`새 세션을 띄우지 못했어요: ${(started?.err || started?.out || 'hc 명령이 없어요').trim()}`);
@@ -868,6 +975,8 @@ function cmdRun(a: Args, dir: string) {
     // 주소를 읽지 못하면 이름으로 가리킨다
   }
   if (!terminal) terminal = name;
+  // 첫 말을 명령으로 받지 못하는 도구는 뜬 뒤에 말로 보낸다
+  if (!given && !template.includes('{prompt}')) sent = hc(['send', terminal, brief]).ok;
 
   let placed = '';
   if (show) {
@@ -878,7 +987,7 @@ function cmdRun(a: Args, dir: string) {
 
   // 맡긴 말도 남긴다. 나중에 "맡긴 쪽이 무엇을 모르고 일했나"를 볼 수 있게
   // 띄운 폴더도 남긴다. 새 세션이 기록을 남기기 전에 닫혀도 어디서 이어 하면 되는지 알려 줄 수 있게 (worktree에 띄웠을 때)
-  appendEvent(dir, work, { type: 'spawn', node: id, terminal, name, ...(show ? { show } : {}), task: task.trim().slice(0, 2000), cwd: path.resolve(cwd) }, sessionKey());
+  appendEvent(dir, work, { type: 'spawn', node: id, terminal, name, ...(show ? { show } : {}), task: task.trim().slice(0, 2000), cwd: path.resolve(cwd), ...(model ? { model } : {}) }, sessionKey());
   join(dir, work);
   out(`새 세션을 띄웠어요: ${name} (${terminal}) → 노드 ${id}${placed ? ` · ${placed}` : ''}`);
   if (!sent) out(`맡길 일이 아직 전달되지 않았어요. hc read ${terminal}로 화면을 보고(폴더 신뢰 확인이 떠 있을 수 있어요) 풀어 준 뒤 hc send ${terminal} "<맡길 일>"로 다시 보내요.`);
@@ -913,14 +1022,12 @@ function cmdTidy(a: Args, dir: string) {
 }
 
 /** 이 세션은 계획 없이 진행한다고 밝힌다. 계획을 적지 않은 세션의 파일 수정을 막던 안내가 그친다 */
-function cmdSkip(a: Args, dir: string) {
-  const reason = a.pos[0]?.trim();
-  if (!reason) throw new Fail('사용법: muwi skip "<왜 계획 없이 진행하는지>"');
-  const key = sessionKey();
-  if (!key) throw new Fail('세션을 알 수 없어요. 이 명령은 에이전트 세션 안에서 실행해요.');
-  touchSession(dir, key, { skipped: { at: nowIso(), reason } });
-  markSettled(dir, key);
-  out(`이 세션은 계획 없이 진행해요: ${reason}`);
+/**
+ * 0.5.x의 명령. 계획 없이 고칠 때의 알림을 넘기려고 있었다. 알림을 뺐으니 적을 것이 없다.
+ * 옛 지침을 받은 세션이 불러도 실패하지 않게 받아 준다
+ */
+function cmdSkip() {
+  out('계획 없이 진행해요. 0.6.0부터는 muwi skip을 적지 않아도 돼요 (muwi는 계획이 없어도 막지 않아요).');
 }
 
 function cmdSession(dir: string) {
@@ -939,6 +1046,38 @@ async function main(argv: string[]) {
   const major = Number(process.versions.node.split('.')[0]);
   if (major < NODE_MIN) throw new Fail(`muwi는 Node ${NODE_MIN} 이상이 필요해요 (지금: ${process.version})`);
   const dir = runsDir();
+  // 적는 명령이 끝나면 바뀐 지침이 있는지 보고 출력 끝에 붙인다
+  if (cmd && TELLS.has(cmd)) {
+    if (ADOPTS.has(cmd)) adoptHere(dir);
+    await run(cmd, a, dir);
+    return tellGuide(dir);
+  }
+  return run(cmd, a, dir);
+}
+
+/**
+ * muwi run으로 뜬 세션인데 아직 맡은 노드에 붙지 않았으면 여기서 붙인다.
+ * 세션이 시작될 때를 알려 주는 도구는 훅이 먼저 붙인다. 알려 주지 않는 도구는 그 세션의 첫 muwi 명령에서 붙는다
+ */
+function adoptHere(dir: string) {
+  const key = sessionKey();
+  if (!key || !process.env.HC_TERMINAL_ID) return;
+  // 이미 작업에 붙은 세션은 다시 묻지 않는다 (명령마다 Herdr에 묻지 않게)
+  if (readSession(dir, key)?.work) return;
+  try {
+    adoptSpawn(dir, key, process.env);
+  } catch {
+    // 붙이지 못해도 명령은 그대로 한다
+  }
+}
+
+/** 맡은 세션이 처음 실행할 만한 명령들: 맡은 노드의 진행을 적는 명령 */
+const ADOPTS = new Set(['node', 'start', 'done', 'wait', 'block', 'add', 'remove']);
+
+/** 지침이 바뀌었을 때 알려 줄 명령들: 세션이 계획과 진행을 적는 명령 */
+const TELLS = new Set(['plan', 'add', 'remove', 'node', 'start', 'done', 'wait', 'block', 'run']);
+
+async function run(cmd: string | undefined, a: Args, dir: string) {
   switch (cmd) {
     case 'plan': return cmdPlan(a, dir);
     case 'add': return cmdAdd(a, dir);
@@ -957,10 +1096,11 @@ async function main(argv: string[]) {
     case 'version': case '--version': case '-v': return out(version());
     case 'open': return cmdOpen(a);
     case 'layout': return cmdLayout(a, dir);
-    case 'skip': return cmdSkip(a, dir);
+    case 'skip': return cmdSkip();
     case 'run': return cmdRun(a, dir);
     case 'tidy': return cmdTidy(a, dir);
     case 'session': return cmdSession(dir);
+    case 'guide': return cmdGuide(dir);
     case undefined: case 'help': case '--help': case '-h': return out(HELP);
     default: throw new Fail(`모르는 명령: ${cmd}\n\n${HELP}`);
   }

@@ -30,15 +30,19 @@ export const LABEL_NODE = 'muwi.node';
 /** 그 터미널에서 지금 도는 세션. 세션이 시작될 때 붙인다. 같은 터미널에서 다른 대화가 시작되면 바뀐다 */
 export const LABEL_SESSION = 'muwi.session';
 
-/** 이 터미널이 muwi run으로 뜬 것이면 맡은 작업과 노드를 돌려준다. 띄울 때 터미널에 붙여 둔 라벨에서 읽는다 */
-export function spawnedFor(terminal: string, env: NodeJS.ProcessEnv = process.env): { work: string; node: string } | null {
+/** muwi run으로 띄울 때 명령에 준 모델 (--model …). 훅이 모델을 알려 주지 않는 도구에서 그 세션의 모델로 쓴다 */
+export const LABEL_MODEL = 'muwi.model';
+
+/** 이 터미널이 muwi run으로 뜬 것이면 맡은 작업과 노드(와 띄울 때 준 모델)를 돌려준다. 띄울 때 터미널에 붙여 둔 라벨에서 읽는다 */
+export function spawnedFor(terminal: string, env: NodeJS.ProcessEnv = process.env): { work: string; node: string; model?: string } | null {
   const r = hc(['get', terminal, '--json'], env, 3000);
   if (!r.ok) return null;
   try {
     const labels = JSON.parse(r.out)?.labels ?? {};
     const work = labels[LABEL_WORK];
     const node = labels[LABEL_NODE];
-    return typeof work === 'string' && work && typeof node === 'string' && node ? { work, node } : null;
+    const model = labels[LABEL_MODEL];
+    return typeof work === 'string' && work && typeof node === 'string' && node ? { work, node, ...(typeof model === 'string' && model ? { model } : {}) } : null;
   } catch {
     return null;
   }

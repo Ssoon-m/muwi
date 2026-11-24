@@ -3,11 +3,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { guardReason, handleHook, isScratchPath, skillFromPath } from '../src/hook.ts';
+import { fileGuideHash, guideUpdate, handleHook, skillFromPath } from '../src/hook.ts';
 import { markNode } from '../src/node.ts';
-import { attach, readSession, recordSkill } from '../src/session.ts';
-import { appendEvent, clock, readEvents, writeConfig, writePlan, type NodeStatus, type Plan } from '../src/store.ts';
-import { loadBoard, loadView } from '../src/view.ts';
+import { attach, readSession, recordSkill, touchSession } from '../src/session.ts';
+import { appendEvent, clock, readConfig, readEvents, readPlan, writeConfig, writePlan, type NodeStatus, type Plan } from '../src/store.ts';
+import { buildView, loadBoard, loadView, unionMs } from '../src/view.ts';
 
 const ENV = {} as NodeJS.ProcessEnv;
 const T0 = Date.parse('2026-11-22T05:00:00.000Z');
@@ -112,6 +112,31 @@ test('회차와 걸린 시간: 끝낸 노드를 다시 하면 2회차, 사람을
   assert.equal(v.state, 'done');
 });
 
+test('작업 시간: 노드들이 작업한 시간을 더한다. 나란히 한 노드는 겹친 시간을 한 번만 세고, 기다린 시간은 세지 않는다', () => {
+  const t = setup([{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd', after: ['a', 'b', 'c'] }]);
+  const MIN = 60_000;
+  const seen = (now: number) => buildView(readPlan(t.dir, 'w1')!, readEvents(t.dir, 'w1'), {}, T0 + now * MIN);
+  const spent = (now: number) => seen(now).spentMs / MIN;
+  // a와 b를 나란히 10분씩 (0~10분, 5~15분): 겹친 5분은 한 번만 센다
+  at(0); t.node('a', 'doing', 'lead');
+  at(5); t.node('b', 'doing', 'lead');
+  assert.equal(spent(7), 7); // 하는 중에는 지금까지
+  at(10); t.node('a', 'done', 'lead');
+  at(15); t.node('b', 'done', 'lead');
+  assert.equal(spent(15), 15);
+  // 아무 노드도 하지 않은 5분(15~20분)과 사람을 기다린 10분(25~35분)은 세지 않는다
+  at(20); t.node('c', 'doing', 'lead');
+  at(25); t.node('c', 'waiting', 'lead', '어느 쪽으로 할까요');
+  assert.equal(spent(30), 20);
+  at(35); t.node('c', 'doing', 'lead');
+  at(40); t.node('c', 'done', 'lead');
+  assert.equal(spent(60), 25);
+  // 노드의 시간을 그냥 더하면 30분이다 (a 10 + b 10 + c 10). 작업 시간은 겹침을 뺀 25분
+  const nodes = seen(60).nodes;
+  assert.equal(nodes.reduce((sum, n) => sum + n.spentMs, 0) / MIN, 30);
+  assert.deepEqual([unionMs([]), unionMs([[0, 5], [5, 8]]), unionMs([[0, 10], [2, 4]]), unionMs([[6, 9], [0, 3]])], [0, 8, 10, 6]);
+});
+
 test('작업 상태: 응답 대기 > 막힘 > 작업 중 > 끝. 목록도 그 순서로 온다', () => {
   const a = setup([{ id: 'x' }, { id: 'y' }], 'aaa');
   at(1); a.node('x', 'doing', 's1');
@@ -208,122 +233,24 @@ test('SKILL.md 경로에서 skill 이름을 꺼낸다', () => {
   assert.equal(skillFromPath(undefined), null);
 });
 
-test('guard: push·PR·댓글 명령만 사람에게 묻는다', () => {
-  for (const cmd of [
-    'git push', 'git push origin feat/x', 'git -C /repo push -u origin HEAD', 'cd /repo && git push --force-with-lease',
-    'gh pr create --title x --body y', 'gh pr comment 12 --body ok',
-    `curl -s -u "$U:$T" -X POST https://api.bitbucket.org/2.0/repositories/acme/web-app/pullrequests -d '{}'`,
-  ]) assert.ok(guardReason(cmd), cmd);
-  for (const cmd of [
-    'git status', 'git commit -m "push 버튼 추가"', 'git log --oneline', 'git stash push', 'echo "git push"', 'gh pr view 12', 'gh pr list',
-    'curl -s https://api.bitbucket.org/2.0/repositories/acme/web-app/pullrequests/12',
-  ]) assert.equal(guardReason(cmd), null, cmd);
-  // 기본은 꺼져 있다. muwi config guard on 일 때만 묻는다
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-guard-'));
-  const push = { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git push' } };
-  assert.deepEqual(handleHook(push, dir, 'guard', ENV), {});
-  writeConfig(dir, { nudge: true, guard: true });
-  assert.equal(JSON.parse(handleHook(push, dir, 'guard', ENV).stdout!).hookSpecificOutput.permissionDecision, 'ask');
-  assert.deepEqual(handleHook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'ls' } }, dir, 'guard', ENV), {});
-});
-
-const edit = (session: string, file = '/repo/src/app.ts') => ({ session_id: session, hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: file } });
-const denied = (r: { stdout?: string }) => (r.stdout ? JSON.parse(r.stdout).hookSpecificOutput.permissionDecision === 'deny' : false);
-
-test('nudge: 계획을 적지 않은 세션의 파일 수정은, 계획을 적거나 건너뛴다고 밝힐 때까지 알린다', () => {
+test('muwi는 AI가 하려는 일을 막지 않는다: 셸 명령, 파일 수정, 서브에이전트 띄우기에 아무 답도 하지 않는다', () => {
   const t = setup([{ id: 'impl' }]);
-  const first = handleHook(edit('fresh'), t.dir, 'nudge', ENV);
-  assert.ok(denied(first));
-  const reason = JSON.parse(first.stdout!).hookSpecificOutput.permissionDecisionReason;
-  assert.match(reason, /muwi plan --work/);
-  assert.match(reason, /muwi skip/);
-  assert.match(reason, /수정을 다시 시도하세요/);
-  // 그냥 다시 시도하면 또 알린다 (조용히 넘어가지 않는다)
-  assert.ok(denied(handleHook(edit('fresh'), t.dir, 'nudge', ENV)));
-  assert.ok(!fs.existsSync(path.join(t.dir, '.sessions', 'fresh.ok')));
-  // 계획을 적으면 지나간다. hook.sh가 다음부터 node를 띄우지 않게 표시 파일이 남는다
-  attach(t.dir, 'fresh', t.work, ENV);
-  assert.deepEqual(handleHook(edit('fresh'), t.dir, 'nudge', ENV), {});
-  assert.ok(fs.existsSync(path.join(t.dir, '.sessions', 'fresh.ok')));
-});
-
-test('nudge: 사람이 새로 일을 시키면 다시 따진다. skip은 그 요청까지만, 끝난 작업은 계속하는 것으로 치지 않는다', () => {
-  const t = setup([{ id: 'impl' }]);
-  const says = (session: string) => handleHook({ session_id: session, hook_event_name: 'UserPromptSubmit', prompt: '…' }, t.dir, 'record', ENV);
-  // skip: 이번에 시킨 일에만
-  handleHook(edit('s1'), t.dir, 'nudge', ENV);
-  const s = readSession(t.dir, 's1')!;
-  fs.writeFileSync(path.join(t.dir, '.sessions', 's1.json'), JSON.stringify({ ...s, skipped: { at: s.seenAt, reason: '오타' } }));
-  assert.deepEqual(handleHook(edit('s1'), t.dir, 'nudge', ENV), {});
-  assert.ok(fs.existsSync(path.join(t.dir, '.sessions', 's1.ok')));
-  says('s1');
-  assert.ok(!fs.existsSync(path.join(t.dir, '.sessions', 's1.ok')));
-  assert.equal(readSession(t.dir, 's1')!.skipped, undefined);
-  assert.ok(denied(handleHook(edit('s1'), t.dir, 'nudge', ENV)));
-
-  // 하던 작업에 끝나지 않은 노드가 있으면 계속하는 것으로 본다
-  at(1); t.node('impl', 'doing', 's2');
-  assert.deepEqual(handleHook(edit('s2'), t.dir, 'nudge', ENV), {});
-  says('s2');
-  assert.deepEqual(handleHook(edit('s2'), t.dir, 'nudge', ENV), {});
-  // 노드가 다 끝난 뒤에 새로 시키면 다시 묻는다. 그 작업의 연장일 수 있다고 알려 준다
-  at(2); t.node('impl', 'done', 's2');
-  assert.deepEqual(handleHook(edit('s2'), t.dir, 'nudge', ENV), {}); // 같은 요청 안에서는 그대로
-  says('s2');
-  const again = handleHook(edit('s2'), t.dir, 'nudge', ENV);
-  assert.ok(denied(again));
-  const reason = JSON.parse(again.stdout!).hookSpecificOutput.permissionDecisionReason;
-  assert.match(reason, /하던 작업\(w1\)은 노드가 다 끝났어요/);
-  assert.match(reason, /muwi add <id>/);
-  assert.match(reason, /muwi plan --work/);
-  assert.match(reason, /muwi skip/);
-});
-
-test('nudge: 파일을 고치지 않는 일도 서브에이전트를 띄우면 계획을 먼저 묻는다 (PR 리뷰의 점검들처럼)', () => {
-  const t = setup([{ id: 'impl' }]);
-  const spawn = (session: string, extra: object = {}) =>
-    ({ session_id: session, hook_event_name: 'PreToolUse', tool_name: 'Agent', tool_input: { description: '팀 기준 점검', prompt: '…' }, ...extra });
-  const first = handleHook(spawn('reviewer'), t.dir, 'nudge', ENV);
-  assert.ok(denied(first));
-  const reason = JSON.parse(first.stdout!).hookSpecificOutput.permissionDecisionReason;
-  assert.match(reason, /여러 단계로 하는 일이면 파일을 고치지 않아도 계획을 적어요/);
-  assert.match(reason, /서브에이전트 띄우기를 다시 시도하세요/);
-  assert.match(reason, /muwi skip/);
-  // 예전 이름(Task)도 같다
-  assert.ok(denied(handleHook({ ...spawn('reviewer'), tool_name: 'Task' }, t.dir, 'nudge', ENV)));
-  // 서브에이전트 안에서 또 띄우는 것은 따지지 않는다 (맡긴 세션이 이미 따졌다)
-  assert.deepEqual(handleHook(spawn('reviewer', { agent_id: 'ag1' }), t.dir, 'nudge', ENV), {});
-  // 계획을 적으면 지나간다
-  attach(t.dir, 'reviewer', t.work, ENV);
-  assert.deepEqual(handleHook(spawn('reviewer'), t.dir, 'nudge', ENV), {});
-});
-
-test('nudge: 계획을 적은 세션과 맡은 노드를 시작한 세션은 알리지 않는다', () => {
-  const t = setup([{ id: 'impl' }]);
-  at(1); t.node('impl', 'doing', 'worker'); // muwi node impl start --work w1
-  assert.deepEqual(handleHook(edit('worker'), t.dir, 'nudge', ENV), {});
-  assert.ok(fs.existsSync(path.join(t.dir, '.sessions', 'worker.ok')));
-});
-
-test('nudge: 작업물이 아닌 곳(기록 폴더, 에이전트 설정, 임시 폴더)에 쓰는 것은 알리지 않는다', () => {
-  const t = setup([{ id: 'impl' }]);
-  const env = { HOME: '/Users/me', TMPDIR: '/var/folders/xx/T/' } as NodeJS.ProcessEnv;
-  for (const file of [`${t.dir}/w1/notes.md`, '/Users/me/.muwi/w/plan.md', '/Users/me/.claude/projects/x/memory/a.md', '/tmp/a.txt', '/var/folders/xx/T/b.txt']) {
-    assert.ok(isScratchPath(file, t.dir, env), file);
-    assert.deepEqual(handleHook(edit('scratch', file), t.dir, 'nudge', env), {}, file);
+  // push·PR 같은 명령: 승인은 muwi의 일이 아니다
+  for (const command of ['git push', 'gh pr create --title x --body y', 'ls']) {
+    assert.deepEqual(handleHook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command } }, t.dir, 'command', ENV), {});
   }
-  assert.equal(isScratchPath('/Users/me/work/web-app/src/a.ts', t.dir, env), false);
-  // 작업물을 고치려 하면 그때 알린다
-  assert.ok(denied(handleHook(edit('scratch', '/Users/me/work/web-app/src/a.ts'), t.dir, 'nudge', env)));
+  // 계획이 없는 세션의 파일 수정과 서브에이전트 띄우기: 계획을 적을지는 AI가 정한다
+  const edit = { session_id: 'fresh', hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: '/repo/src/app.ts' } };
+  const spawn = { session_id: 'fresh', hook_event_name: 'PreToolUse', tool_name: 'Agent', tool_input: { subagent_type: 'reviewer' } };
+  for (const payload of [edit, spawn]) assert.deepEqual(handleHook(payload, t.dir, 'record', ENV), {});
+  // 사람이 말할 때의 입력(0.5.x의 훅 설정이 보낸다)에도 답하지 않는다
+  assert.deepEqual(handleHook({ session_id: 'fresh', hook_event_name: 'UserPromptSubmit', prompt: '…' }, t.dir, 'record', ENV), {});
+  // 0.5.x의 설정에 guard와 nudge가 켜져 있어도 읽지 않는다
+  fs.writeFileSync(path.join(t.dir, 'config.json'), JSON.stringify({ nudge: true, guard: true, layout: false }));
+  assert.deepEqual(readConfig(t.dir), { layout: false });
+  assert.deepEqual(handleHook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git push' } }, t.dir, 'command', ENV), {});
 });
 
-test('nudge: muwi config nudge off 이면 알리지 않는다', () => {
-  const t = setup([{ id: 'impl' }]);
-  writeConfig(t.dir, { nudge: false, guard: false });
-  assert.deepEqual(handleHook(edit('fresh'), t.dir, 'nudge', ENV), {});
-});
-
-/** muwi가 업데이트된 것처럼: 지침을 바꾼 새 설치 위치 */
 function newerRoot(version = '9.9.9') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-newer-'));
   const here = path.resolve(import.meta.dirname, '..');
@@ -334,24 +261,48 @@ function newerRoot(version = '9.9.9') {
   return root;
 }
 
-test('업데이트: 세션이 시작된 뒤에 지침이 바뀌면, 사람이 다음에 말을 걸 때 새 지침을 한 번 넣는다', () => {
+test('업데이트: 세션이 시작된 뒤에 지침이 바뀌면, 그 세션의 다음 muwi 명령이 새 지침을 한 번 전한다 (어느 도구에서나 된다)', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-guide-'));
   const here = path.resolve(import.meta.dirname, '..');
-  const says = (root: string, session = 's1') => handleHook({ session_id: session, hook_event_name: 'UserPromptSubmit', prompt: '다음 일' }, dir, 'record', ENV, root);
   // 세션이 시작될 때 넣은 지침을 기억한다
   handleHook({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', ENV, here);
   assert.ok(readSession(dir, 's1')!.instructions);
-  // 지침이 그대로면 아무것도 넣지 않는다
-  assert.deepEqual(says(here), {});
+  // 지침이 그대로면 붙일 말이 없다
+  assert.equal(guideUpdate(dir, 's1', ENV, here), null);
   // muwi가 업데이트돼 지침이 바뀌었다
   const root = newerRoot();
-  const next = JSON.parse(says(root).stdout!).hookSpecificOutput;
-  assert.equal(next.hookEventName, 'UserPromptSubmit');
-  assert.match(next.additionalContext, /muwi가 업데이트됐다 \(9\.9\.9\)\. 작업 진행 방식이 바뀌었으니/);
-  assert.match(next.additionalContext, /새로 생긴 규칙/);
-  // 한 번만 넣는다
-  assert.deepEqual(says(root), {});
-  // 지침을 기억하지 못하는 세션(예전 버전에서 시작)은 지금 것을 기억만 하고 넣지 않는다
-  assert.deepEqual(says(root, 'old'), {});
+  // 사람이 말할 때의 훅으로는 넣지 않는다 (말할 때 문맥을 넣을 수 없는 도구가 있다)
+  assert.deepEqual(handleHook({ session_id: 's1', hook_event_name: 'UserPromptSubmit', prompt: '다음 일' }, dir, 'record', ENV, root), {});
+  const text = guideUpdate(dir, 's1', ENV, root)!;
+  assert.match(text, /muwi가 업데이트됐다 \(9\.9\.9\)\. 작업 진행 방식이 바뀌었으니/);
+  assert.match(text, /새로 생긴 규칙/);
+  // 한 번만 전한다
+  assert.equal(guideUpdate(dir, 's1', ENV, root), null);
+  // 처음 보는 세션(지침을 어떻게 받았는지 모른다)은 지금 판을 본 것으로 적기만 한다
+  assert.equal(guideUpdate(dir, 'old', ENV, root), null);
   assert.ok(readSession(dir, 'old')!.instructions);
+});
+
+test('업데이트: 지침 파일로 지침을 받는 도구는 그 파일에 든 판이 그 세션이 본 지침이다 (muwi setup을 다시 하지 않았으면 옛 판)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-guide-file-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-guide-home-'));
+  const here = path.resolve(import.meta.dirname, '..');
+  const env = { ...ENV, HOME: home, CODEX_HOME: path.join(home, '.codex') } as NodeJS.ProcessEnv;
+  const block = fs.readFileSync(path.join(here, 'hooks', 'instructions.md'), 'utf8');
+  fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.codex', 'AGENTS.md'), `# 내 지침\n\n${block}`);
+  assert.ok(fileGuideHash('codex', env));
+  assert.equal(fileGuideHash('claude', env), undefined); // 지침 파일이 없는 도구
+  // 파일의 지침이 지금 판과 같으면 붙일 말이 없다
+  handleHook({ session_id: 'c1', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', env, here, 'codex');
+  assert.equal(readSession(dir, 'c1')!.instructions, fileGuideHash('codex', env));
+  assert.equal(guideUpdate(dir, 'c1', env, here), null);
+  // muwi는 새 판인데 AGENTS.md에는 옛 지침이 남아 있다: 세션이 시작될 때 읽은 것은 옛 지침이므로 새 지침을 전한다
+  const root = newerRoot();
+  handleHook({ session_id: 'c2', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', env, root, 'codex');
+  assert.match(guideUpdate(dir, 'c2', env, root)!, /새로 생긴 규칙/);
+  assert.equal(guideUpdate(dir, 'c2', env, root), null);
+  // 세션 시작 훅이 없는 도구도 같다: 첫 muwi 명령에서 파일의 판과 견준다
+  touchSession(dir, 'c3', { tool: 'codex' }, env);
+  assert.match(guideUpdate(dir, 'c3', env, root)!, /새로 생긴 규칙/);
 });

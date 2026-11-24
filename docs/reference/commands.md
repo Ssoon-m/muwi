@@ -25,6 +25,7 @@
 | `muwi status [--all] [--json]` | 작업 목록을 보여 줍니다. 사용자를 기다리는 작업이 위에 나옵니다. 지난 작업은 접혀 있고 `--all`을 붙이면 모두 나옵니다 |
 | `muwi show [<작업>] [--json]` | 작업 하나의 기록을 보여 줍니다: 노드, 회차, 누가 했는지, 읽은 skill, 계획이 바뀐 기록, 빠진 노드, 문제 표시 |
 | `muwi session` | 현재 세션이 붙어 있는 작업과 읽은 skill을 보여 줍니다 |
+| `muwi guide` | 작업 진행 방식(지침)의 원본을 보여 줍니다. muwi가 업데이트돼 지침이 바뀌면 그 세션의 다음 적는 명령(`plan`, `node` 등) 출력 끝에도 한 번 붙습니다 |
 | `muwi --version` | 버전을 보여 줍니다 |
 
 `--json`을 붙이면 같은 내용을 JSON으로 출력합니다.
@@ -46,11 +47,11 @@
 | --- | --- |
 | `muwi setup` | 터미널용 `muwi` 명령과 Herdr 앱의 그래프 칸을 설치합니다 |
 | `muwi setup --claude` | 플러그인 없이 쓸 때 Claude Code 훅과 사용법 skill도 설치합니다 |
-| `muwi setup --codex` | Codex에 지침과 사용법 skill을 넣습니다 |
+| `muwi setup --tools` | 아는 AI 도구와, 이 컴퓨터에 깔렸는지, muwi 통합을 넣었는지 보여 줍니다 |
+| `muwi setup --tool <도구>[,<도구>]` | 그 AI 도구에 muwi 통합(지침, 사용법 skill, 훅 또는 플러그인)을 넣습니다. `--codex`는 `--tool codex`와 같습니다 |
+| `muwi setup --all` | 깔려 있는 AI 도구 전부에 통합을 넣습니다. Claude Code는 플러그인이 넣어 주므로 뺍니다 |
 | `muwi setup --remove` | `muwi setup`으로 설치한 것을 지웁니다. `muwi layout`으로 바꾼 화면도 되돌립니다 |
 | `muwi config` | 현재 설정을 보여 줍니다 |
-| `muwi config nudge on\|off` | 계획 알림을 켜거나 끕니다. 기본값은 `on`입니다 |
-| `muwi config guard on\|off` | push 전에 묻기를 켜거나 끕니다. 기본값은 `off`입니다 |
 | `muwi config layout on\|off` | 화면에 muwi 칸이 없을 때 `muwi layout`을 권하는 안내를 켜거나 끕니다. 기본값은 `on`입니다 |
 
 각 항목이 무엇을 설치하고 설정하는지는 [설치와 설정](setup.md)에 있습니다.
@@ -124,12 +125,12 @@
 | 명령 | 설명 |
 | --- | --- |
 | `muwi node <id> start` | 노드를 시작합니다. 끝냈거나 막혔던 노드면 다음 회차가 됩니다 |
+| `muwi node <id> start --sub` | 서브에이전트가 맡은 노드를 시작할 때 붙입니다. 그 노드가 서브에이전트가 한 것으로 적히고, `--work`를 붙여도 맡긴 세션이 붙어 있는 작업은 바뀌지 않습니다. 어느 AI 도구에서나 됩니다 |
 | `muwi node <id> done ["<결과 한 줄>"]` | 노드를 끝냅니다 |
 | `muwi node <id> wait "<물어볼 것>"` | 사용자의 결정을 기다립니다 |
 | `muwi node <id> block "<이유>"` | 스스로 풀 수 없어서 멈춥니다 |
 | `muwi node <id> pause` | 하던 노드를 잠시 멈춥니다. 다른 노드를 먼저 할 때 씁니다. 다시 `start`하면 같은 회차로 이어집니다 (`todo`도 같습니다) |
 | `muwi flag [<id>] "<메모>"` | 문제 지점을 표시합니다. id를 생략하면 작업에 표시합니다 |
-| `muwi skip "<이유>"` | 이번에 시킨 일은 계획 없이 진행한다고 남깁니다. 다음에 시킨 일에는 적용되지 않습니다 |
 
 `muwi start <id>`, `muwi done <id>`, `muwi wait <id>`, `muwi block <id>`처럼 `node`를 생략해도 됩니다. 결과 한 줄은 `--result "<글>"`로도 줄 수 있습니다.
 
@@ -149,7 +150,7 @@ Herdr 앱의 터미널 안에서만 동작합니다.
 | `--show pane\|tab` | 계획의 `show`, 없으면 칸 없음 | `pane`은 현재 터미널 오른쪽에, `tab`은 새 tab에 놓습니다 |
 | `--down` | 끔 | pane을 오른쪽 대신 아래에 놓습니다 |
 | `--cwd <폴더>` | 현재 폴더 | 그 세션이 일할 폴더입니다 |
-| `--agent "<명령>"` | `claude` | 띄울 명령입니다. 예: `"claude --model sonnet"` |
+| `--agent <도구>` 또는 `"<명령>"` | 맡기는 세션과 같은 도구 | 다른 도구에 맡기려면 도구 이름을 줍니다 (`--agent codex`). 명령을 직접 줄 수도 있습니다. 예: `"claude --model sonnet"`. 명령에 모델(`--model`, `-m`)을 주면 그 세션의 모델로 적어 둡니다. 훅이 모델을 알려 주지 않는 도구에서도 노드에 모델이 남습니다 |
 | `--name <이름>` | 노드 id | Herdr의 목록에 나오는 이름입니다 |
 
 `--agent`의 값은 공백으로 나눕니다. 따옴표로 묶은 인자나 공백이 든 경로는 쓸 수 없습니다.

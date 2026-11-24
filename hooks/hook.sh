@@ -1,18 +1,16 @@
 #!/bin/sh
 # Claude Code 훅이 부른다. 입력(JSON)을 읽고, 볼 필요가 있는 것만 muwi hook으로 넘긴다.
-# 대부분의 호출(skill과 상관없는 파일 읽기, push가 아닌 명령, 이미 계획을 적은 세션의 파일 수정)은
+# 대부분의 호출(skill과 상관없는 파일 읽기, 서브에이전트가 아닌 쪽의 명령, 이미 계획을 적은 세션의 파일 수정)은
 # 여기서 끝나서 node를 띄우지 않는다.
-#   hook.sh        세션이 시작되면 지침을 넣고, 읽은 skill과 서브에이전트의 시작·끝을 기록한다.
-#                  사람이 새로 말을 걸면 계획을 적었는지 다시 따지게 한다
-#   hook.sh nudge  계획 없이 파일을 고치거나 서브에이전트를 띄우려 할 때 알려 준다 (계획을 적거나 muwi skip 하면 그 요청 동안 그친다)
-#   hook.sh guard  push·PR·댓글 앞에서 사람에게 묻게 한다 (muwi config guard on 일 때)
+#   hook.sh        세션이 시작되면 지침을 넣고, 읽은 skill과 서브에이전트의 시작·끝을 기록한다
+#   hook.sh command  서브에이전트가 muwi로 노드를 시작하면 그 노드를 그 서브에이전트가 한 것으로 잇는다. 명령을 막지 않는다
+#                  (0.5.x의 훅 설정은 guard라고 부른다. push 앞에서 묻기는 0.6.0에서 뺐다)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 payload=$(cat)
 case "${1:-}" in
-  guard)
-    # push·PR 명령이거나, 서브에이전트가 muwi 명령을 실행할 때만 넘긴다 (서브에이전트가 맡은 노드를 잇는다)
+  command | guard)
+    # 서브에이전트가 muwi 명령을 실행할 때만 넘긴다 (서브에이전트가 맡은 노드를 잇는다)
     case "$payload" in
-      *push* | *"gh pr"* | *pullrequests*) ;;
       *'"agent_id"'*)
         case "$payload" in
           *muwi*) ;;
@@ -23,10 +21,8 @@ case "${1:-}" in
     esac
     ;;
   nudge)
-    # 작업에 붙었거나 계획 없이 진행하겠다고 밝힌 세션은 표시 파일이 있다
-    sid=$(printf '%s' "$payload" | sed -n 's/.*"session_id":"\([A-Za-z0-9_.-]*\)".*/\1/p' | head -n 1)
-    runs="${MUWI_DIR:-$HOME/.muwi}"
-    if [ -n "$sid" ] && [ -f "$runs/.sessions/$sid.ok" ]; then exit 0; fi
+    # 0.5.x의 훅 설정이 부르던 갈래 (계획 없이 고칠 때 알림). 0.6.0에서 뺐다. 조용히 지나간다
+    exit 0
     ;;
   *)
     case "$payload" in
@@ -45,7 +41,7 @@ case "${1:-}" in
         ;;
     esac
     case "$payload" in
-      *'"SessionStart"'* | *'"UserPromptSubmit"'* | *'"SubagentStart"'* | *'"SubagentStop"'* | *'"Skill"'* | *SKILL.md*) ;;
+      *'"SessionStart"'* | *'"SubagentStart"'* | *'"SubagentStop"'* | *'"Skill"'* | *SKILL.md*) ;;
       *) exit 0 ;;
     esac
     ;;
