@@ -6,8 +6,8 @@ import { test } from 'node:test';
 import { fileGuideHash, guideUpdate, handleHook, skillFromPath } from '../src/hook.ts';
 import { markNode } from '../src/node.ts';
 import { attach, readSession, recordSkill, touchSession } from '../src/session.ts';
-import { appendEvent, clock, readConfig, readEvents, writeConfig, writePlan, type NodeStatus, type Plan } from '../src/store.ts';
-import { loadBoard, loadView } from '../src/view.ts';
+import { appendEvent, clock, readConfig, readEvents, readPlan, writeConfig, writePlan, type NodeStatus, type Plan } from '../src/store.ts';
+import { buildView, loadBoard, loadView, unionMs } from '../src/view.ts';
 
 const ENV = {} as NodeJS.ProcessEnv;
 const T0 = Date.parse('2026-11-22T05:00:00.000Z');
@@ -110,6 +110,31 @@ test('회차와 걸린 시간: 끝낸 노드를 다시 하면 2회차, 사람을
   assert.equal(pr.attempts, 1);
   assert.equal(pr.spentMs, 2 * 60_000);
   assert.equal(v.state, 'done');
+});
+
+test('작업 시간: 노드들이 작업한 시간을 더한다. 나란히 한 노드는 겹친 시간을 한 번만 세고, 기다린 시간은 세지 않는다', () => {
+  const t = setup([{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd', after: ['a', 'b', 'c'] }]);
+  const MIN = 60_000;
+  const seen = (now: number) => buildView(readPlan(t.dir, 'w1')!, readEvents(t.dir, 'w1'), {}, T0 + now * MIN);
+  const spent = (now: number) => seen(now).spentMs / MIN;
+  // a와 b를 나란히 10분씩 (0~10분, 5~15분): 겹친 5분은 한 번만 센다
+  at(0); t.node('a', 'doing', 'lead');
+  at(5); t.node('b', 'doing', 'lead');
+  assert.equal(spent(7), 7); // 하는 중에는 지금까지
+  at(10); t.node('a', 'done', 'lead');
+  at(15); t.node('b', 'done', 'lead');
+  assert.equal(spent(15), 15);
+  // 아무 노드도 하지 않은 5분(15~20분)과 사람을 기다린 10분(25~35분)은 세지 않는다
+  at(20); t.node('c', 'doing', 'lead');
+  at(25); t.node('c', 'waiting', 'lead', '어느 쪽으로 할까요');
+  assert.equal(spent(30), 20);
+  at(35); t.node('c', 'doing', 'lead');
+  at(40); t.node('c', 'done', 'lead');
+  assert.equal(spent(60), 25);
+  // 노드의 시간을 그냥 더하면 30분이다 (a 10 + b 10 + c 10). 작업 시간은 겹침을 뺀 25분
+  const nodes = seen(60).nodes;
+  assert.equal(nodes.reduce((sum, n) => sum + n.spentMs, 0) / MIN, 30);
+  assert.deepEqual([unionMs([]), unionMs([[0, 5], [5, 8]]), unionMs([[0, 10], [2, 4]]), unionMs([[6, 9], [0, 3]])], [0, 8, 10, 6]);
 });
 
 test('작업 상태: 응답 대기 > 막힘 > 작업 중 > 끝. 목록도 그 순서로 온다', () => {

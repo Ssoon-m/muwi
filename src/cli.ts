@@ -550,7 +550,7 @@ function skillsLine(t: Pick<Try, 'skills' | 'seen' | 'instant'>, started: boolea
 
 function printShow(v: WorkView) {
   const between = v.between ? BETWEEN_NAME[v.between] : v.quiet ? QUIET_NAME[v.quiet] : undefined;
-  out(`${v.work}${v.title ? ` · ${v.title}` : ''} · ${STATE_NAME[v.state]}${between ? ` · ${between}` : ''}${v.unread ? ' · 아직 안 봄' : ''} (${v.counts.done}/${v.counts.total} 끝)`);
+  out(`${v.work}${v.title ? ` · ${v.title}` : ''} · ${STATE_NAME[v.state]}${between ? ` · ${between}` : ''}${v.unread ? ' · 아직 안 봄' : ''} (${v.counts.done}/${v.counts.total} 끝${v.spentMs > 0 ? ` · 작업 ${dur(v.spentMs)}` : ''})`);
   if (v.request) out(`요청: ${v.request}`);
   if (v.helpers.sessions || v.helpers.subagents) {
     const who = v.lead ? v.sessions[v.lead] : undefined;
@@ -644,7 +644,7 @@ function cmdStatus(a: Args, dir: string) {
   for (const w of board.works) {
     if (w.past && !a.flags.all) continue;
     // 끝났는데 사람이 아직 안 본 작업은 "새 결과"로 보여 준다
-    out(`${(w.unread ? '새 결과' : STATE_NAME[w.state]).padEnd(7)} ${w.work}  ${w.counts.done}/${w.counts.total}${w.title ? `  ${w.title}` : ''}`);
+    out(`${(w.unread ? '새 결과' : STATE_NAME[w.state]).padEnd(7)} ${w.work}  ${w.counts.done}/${w.counts.total}${w.spentMs > 0 ? ` · ${dur(w.spentMs)}` : ''}${w.title ? `  ${w.title}` : ''}`);
     for (const n of w.active) out(`          ${MARK[n.status]} ${n.id}  ${n.title}${n.closed ? ' (세션이 닫힘)' : n.quiet ? ` (${QUIET_NAME[n.quiet]})` : ''}${n.note ? ` : ${n.note}` : ''}`);
     // 하는 노드가 없으면 그 작업의 세션이 무얼 하는지
     const between = w.between ? BETWEEN_NAME[w.between] : undefined;

@@ -420,9 +420,28 @@ export default class Muwi extends View {
     });
   }
 
-  /** 지금 보는 작업에 시간이 흐르는 노드가 있는가 (하던 세션이 닫힌 노드는 멈춰 있다) */
+  /** 작업 줄의 오른쪽 글 */
+  rowMeta(w, now) {
+    const ms = this.workSpent(w, now);
+    const time = ms > 0 ? dur(ms) : null;
+    if (w.state === "done") return [time, ago(w.updatedAt, now)].filter(Boolean).join(" · ");
+    return [`${w.counts.done}/${w.counts.total}`, time].filter(Boolean).join(" · ");
+  }
+
+  /** 시간이 흐르는 노드가 있는가: 지금 보는 작업이나 목록의 작업에 (하던 세션이 닫힌 노드는 멈춰 있다) */
   ticking() {
-    return (this.data?.selected?.nodes ?? []).some((n) => n.status === "doing" && !n.closed);
+    const going = (n) => n.status === "doing" && !n.closed;
+    return (this.data?.selected?.nodes ?? []).some(going) || (this.data?.works ?? []).some((w) => (w.active ?? []).some(going));
+  }
+
+  /**
+   * 작업에 든 작업 시간: 노드들이 작업한 시간을 겹침 없이 더한 것 (muwi가 읽은 때까지).
+   * 지금 작업 중인 노드가 있으면 그 뒤로 흐른 시간을 더해 초마다 늘린다. 다 멈췄거나 기다리는 중이면 늘지 않는다
+   */
+  workSpent(w, now) {
+    const nodes = w.nodes ?? w.active ?? [];
+    const running = nodes.some((n) => n.status === "doing" && !n.closed && !this.quietIn(w.nodes ? this.terminalOf(w, n) : n.terminal, n.quiet));
+    return this.spent(w.spentMs ?? 0, running, now);
   }
 
   /**
@@ -704,7 +723,10 @@ export default class Muwi extends View {
           .child(div().min_w(0).truncate().text_color(t.dim).child(
             // 지금 보는 터미널의 세션은 계획 없이 일한다
             !view && this.planless ? "지금 칸의 세션은 계획 없이 진행 중이에요"
-              : view ? [`${view.work} · ${view.counts.done}/${view.counts.total} 끝 · ${ago(view.updatedAt, now)}`,
+              : view ? [`${view.work} · ${view.counts.done}/${view.counts.total} 끝`,
+                // 작업 시간: 노드들이 작업한 시간의 합. 끝난 작업은 끝난 때도 같이
+                this.workSpent(view, now) > 0 ? `작업 ${dur(this.workSpent(view, now))}` : null,
+                view.state === "done" ? ago(view.updatedAt, now) : null,
                 view.helpers?.sessions ? `새 세션 ${view.helpers.sessions}` : null,
                 view.helpers?.subagents ? `서브에이전트 ${view.helpers.subagents}` : null,
                 talk ? `대화: ${talk.name} · 열려 있음` : "대화: 닫힘"].filter(Boolean).join(" · ") : `${works.length}개 작업`))
@@ -1067,7 +1089,8 @@ export default class Muwi extends View {
         .child(h_flex().gap(6).text_size(10.5)
           .child(div().flex_1().min_w(0).truncate().text_color(item.ask ? c.waiting : c[w.state] ?? t.dim).child(line))
           // 끝나지 않은 작업은 몇 단계째인지: 끝난 노드 / 전체
-          .child(div().flex_none().text_color(t.dim).child(w.state === "done" ? ago(w.updatedAt, now) : `${w.counts.done}/${w.counts.total} · ${ago(w.updatedAt, now)}`))));
+          // 오른쪽: 몇 단계째인지와 작업 시간 (노드들이 작업한 시간의 합. 작업 중이면 초마다 늘어난다). 끝난 작업은 작업 시간과 끝난 때
+          .child(div().flex_none().text_color(t.dim).child(this.rowMeta(w, now)))));
   }
 
   /** 계획 없이 일하는 세션 한 줄 (Herdr의 Agents 칸과 같은 모양). 누르면 그 터미널로 간다 */
