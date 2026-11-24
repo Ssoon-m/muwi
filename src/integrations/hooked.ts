@@ -7,7 +7,7 @@ import path from 'node:path';
 import type { Happened, Reply } from '../events.ts';
 import { backup, writeText } from './files.ts';
 import { HOOK_MARK, installEntries, uninstallEntries } from './settings-hooks.ts';
-import { flatShaped, fromShaped, plugged, shaped, shapedEntries, toShaped, toolCommand, type Shape } from './shaped.ts';
+import { canOf, flatShaped, fromShaped, plugged, shaped, shapedEntries, toShaped, toolCommand, type Shape } from './shaped.ts';
 import type { Adapter, HookResult } from './types.ts';
 
 /** Claude Code와 같은 사건 이름 */
@@ -78,6 +78,7 @@ const DROID: Shape = {
   tools: { edit: ['Edit', 'Create', 'ApplyPatch'], spawn: ['Task'], shell: ['Execute'], read: ['Read'], skill: ['Skill'] },
 };
 export const droid: Adapter = {
+  can: canOf(DROID),
   install(ctx) {
     const bare = path.join(ctx.home, 'hooks.json');
     const file = fs.existsSync(bare) ? bare : path.join(ctx.home, 'settings.json');
@@ -149,6 +150,7 @@ export function removeTomlRegion(text: string): string {
 }
 const tomlString = (v: string) => (v.includes("'") ? JSON.stringify(v) : `'${v}'`);
 export const kimi: Adapter = {
+  can: canOf(KIMI),
   install(ctx) {
     const file = path.join(ctx.home, 'config.toml');
     const old = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
@@ -192,6 +194,7 @@ const AGY: Shape = {
   },
 };
 export const antigravity: Adapter = {
+  can: canOf(AGY),
   install(ctx) {
     const file = path.join(ctx.home, 'hooks.json');
     let data: Record<string, unknown> = {};
@@ -235,7 +238,8 @@ export const antigravity: Adapter = {
 //    플러그인 파일은 muwi 설치 위치의 integrations/<도구>/에 있다
 export const opencode = plugged('opencode', { to: 'plugins', files: ['muwi.js'] });
 export const kilo = plugged('kilo', { to: 'plugin', files: ['muwi.js'] });
-export const pi = plugged('pi', { to: 'extensions', files: ['muwi.ts'] });
+// Pi에는 서브에이전트가 없다
+export const pi = plugged('pi', { to: 'extensions', files: ['muwi.ts'], can: { subagents: false } });
 export const omp = plugged('omp', { to: 'extensions', files: ['muwi.ts'] });
 // Hermes는 플러그인을 켜 줘야 읽는다 (hermes plugins enable muwi)
 export const hermes = plugged('hermes', { to: path.join('plugins', 'muwi'), files: ['__init__.py', 'plugin.yaml'] });

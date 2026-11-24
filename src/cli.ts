@@ -6,13 +6,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { LABEL_NODE, LABEL_WORK, hc, herdrApp, terminalName, type Ran } from './herdr.ts';
 import { layoutFor, layoutProblems, type Fit, type Flow } from './layout.ts';
-import { ROOT, guideUpdate, handleHook, sessionInstructions } from './hook.ts';
+import { ROOT, adoptSpawn, guideUpdate, handleHook, sessionInstructions } from './hook.ts';
 import { fromSubagent, markNode } from './node.ts';
 import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
 import { attach, markSettled, readSession, recentSessions, sessionKey, sessionLabel, touchSession } from './session.ts';
 import { resumeFacts } from './resume.ts';
 import { checkMod, installedTools, newestPlugin, olderThan, readInstall, refreshSetup, removeSetup, runSetup } from './setup.ts';
 import { adapterOf } from './integrations/index.ts';
+import { gaps } from './integrations/types.ts';
 import { TOOLS, launchCommand, toolById } from './integrations/tools.ts';
 import { GRAPH_AT, ScreenError, applyLayout, ensurePreview, removeLayout, screenState, type GraphAt, type Screen } from './screen.ts';
 import {
@@ -716,7 +717,9 @@ function cmdSetup(a: Args, dir: string) {
     const done = readInstall(dir)?.tools ?? {};
     for (const t of TOOLS) {
       const state = done[t.id] ? '통합 넣음' : t.id === 'claude' && !have.has(t.id) ? '없음' : have.has(t.id) ? '깔려 있음' : '없음';
-      out(`${t.id.padEnd(16)} ${t.name.padEnd(18)} ${state.padEnd(6)}${t.limits ? `  ${t.limits}` : ''}`);
+      // 그 도구의 훅이 알려 주지 않는 것 (커넥터의 선언에서 만든다). 비어 있으면 다 알려 준다
+      const lacks = gaps(adapterOf(t.id)?.can ?? { subagents: false, start: false, skills: false }).join(' · ');
+      out(`${t.id.padEnd(16)} ${t.name.padEnd(18)} ${state.padEnd(6)}${lacks ? `  ${lacks}` : ''}`);
     }
     out('넣기: muwi setup --tool <도구>[,<도구>] 또는 muwi setup --all. Claude Code는 플러그인이 넣어 줘요.');
     return;
@@ -1019,11 +1022,31 @@ async function main(argv: string[]) {
   const dir = runsDir();
   // 적는 명령이 끝나면 바뀐 지침이 있는지 보고 출력 끝에 붙인다
   if (cmd && TELLS.has(cmd)) {
+    if (ADOPTS.has(cmd)) adoptHere(dir);
     await run(cmd, a, dir);
     return tellGuide(dir);
   }
   return run(cmd, a, dir);
 }
+
+/**
+ * muwi run으로 뜬 세션인데 아직 맡은 노드에 붙지 않았으면 여기서 붙인다.
+ * 세션이 시작될 때를 알려 주는 도구는 훅이 먼저 붙인다. 알려 주지 않는 도구는 그 세션의 첫 muwi 명령에서 붙는다
+ */
+function adoptHere(dir: string) {
+  const key = sessionKey();
+  if (!key || !process.env.HC_TERMINAL_ID) return;
+  // 이미 작업에 붙은 세션은 다시 묻지 않는다 (명령마다 Herdr에 묻지 않게)
+  if (readSession(dir, key)?.work) return;
+  try {
+    adoptSpawn(dir, key, process.env);
+  } catch {
+    // 붙이지 못해도 명령은 그대로 한다
+  }
+}
+
+/** 맡은 세션이 처음 실행할 만한 명령들: 맡은 노드의 진행을 적는 명령 */
+const ADOPTS = new Set(['node', 'start', 'done', 'wait', 'block', 'add', 'remove', 'skip']);
 
 /** 지침이 바뀌었을 때 알려 줄 명령들: 세션이 계획과 진행을 적는 명령 */
 const TELLS = new Set(['plan', 'add', 'remove', 'node', 'start', 'done', 'wait', 'block', 'skip', 'run']);

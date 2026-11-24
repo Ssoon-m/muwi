@@ -12,7 +12,7 @@ import { shPath, writeText } from './files.ts';
 import { installFlat, uninstallFlat } from './flat.ts';
 import { HOOK_MARK, installEntries, uninstallEntries, type HookEntry } from './settings-hooks.ts';
 import { toolById } from './tools.ts';
-import type { Adapter, HookMode, HookResult, SetupCtx } from './types.ts';
+import type { Adapter, Can, HookMode, HookResult, SetupCtx } from './types.ts';
 
 export type Shape = {
   id: string;
@@ -164,8 +164,18 @@ export function shaped(shape: Shape, wiring: Wiring): Adapter {
     remove(wired) {
       for (const file of wired.settings ?? []) uninstallEntries(file, bare);
     },
+    can: canOf(shape),
     from: (payload, mode, env) => fromShaped(shape, payload, mode, env),
     to: (h, r) => toShaped(shape, h, r),
+  };
+}
+
+/** 모양에서 읽은 선언: 서브에이전트 사건을 거는가, 세션 시작을 거는가, skill을 읽는 도구를 아는가 */
+export function canOf(shape: Pick<Shape, 'on' | 'tools' | 'shellReads'>): Can {
+  return {
+    subagents: Boolean(shape.on.subStart),
+    start: Boolean(shape.on.start),
+    skills: shape.tools.read.length + (shape.tools.skill?.length ?? 0) > 0 || Boolean(shape.shellReads),
   };
 }
 
@@ -181,6 +191,7 @@ export function flatShaped(shape: Shape, o: { file: string; matcher: Wiring['mat
     remove(wired) {
       for (const file of wired.settings ?? []) uninstallFlat(file, o);
     },
+    can: canOf(shape),
     from: (payload, mode, env) => fromShaped(shape, payload, mode, env),
     to: (h, r) => toShaped(shape, h, r),
   };
@@ -200,9 +211,10 @@ const HOOK_SLOT = '__MUWI_HOOK__';
  * 플러그인은 그 도구의 사건을 Claude Code와 같은 모양의 JSON으로 바꿔 hooks/tool.sh <도구> [갈래]에 넘기고, 답을 그 도구에 적용한다.
  * to: 설정 폴더 기준으로 넣을 폴더. files: 넣을 파일들 (integrations/<도구>/ 기준)
  */
-export function plugged(id: string, o: { to: string; files: string[] }): Adapter {
+export function plugged(id: string, o: { to: string; files: string[]; can?: Partial<Can> }): Adapter {
   const shape: Shape = { id, ...PLUGIN_SHAPE };
   return {
+    can: { ...canOf(shape), ...o.can },
     install(ctx: SetupCtx) {
       const script = path.join(ctx.root, 'hooks', 'tool.sh');
       // 플러그인이 이 스크립트를 바로 실행한다

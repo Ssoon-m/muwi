@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { handleHook } from '../src/hook.ts';
-import { ADAPTERS } from '../src/integrations/index.ts';
+import { ADAPTERS, adapterOf } from '../src/integrations/index.ts';
+import { gaps } from '../src/integrations/types.ts';
 import { removeTomlRegion } from '../src/integrations/hooked.ts';
 import { TOOLS, detectTool, launchCommand, resumeCommand, toolById, toolHome } from '../src/integrations/tools.ts';
 import { readInstall, removeSetup, runSetup } from '../src/setup.ts';
@@ -182,4 +183,20 @@ test('muwi hook --from <도구>: 그 도구의 형식으로 읽고 답한다 (�
   assert.equal(run(['--from', 'antigravity-cli', '--event', 'PostToolUse'], { conversationId: 'c', toolCall: { name: 'view_file', args: { AbsolutePath: '/x/a.md' } } }).stdout.trim(), '{}');
   // 모르는 도구면 아무것도 하지 않는다
   assert.deepEqual([run(['nudge', '--from', 'nope'], EDITS.claude).status, run(['nudge', '--from', 'nope'], EDITS.claude).stdout], [0, '']);
+});
+
+test('커넥터 규격: 모든 도구에 커넥터가 있고, 그 도구의 훅이 알려 주는 것을 선언한다', () => {
+  for (const t of TOOLS) {
+    const a = adapterOf(t.id);
+    assert.ok(a, `${t.id}에 커넥터가 없어요`);
+    // 꼭 해야 하는 일 넷과 선언
+    for (const k of ['install', 'remove', 'from', 'to'] as const) assert.equal(typeof a[k], 'function', `${t.id}.${k}`);
+    assert.deepEqual(Object.keys(a.can).sort(), ['skills', 'start', 'subagents'], t.id);
+    // 선언에 없는 것은 사람이 읽는 말로 나온다 (muwi setup --tools와 문서의 표)
+    assert.equal(gaps(a.can).length, Object.values(a.can).filter(v => !v).length, t.id);
+  }
+  // 서브에이전트를 알려 주지 않는 도구에서도 --sub로 밝힌 노드는 표시된다 (tests/cli.test.ts). 선언은 "자동으로 알아보는가"다
+  assert.equal(adapterOf('claude')!.can.subagents, true);
+  assert.equal(adapterOf('pi')!.can.subagents, false);
+  assert.deepEqual(gaps({ subagents: true, start: true, skills: true }), []);
 });
