@@ -298,7 +298,7 @@ export function newerElsewhere(version: string, env: NodeJS.ProcessEnv = process
       let v: string | undefined;
       try {
         const m = readJson<{ name?: string; version?: string }>(path.join(pkg.root, 'package.json'));
-        if (m?.name === 'muwi' || m?.name === 'herdr-muwi') v = m.version;
+        if (m?.name && PACKAGE_NAMES.includes(m.name)) v = m.version;
       } catch {
         continue;
       }
@@ -308,11 +308,14 @@ export function newerElsewhere(version: string, env: NodeJS.ProcessEnv = process
   return newest;
 }
 
+/** npm에 올리는 muwi 패키지들 (둘 다 muwi 명령을 낸다) */
+const PACKAGE_NAMES = ['@muwi/herdr-app', '@muwi/core'];
+
 function packagesAt(dir: string, platform: NodeJS.Platform): { bin: string; root: string }[] {
   if (platform === 'win32') {
     const bin = path.join(dir, 'muwi.cmd');
     if (!fs.existsSync(bin)) return [];
-    return ['herdr-muwi', 'muwi'].map(name => ({ bin, root: path.join(dir, 'node_modules', name) }));
+    return PACKAGE_NAMES.map(name => ({ bin, root: path.join(dir, 'node_modules', ...name.split('/')) }));
   }
   const bin = path.join(dir, 'muwi');
   try {

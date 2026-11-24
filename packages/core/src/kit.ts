@@ -1,5 +1,5 @@
 // 명령들이 같이 쓰는 것: 인자 읽기, 출력, 실패, 어느 작업에 적을지 고르기.
-// 코어의 명령과 화면 패키지(herdr-muwi)가 더하는 명령이 함께 쓴다.
+// 코어의 명령과 화면 패키지(@muwi/herdr-app)가 더하는 명령이 함께 쓴다.
 import { attach, readSession, sessionKey } from './session.ts';
 import { checkWorkName, listWorks, readPlan, type Plan } from './store.ts';
 
@@ -24,8 +24,8 @@ process.stdout.on('error', (e: NodeJS.ErrnoException) => {
 export const VALUED: ReadonlySet<string> = new Set(['work', 'request', 'title', 'why', 'by', 'file', 'after', 'before', 'result', 'run', 'show', 'from', 'event', 'tool']);
 
 /**
- * Herdr 화면(herdr-muwi)이 더하는 명령의 이름. 코어만 깐 사람이 이 명령을 치면 어느 패키지에 있는지 알려 주려고 이름만 둔다.
- * herdr-muwi의 시험이 이 목록과 화면이 더하는 명령이 같은지 본다
+ * Herdr 화면(@muwi/herdr-app)이 더하는 명령의 이름. 코어만 깐 사람이 이 명령을 치면 어느 패키지에 있는지 알려 주려고 이름만 둔다.
+ * @muwi/herdr-app의 시험이 이 목록과 화면이 더하는 명령이 같은지 본다
  */
 export const SCREEN_COMMANDS: ReadonlySet<string> = new Set(['board', 'layout', 'open', 'run', 'tidy']);
 

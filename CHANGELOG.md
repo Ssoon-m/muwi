@@ -6,12 +6,12 @@
 
 ### 변경
 
-- **패키지를 둘로 나눴습니다.** 코어 `muwi`(기록, 명령, 지침, AI 도구 커넥터)와 Herdr 화면 `herdr-muwi`(작업 목록과 그래프 칸, `muwi run`·`tidy`·`open`·`layout`·`board`, 그래프 배치)입니다. `herdr-muwi`가 `muwi`를 받아서 돕니다. 둘 다 `muwi` 명령을 내므로 하나만 깝니다.
-- **npm으로 깝니다.** Claude Code 플러그인으로 깔던 구조를 걷어냈습니다 (`npm i -g herdr-muwi`). Claude Code도 다른 도구처럼 커넥터로 넣습니다 (`muwi setup --tool claude` 또는 `--all`): 훅은 `~/.claude/settings.json`에, 사용법은 `~/.claude/skills/muwi`에 넣습니다. 이제 Claude Code 없이도 muwi를 깔 수 있습니다.
-- 코어는 화면을 모릅니다. 화면 규격(이 프로세스가 도는 자리, 세션 상태, 맡긴 노드, 화면이 더하는 명령·설정, setup에서 넣고 빼기)으로만 묻고, `herdr-muwi`가 Herdr로 채웁니다. 화면은 `muwi setup`이 `setup.json`에 적어 둔 경로에서 불러오므로 훅과 그래프 칸이 부르는 명령도 Herdr 화면을 씁니다. 불러오지 못하면 화면 없이 돌고, 까닭을 화면 명령의 오류와 `.hook-errors.log`에 남기며, 업데이트 뒤 다시 맞출 때도 화면이 넣은 것의 기록을 지우지 않습니다. 화면 없이 쓰면 기록과 `muwi show`·`status`는 그대로 되고, 세션 상태는 모름으로 둡니다.
-- `muwi config`의 설정은 화면이 정합니다 (`layout`은 `herdr-muwi`의 설정입니다).
-- 그래프 배치에 쓰는 elkjs를 저장소에 넣어 두지 않고 `herdr-muwi`의 의존 패키지로 받습니다.
-- 저장소는 pnpm workspace 모노레포입니다 (`packages/muwi`, `packages/herdr-muwi`). 개발할 때는 TypeScript를 그대로 실행하고, 배포할 때만 `.js`로 바꿉니다 (`pnpm build`). `pnpm check:package`가 만든 패키지를 하나씩 `npm i -g`로 깔아서, npm이 PATH에 건 `muwi`(Windows는 npm이 만든 `muwi.cmd`)로 명령, 그래프 배치, setup, 훅, Claude Code 커넥터를 돌려 봅니다. CI에서 세 OS 모두 돌립니다.
+- **패키지를 둘로 나눴습니다.** 코어 `@muwi/core`(기록, 명령, 지침, AI 도구 커넥터)와 Herdr 화면 `@muwi/herdr-app`(작업 목록과 그래프 칸, `muwi run`·`tidy`·`open`·`layout`·`board`, 그래프 배치)입니다. `@muwi/herdr-app`이 `@muwi/core`를 받아서 돕니다. 둘 다 `muwi` 명령을 내므로 하나만 깝니다.
+- **npm으로 깝니다.** Claude Code 플러그인으로 깔던 구조를 걷어냈습니다 (`npm i -g @muwi/herdr-app`). Claude Code도 다른 도구처럼 커넥터로 넣습니다 (`muwi setup --tool claude` 또는 `--all`): 훅은 `~/.claude/settings.json`에, 사용법은 `~/.claude/skills/muwi`에 넣습니다. 이제 Claude Code 없이도 muwi를 깔 수 있습니다.
+- 코어는 화면을 모릅니다. 화면 규격(이 프로세스가 도는 자리, 세션 상태, 맡긴 노드, 화면이 더하는 명령·설정, setup에서 넣고 빼기)으로만 묻고, `@muwi/herdr-app`이 Herdr로 채웁니다. 화면은 `muwi setup`이 `setup.json`에 적어 둔 경로에서 불러오므로 훅과 그래프 칸이 부르는 명령도 Herdr 화면을 씁니다. 불러오지 못하면 화면 없이 돌고, 까닭을 화면 명령의 오류와 `.hook-errors.log`에 남기며, 업데이트 뒤 다시 맞출 때도 화면이 넣은 것의 기록을 지우지 않습니다. 화면 없이 쓰면 기록과 `muwi show`·`status`는 그대로 되고, 세션 상태는 모름으로 둡니다.
+- `muwi config`의 설정은 화면이 정합니다 (`layout`은 `@muwi/herdr-app`의 설정입니다).
+- 그래프 배치에 쓰는 elkjs를 저장소에 넣어 두지 않고 `@muwi/herdr-app`의 의존 패키지로 받습니다.
+- 저장소는 pnpm workspace 모노레포입니다 (`packages/core`, `packages/herdr-app`). 개발할 때는 TypeScript를 그대로 실행하고, 배포할 때만 `.js`로 바꿉니다 (`pnpm build`). `pnpm check:package`가 만든 패키지를 하나씩 `npm i -g`로 깔아서, npm이 PATH에 건 `muwi`(Windows는 npm이 만든 `muwi.cmd`)로 명령, 그래프 배치, setup, 훅, Claude Code 커넥터를 돌려 봅니다. CI에서 세 OS 모두 돌립니다.
 - 커넥터 코드의 폴더 이름을 `integrations`에서 `connectors`로 바꿨습니다.
 - `muwi setup`과 `muwi --version`이 PATH에서 더 새 muwi를 찾으면 알려 줍니다. nvm 등으로 Node를 바꾸고 다른 자리에 새로 깔면 훅과 `~/.local/bin/muwi`가 옛 판에 남기 때문입니다. 새 자리의 명령으로 `muwi setup`을 실행하면 옮겨 갑니다.
 

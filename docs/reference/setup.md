@@ -8,7 +8,7 @@ muwi가 무엇을 어디에 설치하는지, 설정으로 무엇을 바꿀 수 �
 | --- | --- |
 | Node | 24 이상과 npm |
 | AI 도구 | Claude Code, Codex 등 커넥터가 있는 도구 ([다른 AI 도구에 넣기](#다른-ai-도구에-넣기)) |
-| [Herdr 앱](https://herdr.dev) | 그래프를 보거나 새 세션을 띄울 때 필요합니다 (`herdr-muwi`) |
+| [Herdr 앱](https://herdr.dev) | 그래프를 보거나 새 세션을 띄울 때 필요합니다 (`@muwi/herdr-app`) |
 | Git for Windows | Windows에서만. Claude Code가 훅을 Git Bash로 실행합니다. [Windows에서 쓰기](#windows에서-쓰기)를 보세요 |
 
 PATH에 Node가 없는 곳(Herdr가 띄우는 세션, 그래프 칸)에서는 muwi가 로그인 셸에 물어 Node를 찾고 `~/.cache/muwi/node`에 적어 둡니다. Node 버전을 바꿨다면 `muwi setup`을 다시 실행하세요. 캐시를 버리고 다시 찾습니다. 바꾼 Node에 muwi를 새로 깔았다면 [다른 자리에 새로 깔았을 때](#업데이트하기)를 보세요. 자세한 내용은 [문제 해결하기](../guides/troubleshooting.md#node-24-이상이-필요하다고-나올-때)에 있습니다.
@@ -19,12 +19,12 @@ muwi는 패키지 두 개로 나뉩니다. 둘 다 `muwi` 명령을 내므로 �
 
 | 패키지 | 들어 있는 것 |
 | --- | --- |
-| `herdr-muwi` | `muwi`의 모든 것에 더해 Herdr 화면: 작업 목록과 그래프 칸, `muwi run`·`tidy`(새 세션에 맡기기), `muwi layout`·`open`, 그래프 배치 |
-| `muwi` | 코어: 기록, 명령, AI에게 주는 지침, 사용법 skill, AI 도구 커넥터. 화면 없이 기록만 쓸 때 |
+| `@muwi/herdr-app` | `@muwi/core`의 모든 것에 더해 Herdr 화면: 작업 목록과 그래프 칸, `muwi run`·`tidy`(새 세션에 맡기기), `muwi layout`·`open`, 그래프 배치 |
+| `@muwi/core` | 코어: 기록, 명령, AI에게 주는 지침, 사용법 skill, AI 도구 커넥터. 화면 없이 기록만 쓸 때 |
 
 ```sh
-npm i -g herdr-muwi      # Herdr 앱에서 그래프로 볼 때
-npm i -g muwi            # 기록만 쓸 때
+npm i -g @muwi/herdr-app   # Herdr 앱에서 그래프로 볼 때
+npm i -g @muwi/core        # 기록만 쓸 때
 ```
 
 ## muwi setup이 설치하는 것
@@ -38,12 +38,12 @@ muwi setup --tool claude         # 그 AI 도구에 커넥터도. 여러 개는 
 | --- | --- | --- |
 | 터미널용 `muwi` 명령 | `~/.local/bin/muwi` | 항상 |
 | PowerShell·cmd용 `muwi` 명령 | `~/.local/bin/muwi.cmd` | Windows에서만 |
-| 그래프 칸 | `~/.config/herdr-app/mods/muwi` | `herdr-muwi`로 깔았고 Herdr 앱이 있을 때 |
+| 그래프 칸 | `~/.config/herdr-app/mods/muwi` | `@muwi/herdr-app`으로 깔았고 Herdr 앱이 있을 때 |
 | AI 도구의 커넥터 | 도구마다 다릅니다 ([다른 AI 도구에 넣기](#다른-ai-도구에-넣기)) | `--tool`이나 `--all`로 고른 도구 |
 
 터미널용 명령은 Herdr 앱의 그래프 칸이 기록을 읽을 때도 씁니다. npm이 넣은 `muwi` 명령과 같은 것을 부릅니다.
 
-설치한 항목은 `~/.muwi/setup.json`에 기록합니다. `muwi setup --remove`는 이 기록에 있는 것만 지웁니다. 화면(`herdr-muwi`)의 경로도 여기에 적어 두므로, 그 뒤로는 훅과 그래프 칸이 부르는 명령도 Herdr 화면을 씁니다.
+설치한 항목은 `~/.muwi/setup.json`에 기록합니다. `muwi setup --remove`는 이 기록에 있는 것만 지웁니다. 화면(`@muwi/herdr-app`)의 경로도 여기에 적어 두므로, 그 뒤로는 훅과 그래프 칸이 부르는 명령도 Herdr 화면을 씁니다.
 
 muwi를 업데이트하면 다음 세션이 시작될 때 이 항목들을 새 버전에 맞춥니다. 한 번 넣은 도구는 `muwi setup`을 다시 실행할 때 고르지 않아도 맞춥니다.
 
@@ -174,7 +174,7 @@ muwi의 동작은 도구의 훅에 기대지 않고, 모든 도구에 있는 것
 
 ### 커넥터가 해야 하는 일
 
-새 도구를 붙이려면 커넥터 하나를 만듭니다 (`packages/muwi/src/connectors/types.ts`의 `Adapter`). 꼭 해야 하는 일은 넷입니다.
+새 도구를 붙이려면 커넥터 하나를 만듭니다 (`packages/core/src/connectors/types.ts`의 `Adapter`). 꼭 해야 하는 일은 넷입니다.
 
 | 할 일 | 내용 |
 | --- | --- |
@@ -183,7 +183,7 @@ muwi의 동작은 도구의 훅에 기대지 않고, 모든 도구에 있는 것
 | 읽기 (`from`) | 그 도구의 훅 입력을 공통 사건으로 바꿉니다: 세션 시작, skill을 읽음, 서브에이전트 시작·끝, 서브에이전트가 실행하려는 셸 명령 |
 | 답하기 (`to`) | 코어의 답을 그 도구의 형식으로 바꿉니다. 답은 "말해 주기" 하나입니다 (세션이 시작될 때의 지침). muwi는 돌려보내지 않습니다 |
 
-그리고 그 도구의 훅이 알려 주는 것을 선언합니다 (`can`: 서브에이전트, 세션 시작, skill 읽기). 선언에 없는 것은 위의 "어느 도구에서나 똑같이 되는 것"으로 메웁니다. 도구 표(`packages/muwi/src/connectors/tools.ts`)에는 설정 폴더, 지침 파일, 띄우는 명령과 이어 가는 명령을 적습니다.
+그리고 그 도구의 훅이 알려 주는 것을 선언합니다 (`can`: 서브에이전트, 세션 시작, skill 읽기). 선언에 없는 것은 위의 "어느 도구에서나 똑같이 되는 것"으로 메웁니다. 도구 표(`packages/core/src/connectors/tools.ts`)에는 설정 폴더, 지침 파일, 띄우는 명령과 이어 가는 명령을 적습니다.
 
 ## Windows에서 쓰기
 
@@ -202,7 +202,7 @@ GitHub Actions의 Windows에서 시험 전체를 돌리고, 두 패키지를 하
 ## 업데이트하기
 
 ```sh
-npm i -g herdr-muwi@latest       # muwi만 깔았으면 muwi@latest
+npm i -g @muwi/herdr-app@latest   # @muwi/core만 깔았으면 @muwi/core@latest
 ```
 
 같은 자리에서 바뀌므로 이미 열려 있는 세션의 훅도 다음 호출부터 새 버전으로 돕니다. 지침이 바뀌었으면 그 세션의 다음 `muwi` 명령 출력에 새 지침이 한 번 붙고, 다음 세션이 시작될 때 터미널용 명령·그래프 칸·커넥터를 새 버전에 맞춥니다. 커넥터가 거는 훅의 종류가 바뀐 업데이트는 세션을 새로 열어야 적용됩니다.
@@ -221,7 +221,7 @@ npm i -g herdr-muwi@latest       # muwi만 깔았으면 muwi@latest
 
 ```sh
 muwi setup --remove
-npm rm -g herdr-muwi
+npm rm -g @muwi/herdr-app
 ```
 
 기록(`~/.muwi/`)과 Node 경로 캐시(`~/.cache/muwi/`)는 남습니다. 필요 없으면 폴더를 지우세요.

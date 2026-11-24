@@ -1,5 +1,5 @@
 // 화면 규격: 세션들이 도는 곳(터미널 앱)과, 기록을 보여 주는 화면. 코어는 그것이 무엇인지 모른다.
-// herdr-muwi가 Herdr로 구현한다. 화면이 없으면 코어는 "모름"으로 돈다:
+// @muwi/herdr-app이 Herdr로 구현한다. 화면이 없으면 코어는 "모름"으로 돈다:
 //   계획과 진행 기록, muwi show·status는 그대로 되고, 세션이 살아 있는지는 알 수 없어 적힌 그대로 보여 준다.
 // 화면은 $MUWI_HOST(화면 모듈의 경로)나, muwi setup이 setup.json에 적어 둔 경로에서 불러온다.
 import path from 'node:path';

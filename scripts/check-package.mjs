@@ -22,21 +22,21 @@ fs.mkdirSync(packs);
 const npm = (args, cwd = tmp) => execFileSync('npm', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], shell: WIN });
 const pack = dir => path.join(packs, npm(['pack', dir, '--pack-destination', packs, '--silent']).trim().split('\n').pop());
 
-const coreTgz = pack(build('muwi'));
-// herdr-muwi는 같은 버전의 muwi를 npm에서 받는다. 아직 올리지 않은 판을 확인하므로, 확인용 사본만 그 의존을 방금 만든 tarball로 바꾼다
-const herdrDist = build('herdr-muwi');
-const herdrCheck = path.join(tmp, 'herdr-muwi');
+const coreTgz = pack(build('core'));
+// @muwi/herdr-app은 같은 버전의 @muwi/core를 npm에서 받는다. 아직 올리지 않은 판을 확인하므로, 확인용 사본만 그 의존을 방금 만든 tarball로 바꾼다
+const herdrDist = build('herdr-app');
+const herdrCheck = path.join(tmp, 'herdr-app');
 fs.cpSync(herdrDist, herdrCheck, { recursive: true });
 const manifest = JSON.parse(fs.readFileSync(path.join(herdrCheck, 'package.json'), 'utf8'));
-manifest.dependencies.muwi = `file:${coreTgz.split(path.sep).join('/')}`;
+manifest.dependencies['@muwi/core'] = `file:${coreTgz.split(path.sep).join('/')}`;
 fs.writeFileSync(path.join(herdrCheck, 'package.json'), JSON.stringify(manifest, null, 2));
 const herdrTgz = pack(herdrCheck);
 
-/** 패키지 하나를 빈 자리(npm prefix)에 npm i -g로 깐다. 그 패키지의 폴더와 npm이 건 명령을 돌려준다 */
-function installAlone(name, tgz) {
-  const prefix = path.join(tmp, `${name}-prefix`);
+/** 패키지 하나를 빈 자리(npm prefix)에 npm i -g로 깐다. 그 패키지의 폴더와 npm이 건 명령을 돌려준다. label은 임시 폴더 이름 */
+function installAlone(label, name, tgz) {
+  const prefix = path.join(tmp, `${label}-prefix`);
   npm(['install', '-g', '--prefix', prefix, tgz, '--no-audit', '--no-fund', '--silent']);
-  const pkg = path.join(prefix, ...(WIN ? [] : ['lib']), 'node_modules', name);
+  const pkg = path.join(prefix, ...(WIN ? [] : ['lib']), 'node_modules', ...name.split('/'));
   return { pkg, bin: WIN ? path.join(prefix, 'muwi.cmd') : path.join(prefix, 'bin', 'muwi') };
 }
 
@@ -58,7 +58,7 @@ function runner(env) {
   return run;
 }
 
-const version = JSON.parse(fs.readFileSync(path.join(build('muwi'), 'package.json'), 'utf8')).version;
+const version = JSON.parse(fs.readFileSync(path.join(build('core'), 'package.json'), 'utf8')).version;
 const plan = JSON.stringify({ title: '확인', nodes: [{ id: 'a', title: 'A' }, { id: 'b', title: 'B', after: ['a'] }] });
 
 // 실행되는 코드는 모두 .js다 (도구에 넣는 Pi·oh-my-pi 플러그인 파일과 그래프 칸의 타입 파일만 .ts로 남는다)
@@ -76,10 +76,10 @@ function onlyAllowedTs(pkg) {
   assert.deepEqual(ts.filter(f => !allowed.includes(f)), []);
 }
 
-// ---- 코어(muwi)만 깔았을 때: npm이 건 명령으로 기록과 setup이 돈다
+// ---- 코어(@muwi/core)만 깔았을 때: npm이 건 명령으로 기록과 setup이 돈다
 {
-  const { pkg, bin } = installAlone('muwi', coreTgz);
-  const { home, env } = envFor('muwi');
+  const { pkg, bin } = installAlone('core', '@muwi/core', coreTgz);
+  const { home, env } = envFor('core');
   const run = runner(env);
   onlyAllowedTs(pkg);
   assert.equal(run(bin, ['--version']).trim(), version);
@@ -95,11 +95,11 @@ function onlyAllowedTs(pkg) {
   assert.equal(fs.existsSync(wrapper), false);
 }
 
-// ---- herdr-muwi만 깔았을 때: 코어는 herdr-muwi 안에 따라 들어오고, 화면이 더하는 명령과 그래프 배치(elkjs)까지 돈다
+// ---- @muwi/herdr-app만 깔았을 때: 코어는 @muwi/herdr-app 안에 따라 들어오고, 화면이 더하는 명령과 그래프 배치(elkjs)까지 돈다
 {
-  const { pkg: herdr, bin } = installAlone('herdr-muwi', herdrTgz);
-  const core = path.join(herdr, 'node_modules', 'muwi');
-  const { home, env } = envFor('herdr-muwi');
+  const { pkg: herdr, bin } = installAlone('herdr-app', '@muwi/herdr-app', herdrTgz);
+  const core = path.join(herdr, 'node_modules', '@muwi', 'core');
+  const { home, env } = envFor('herdr-app');
   const run = runner(env);
   onlyAllowedTs(herdr);
   onlyAllowedTs(core);
@@ -127,7 +127,7 @@ function onlyAllowedTs(pkg) {
   run(bin, ['setup', '--tool', 'claude']);
   const settings = JSON.parse(fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8'));
   const command = settings.hooks.SessionStart[0].hooks[0].command;
-  assert.match(command, /node_modules[\\/]muwi[\\/]hooks[\\/]hook\.sh/);
+  assert.match(command, /node_modules[\\/]@muwi[\\/]core[\\/]hooks[\\/]hook\.sh/);
   const viaClaude = run(SH, ['-c', command], JSON.stringify({ session_id: 'c2', hook_event_name: 'SessionStart', source: 'startup' }));
   assert.match(JSON.parse(viaClaude).hookSpecificOutput.additionalContext, /작업 진행 방식 \(muwi\)/);
   assert.ok(fs.existsSync(path.join(home, '.claude', 'skills', 'muwi', 'SKILL.md')));
@@ -137,4 +137,4 @@ function onlyAllowedTs(pkg) {
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });
-console.log(`패키지 확인: muwi·herdr-muwi ${version}을 하나씩 npm i -g로 깔아서, npm이 건 muwi로 명령, 그래프 배치, setup, 훅, Claude Code 커넥터가 돈다`);
+console.log(`패키지 확인: @muwi/core·@muwi/herdr-app ${version}을 하나씩 npm i -g로 깔아서, npm이 건 muwi로 명령, 그래프 배치, setup, 훅, Claude Code 커넥터가 돈다`);

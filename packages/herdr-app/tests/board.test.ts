@@ -6,15 +6,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { setHost } from 'muwi/host';
-import { readInstall, removeSetup, runSetup } from 'muwi/setup';
+import { setHost } from '@muwi/core/host';
+import { readInstall, removeSetup, runSetup } from '@muwi/core/setup';
 import herdr from '../src/host.ts';
 
-/** herdr-muwi의 muwi 명령: Herdr 화면을 붙인 muwi */
+/** @muwi/herdr-app의 muwi 명령: Herdr 화면을 붙인 muwi */
 const CLI = path.resolve(import.meta.dirname, '../bin/muwi.js');
 const HERDR_HOST = path.resolve(import.meta.dirname, '../src/host.ts');
-/** 코어(muwi)가 깔린 곳 */
-const CORE = path.dirname(fileURLToPath(import.meta.resolve('muwi/package.json')));
+/** 코어(@muwi/core)가 깔린 곳 */
+const CORE = path.dirname(fileURLToPath(import.meta.resolve('@muwi/core/package.json')));
 
 const PLAN = JSON.stringify({
   title: '연수원명 클릭 시 상세 이동',

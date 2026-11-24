@@ -12,8 +12,8 @@ cd muwi
 pnpm install
 pnpm test                                             # 모든 패키지의 테스트
 pnpm check:package                                    # 배포할 패키지를 만들어 npm으로 깔아서 돌려 보기
-herdr-app check packages/herdr-muwi/app/muwi          # 그래프 칸 확인 (Herdr 앱이 있을 때)
-node packages/herdr-muwi/bin/muwi.js <명령>           # 깔지 않고 이 저장소의 muwi 실행하기
+herdr-app check packages/herdr-app/app/muwi          # 그래프 칸 확인 (Herdr 앱이 있을 때)
+node packages/herdr-app/bin/muwi.js <명령>           # 깔지 않고 이 저장소의 muwi 실행하기
 ```
 
 두 가지를 조심하세요.
@@ -23,33 +23,33 @@ node packages/herdr-muwi/bin/muwi.js <명령>           # 깔지 않고 이 저�
 
 ## 폴더 구성
 
-패키지는 둘입니다. 코어(`muwi`)는 화면을 모르고, Herdr 화면(`herdr-muwi`)이 코어를 받아서 화면 규격을 채웁니다.
+패키지는 둘입니다. 코어(`@muwi/core`)는 화면을 모르고, Herdr 화면(`@muwi/herdr-app`)이 코어를 받아서 화면 규격을 채웁니다.
 
 | 경로 | 내용 |
 | --- | --- |
-| `packages/muwi/` | 코어 (npm 이름 `muwi`). 의존 패키지가 없습니다 |
-| `packages/muwi/bin/muwi.js` | npm이 PATH에 거는 `muwi` 명령. `src/cli.ts`(배포된 사본은 `src/cli.js`)를 실행합니다 |
-| `packages/muwi/bin/muwi` | sh 입구. `~/.local/bin/muwi`와 훅이 실제 경로로 부릅니다. 셸 설정이 없는 곳에서도 Node를 찾습니다 |
-| `packages/muwi/src/find-node.sh` | 셸 설정 없이 실행될 때 로그인 셸에 물어 Node 24 이상을 찾고 캐시합니다 (명령과 훅이 함께 씁니다) |
-| `packages/muwi/src/cli.ts`, `src/kit.ts` | 명령 처리, 명령들이 같이 쓰는 것 (화면이 더하는 명령도 쓴다) |
-| `packages/muwi/src/host.ts` | 화면 규격. 화면은 `$MUWI_HOST`나 `setup.json`에 적힌 경로에서 불러옵니다 |
-| `packages/muwi/src/store.ts`, `src/plan.ts` | 기록 파일 읽고 쓰기, 계획 형식 확인과 비교 |
-| `packages/muwi/src/node.ts` | 노드 상태 기록 (명령과 훅이 함께 씁니다) |
-| `packages/muwi/src/session.ts`, `src/hook.ts`, `src/events.ts` | 세션 정보, 훅 입력 처리 (도구를 모르는 코어) |
-| `packages/muwi/src/view.ts` | 계획과 사건 기록을 합쳐 보여 줄 형태로 만들기 |
-| `packages/muwi/src/setup.ts` | `muwi setup` |
-| `packages/muwi/src/connectors/` | AI 도구 커넥터 (도구 표 `tools.ts`, 커넥터 규격 `types.ts`) |
-| `packages/muwi/connectors/` | 도구에 넣는 플러그인 파일 (OpenCode, Kilo, Pi, oh-my-pi, Hermes) |
-| `packages/muwi/hooks/` | 훅 스크립트(`hook.sh`, `tool.sh`)와 세션 지침(`instructions.md`) |
-| `packages/muwi/skills/muwi/` | 사용법 skill: 계획 적는 방법, 맡기는 방법, 기록 진단 절차 |
-| `packages/herdr-muwi/` | Herdr 화면 (npm 이름 `herdr-muwi`). 의존 패키지: `muwi`, `elkjs` |
-| `packages/herdr-muwi/bin/muwi.js` | Herdr 화면을 붙인 `muwi` 명령 |
-| `packages/herdr-muwi/src/host.ts` | 화면 규격의 Herdr 구현: 자리(터미널), 세션 상태, 맡긴 노드, 명령, 설치 |
-| `packages/herdr-muwi/src/hc.ts`, `src/live.ts` | Herdr 호출 (`hc`, `herdr-app`), 세션이 닫혔는지와 지금 상태 |
-| `packages/herdr-muwi/src/commands.ts` | `board`, `run`, `tidy`, `open`, `layout` |
-| `packages/herdr-muwi/src/layout.ts` | 그래프 배치 (elkjs) |
-| `packages/herdr-muwi/src/screen.ts`, `src/preview.ts`, `src/install.ts` | `muwi layout`(Herdr 레이아웃에 muwi 칸 넣기), 설정 화면의 그림, 그래프 칸 설치 |
-| `packages/herdr-muwi/app/muwi/` | Herdr 앱의 그래프 칸 |
+| `packages/core/` | 코어 (npm 이름 `@muwi/core`). 의존 패키지가 없습니다 |
+| `packages/core/bin/muwi.js` | npm이 PATH에 거는 `muwi` 명령. `src/cli.ts`(배포된 사본은 `src/cli.js`)를 실행합니다 |
+| `packages/core/bin/muwi` | sh 입구. `~/.local/bin/muwi`와 훅이 실제 경로로 부릅니다. 셸 설정이 없는 곳에서도 Node를 찾습니다 |
+| `packages/core/src/find-node.sh` | 셸 설정 없이 실행될 때 로그인 셸에 물어 Node 24 이상을 찾고 캐시합니다 (명령과 훅이 함께 씁니다) |
+| `packages/core/src/cli.ts`, `src/kit.ts` | 명령 처리, 명령들이 같이 쓰는 것 (화면이 더하는 명령도 쓴다) |
+| `packages/core/src/host.ts` | 화면 규격. 화면은 `$MUWI_HOST`나 `setup.json`에 적힌 경로에서 불러옵니다 |
+| `packages/core/src/store.ts`, `src/plan.ts` | 기록 파일 읽고 쓰기, 계획 형식 확인과 비교 |
+| `packages/core/src/node.ts` | 노드 상태 기록 (명령과 훅이 함께 씁니다) |
+| `packages/core/src/session.ts`, `src/hook.ts`, `src/events.ts` | 세션 정보, 훅 입력 처리 (도구를 모르는 코어) |
+| `packages/core/src/view.ts` | 계획과 사건 기록을 합쳐 보여 줄 형태로 만들기 |
+| `packages/core/src/setup.ts` | `muwi setup` |
+| `packages/core/src/connectors/` | AI 도구 커넥터 (도구 표 `tools.ts`, 커넥터 규격 `types.ts`) |
+| `packages/core/connectors/` | 도구에 넣는 플러그인 파일 (OpenCode, Kilo, Pi, oh-my-pi, Hermes) |
+| `packages/core/hooks/` | 훅 스크립트(`hook.sh`, `tool.sh`)와 세션 지침(`instructions.md`) |
+| `packages/core/skills/muwi/` | 사용법 skill: 계획 적는 방법, 맡기는 방법, 기록 진단 절차 |
+| `packages/herdr-app/` | Herdr 화면 (npm 이름 `@muwi/herdr-app`). 의존 패키지: `@muwi/core`, `elkjs` |
+| `packages/herdr-app/bin/muwi.js` | Herdr 화면을 붙인 `muwi` 명령 |
+| `packages/herdr-app/src/host.ts` | 화면 규격의 Herdr 구현: 자리(터미널), 세션 상태, 맡긴 노드, 명령, 설치 |
+| `packages/herdr-app/src/hc.ts`, `src/live.ts` | Herdr 호출 (`hc`, `herdr-app`), 세션이 닫혔는지와 지금 상태 |
+| `packages/herdr-app/src/commands.ts` | `board`, `run`, `tidy`, `open`, `layout` |
+| `packages/herdr-app/src/layout.ts` | 그래프 배치 (elkjs) |
+| `packages/herdr-app/src/screen.ts`, `src/preview.ts`, `src/install.ts` | `muwi layout`(Herdr 레이아웃에 muwi 칸 넣기), 설정 화면의 그림, 그래프 칸 설치 |
+| `packages/herdr-app/app/muwi/` | Herdr 앱의 그래프 칸 |
 | `packages/*/tests/` | 테스트. 코어의 테스트는 화면 없이(또는 시험용 화면으로) 돕니다 |
 | `scripts/build.mjs`, `scripts/check-package.mjs` | 배포할 패키지 만들기, 만든 패키지를 npm으로 깔아서 확인하기 |
 | `docs/` | 문서 |
@@ -63,7 +63,7 @@ node packages/herdr-muwi/bin/muwi.js <명령>           # 깔지 않고 이 저�
 - **추측하지 않고 기록합니다.** 훅이 관찰한 사실에는 그 순간의 노드와 회차를 함께 적습니다. 그래프를 그릴 때 시각을 맞춰 추측하는 코드를 넣지 않습니다. 확실하지 않으면 `guess`로, 관찰하지 못했으면 `seen`으로 표시합니다.
 - **말없이 다른 곳에 기록하지 않습니다.** 기록하는 명령은 작업을 추측하지 않습니다. 알 수 없으면 실패하고 이유를 알립니다.
 - **Herdr가 하는 일을 다시 만들지 않습니다.** 세션을 띄우고, 기다리고, 말을 거는 일은 `hc`를 호출합니다.
-- **코어는 화면을 모릅니다.** 코어에 Herdr를 부르는 코드를 넣지 않습니다. 화면이 알아야 할 것은 화면 규격(`packages/muwi/src/host.ts`)에 더하고 `herdr-muwi`가 구현합니다.
+- **코어는 화면을 모릅니다.** 코어에 Herdr를 부르는 코드를 넣지 않습니다. 화면이 알아야 할 것은 화면 규격(`packages/core/src/host.ts`)에 더하고 `@muwi/herdr-app`이 구현합니다.
 - **AI가 하려는 일을 막지 않습니다.** 훅은 관찰만 합니다. 승인이나 계획을 강제하는 기능을 넣지 않습니다.
 
 ## 변경할 때 확인할 것
@@ -73,10 +73,10 @@ node packages/herdr-muwi/bin/muwi.js <명령>           # 깔지 않고 이 저�
 | 동작 | 테스트 |
 | 명령이나 옵션 | `muwi --help`, [명령어](docs/reference/commands.md), 사용법 skill |
 | 기록 형식 | `SCHEMA`, [기록 파일](docs/reference/records.md) |
-| 그래프 칸 | `packages/herdr-muwi/app/muwi/main.js`의 견본 자료(`SAMPLE`), [그래프 화면](docs/reference/graph.md). `herdr-app check packages/herdr-muwi/app/muwi`가 통과하는지와 Herdr 앱에서 직접 보는 것까지 확인하세요 |
-| Herdr 화면 바꾸기 | `packages/herdr-muwi/src/screen.ts`의 `placeMuwi` 테스트(`tests/screen.test.ts`), [설치와 설정](docs/reference/setup.md#herdr-앱-화면) |
-| 훅 | 커넥터의 훅 목록(`packages/muwi/src/connectors/`), [동작 원리](docs/how-it-works.md#훅이-하는-일) |
-| 화면 규격 | `packages/muwi/src/host.ts`, `herdr-muwi`의 구현, 코어의 시험용 화면(`tests/place-host.ts`, `tests/fixture-host.ts`) |
+| 그래프 칸 | `packages/herdr-app/app/muwi/main.js`의 견본 자료(`SAMPLE`), [그래프 화면](docs/reference/graph.md). `herdr-app check packages/herdr-app/app/muwi`가 통과하는지와 Herdr 앱에서 직접 보는 것까지 확인하세요 |
+| Herdr 화면 바꾸기 | `packages/herdr-app/src/screen.ts`의 `placeMuwi` 테스트(`tests/screen.test.ts`), [설치와 설정](docs/reference/setup.md#herdr-앱-화면) |
+| 훅 | 커넥터의 훅 목록(`packages/core/src/connectors/`), [동작 원리](docs/how-it-works.md#훅이-하는-일) |
+| 화면 규격 | `packages/core/src/host.ts`, `@muwi/herdr-app`의 구현, 코어의 시험용 화면(`tests/place-host.ts`, `tests/fixture-host.ts`) |
 | 배포할 파일 | `scripts/build.mjs`가 옮기는 목록, `pnpm check:package` |
 
 커밋은 역할별로 나누고 `feat(범위): 설명`, `fix`, `docs`, `test`, `chore` 형식으로 쓰세요.
@@ -110,20 +110,20 @@ node packages/herdr-muwi/bin/muwi.js <명령>           # 깔지 않고 이 저�
 | 서브에이전트 | 세션 안에서 띄운 보조 에이전트 |
 | 그래프 칸 | Herdr 앱에서 muwi가 그리는 화면 |
 | 커넥터 | 한 AI 도구를 muwi에 끼우는 것. 그 도구의 훅 입력을 공통 사건으로 바꾸고, 지침·사용법·훅을 그 도구에 넣는다 |
-| 화면 | 세션들이 도는 곳과 기록을 보여 주는 칸. 지금은 Herdr (`herdr-muwi`) |
+| 화면 | 세션들이 도는 곳과 기록을 보여 주는 칸. 지금은 Herdr (`@muwi/herdr-app`) |
 
 ## 버전 올리기
 
-1. `packages/muwi/package.json`과 `packages/herdr-muwi/package.json`의 버전을 같이 올리세요. 두 패키지는 늘 같은 버전입니다.
+1. `packages/core/package.json`과 `packages/herdr-app/package.json`의 버전을 같이 올리세요. 두 패키지는 늘 같은 버전입니다.
 2. [CHANGELOG.md](CHANGELOG.md)에 새 버전을 적으세요.
 3. `pnpm test`와 `pnpm check:package`가 통과하는지 보세요.
 4. main에 올린 뒤 `v<버전>` 태그를 만들고 push하세요.
-5. 배포할 패키지를 만들고 코어부터 npm에 올리세요 (`herdr-muwi`가 같은 버전의 `muwi`를 받습니다).
+5. 배포할 패키지를 만들고 코어부터 npm에 올리세요 (`@muwi/herdr-app`이 같은 버전의 `@muwi/core`를 받습니다).
 
    ```sh
    pnpm build
-   npm publish packages/muwi/dist
-   npm publish packages/herdr-muwi/dist
+   npm publish packages/core/dist
+   npm publish packages/herdr-app/dist
    ```
 
-설치한 사용자는 `npm i -g herdr-muwi@latest`로 받습니다.
+설치한 사용자는 `npm i -g @muwi/herdr-app@latest`로 받습니다.

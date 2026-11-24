@@ -4,7 +4,7 @@
 
 사용자가 직접 쓰는 명령은 [보기](#보기)와 [설치와 설정](#설치와-설정)입니다. 나머지는 AI가 일하면서 실행합니다. 사용자가 직접 실행해도 같은 방식으로 기록됩니다.
 
-`muwi open`, `muwi layout`, `muwi run`, `muwi tidy`, `muwi board`는 Herdr 화면(`herdr-muwi`)이 더하는 명령입니다. 코어 `muwi`만 깔았으면 "herdr-muwi로 깔면 생겨요"라고 알립니다.
+`muwi open`, `muwi layout`, `muwi run`, `muwi tidy`, `muwi board`는 Herdr 화면(`@muwi/herdr-app`)이 더하는 명령입니다. 코어 `@muwi/core`만 깔았으면 "@muwi/herdr-app으로 깔면 생겨요"라고 알립니다.
 
 ## 작업을 고르는 규칙
 
@@ -32,7 +32,7 @@
 
 `--json`을 붙이면 같은 내용을 JSON으로 출력합니다.
 
-## Herdr 앱 화면 (`herdr-muwi`)
+## Herdr 앱 화면 (`@muwi/herdr-app`)
 
 | 명령 | 설명 |
 | --- | --- |
@@ -53,7 +53,7 @@
 | `muwi setup --all` | 깔려 있는 AI 도구 전부에 커넥터를 넣습니다 |
 | `muwi setup --remove` | `muwi setup`으로 설치한 것을 지웁니다. `muwi layout`으로 바꾼 화면도 되돌립니다 |
 | `muwi config` | 현재 설정을 보여 줍니다. 설정은 화면이 정합니다 (화면 없이 쓰면 설정이 없습니다) |
-| `muwi config layout on\|off` | (`herdr-muwi`) 화면에 muwi 칸이 없을 때 `muwi layout`을 권하는 안내를 켜거나 끕니다. 기본값은 `on`입니다 |
+| `muwi config layout on\|off` | (`@muwi/herdr-app`) 화면에 muwi 칸이 없을 때 `muwi layout`을 권하는 안내를 켜거나 끕니다. 기본값은 `on`입니다 |
 
 각 항목이 무엇을 설치하고 설정하는지는 [설치와 설정](setup.md)에 있습니다.
 
@@ -137,7 +137,7 @@
 
 `start`를 기다리던 노드, 잠시 멈춘 노드, 다른 세션이 하던 노드에 실행하면 같은 회차로 이어집니다.
 
-## 새 세션에 맡기기 (`herdr-muwi`)
+## 새 세션에 맡기기 (`@muwi/herdr-app`)
 
 Herdr 앱의 터미널 안에서만 동작합니다.
 
@@ -165,8 +165,8 @@ Herdr 앱의 터미널 안에서만 동작합니다.
 | `MUWI_DIR` | `~/.muwi` | 기록 폴더입니다 |
 | `MUWI_WORK` | 없음 | 명령이 다룰 작업 이름입니다. `--work`와 같습니다 |
 | `MUWI_SESSION` | Claude Code의 세션 id | 세션 이름을 직접 정합니다 |
-| `MUWI_HOST` | `muwi setup`이 적어 둔 화면 | 화면 모듈의 경로. `herdr-muwi`의 `muwi` 명령이 자기 화면으로 정합니다 |
+| `MUWI_HOST` | `muwi setup`이 적어 둔 화면 | 화면 모듈의 경로. `@muwi/herdr-app`의 `muwi` 명령이 자기 화면으로 정합니다 |
 
 ## 내부 명령
 
-`muwi board`(`herdr-muwi`)와 `muwi hook`은 그래프 칸과 훅이 쓰는 명령입니다. 직접 쓸 일이 없습니다.
+`muwi board`(`@muwi/herdr-app`)와 `muwi hook`은 그래프 칸과 훅이 쓰는 명령입니다. 직접 쓸 일이 없습니다.

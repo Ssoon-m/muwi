@@ -1,5 +1,5 @@
 {
-  "name": "herdr-muwi",
+  "name": "@muwi/herdr-app",
   "version": "0.7.0",
   "description": "muwi를 Herdr 앱에서: 작업 목록과 그래프 칸, 새 세션에 맡기기, 레이아웃",
   "license": "MIT",
@@ -12,16 +12,19 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "elkjs": "0.12.1",
-    "muwi": "workspace:*"
+    "@muwi/core": "workspace:*",
+    "elkjs": "0.12.1"
   },
   "engines": {
     "node": ">=24"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Ssoon-m/muwi.git",
-    "directory": "packages/herdr-muwi"
+    "directory": "packages/herdr-app"
   },
   "scripts": {
     "test": "node --test \"tests/*.test.ts\""

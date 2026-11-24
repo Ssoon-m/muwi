@@ -723,7 +723,7 @@ async function run(cmd: string | undefined, a: Args, dir: string) {
       if (cmd && SCREEN_COMMANDS.has(cmd)) {
         const failed = hostFailure();
         if (failed) throw new Fail(`muwi ${cmd}는 화면이 더하는 명령인데, 화면을 불러오지 못했어요: ${failed.from} (${failed.reason}). 화면 패키지를 옮겼으면 그 패키지의 muwi로 muwi setup을 다시 실행하세요.`);
-        throw new Fail(`muwi ${cmd}는 Herdr 앱 화면과 함께 쓰는 명령이에요. herdr-muwi로 깔면 생겨요.`);
+        throw new Fail(`muwi ${cmd}는 Herdr 앱 화면과 함께 쓰는 명령이에요. @muwi/herdr-app으로 깔면 생겨요.`);
       }
       throw new Fail(`모르는 명령: ${cmd}\n\n${help()}`);
   }

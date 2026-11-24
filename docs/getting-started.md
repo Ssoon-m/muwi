@@ -24,10 +24,10 @@ nvm이나 mise로 Node를 골라도 됩니다. Herdr가 띄우는 세션은 셸 
 
 ## 1. muwi 설치하기
 
-Herdr 앱의 터미널에서 실행하세요. Herdr 앱에서 그래프로 보려면 `herdr-muwi`를 깝니다 (기록만 쓰는 코어 `muwi`가 같이 깔립니다).
+Herdr 앱의 터미널에서 실행하세요. Herdr 앱에서 그래프로 보려면 `@muwi/herdr-app`을 깝니다 (기록만 쓰는 코어 `@muwi/core`가 같이 깔립니다).
 
 ```sh
-npm i -g herdr-muwi
+npm i -g @muwi/herdr-app
 ```
 
 ## 2. AI 도구에 커넥터 넣기

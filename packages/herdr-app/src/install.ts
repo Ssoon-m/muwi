@@ -3,8 +3,8 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { copyDir } from 'muwi/connectors/files';
-import type { HostInstall } from 'muwi/host';
+import { copyDir } from '@muwi/core/connectors/files';
+import type { HostInstall } from '@muwi/core/host';
 import { config, describeScreen, guardScreen, layoutRemoved } from './commands.ts';
 import { ensurePreview, removeLayout, screenState } from './screen.ts';
 

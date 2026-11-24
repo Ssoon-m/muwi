@@ -2,7 +2,7 @@
 //   자리: Herdr 앱의 터미널($HC_TERMINAL_ID), 없으면 herdr의 pane($HERDR_PANE_ID)
 //   세션이 살아 있는지: hc가 알려 주는 터미널의 상태와, 세션이 시작될 때 터미널에 붙여 둔 이름표
 //   맡긴 노드: muwi run이 터미널을 띄울 때 붙인 이름표
-import type { Host } from 'muwi/host';
+import type { Host } from '@muwi/core/host';
 import { board, CONFIG, layout, open, run, tidy } from './commands.ts';
 import { LABEL_SESSION, hc, spawnedFor } from './hc.ts';
 import { removeHerdr, setupHerdr } from './install.ts';
