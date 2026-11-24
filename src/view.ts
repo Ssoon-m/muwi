@@ -148,6 +148,11 @@ export type WorkView = {
   between?: Between;
   /** 새 결과: 모두 끝났는데 사람이 아직 보지 않았다 (끝난 뒤에 viewed 기록이 없다) */
   unread?: boolean;
+  /**
+   * 이 작업에 든 작업 시간 (ms): 노드들이 작업 중이던 시간을 더한 것. 나란히 한 노드는 겹친 시간을 한 번만 센다.
+   * 노드의 시간과 같은 기준이라 사람을 기다린 시간과 세션이 닫힌 뒤의 시간은 들어가지 않는다
+   */
+  spentMs: number;
   nodes: NodeView[];
   edges: { from: string; to: string }[];
   changes: Change[];
@@ -208,6 +213,8 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
   const spawns = new Map<string, Spawn[]>();
   const outside: WorkView['outside'] = [];
   const skillEvents = events.filter((e): e is Event & { type: 'skill' } => e.type === 'skill');
+  /** 노드가 작업 중이던 구간들. 작업의 작업 시간은 이 구간들을 겹침 없이 더한 것이다 */
+  const spans: [number, number][] = [];
 
   const find = (node?: string, n?: number) => (node && n ? drafts.get(node)?.find(d => d.n === n) : undefined);
 
@@ -244,6 +251,7 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
       } else {
         if (d.openFrom !== null) {
           d.spent += Math.max(0, ms(e.at) - d.openFrom);
+          spans.push([d.openFrom, Math.max(d.openFrom, ms(e.at))]);
           d.openFrom = null;
         }
         if (e.status === 'done' || e.status === 'blocked') d.endedAt = e.at;
@@ -293,6 +301,7 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
       // 하던 세션이 닫혔으면 시간은 그 세션을 마지막으로 본 때까지만 센다. 닫힌 뒤로도 계속 늘어나지 않게
       const until = running && owner?.session && closed.has(owner.session) ? Math.min(now, Math.max(d.openFrom!, closed.get(owner.session)!)) : now;
       const spentMs = d.spent + (running ? Math.max(0, until - d.openFrom!) : 0);
+      if (running) spans.push([d.openFrom!, Math.max(d.openFrom!, until)]);
       const own = [...new Set(d.doers.map(x => x.agent).filter((x): x is string => Boolean(x)))];
       const helped = [...d.helpers].filter(id => !owners.has(id));
       let who: Actor | undefined;
@@ -419,6 +428,7 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
     ...(between ? { between } : {}),
     ...(quiet ? { quiet } : {}),
     ...(unread ? { unread: true } : {}),
+    spentMs: unionMs(spans),
     nodes,
     edges: plan.nodes.flatMap(n => n.after.filter(a => byId.has(a)).map(a => ({ from: a, to: n.id }))),
     changes: planEvents.map(e => ({ at: e.at, by: e.by, why: e.why, first: Boolean(e.first), added: e.added, removed: e.removed, changed: e.changed })),
@@ -435,6 +445,17 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
     },
     counts,
   };
+}
+
+/** 구간들을 겹침 없이 더한 길이 (ms). 나란히 한 노드의 시간을 두 번 세지 않는다 */
+export function unionMs(spans: [number, number][]): number {
+  let total = 0, end = -Infinity;
+  for (const [from, to] of [...spans].sort((a, b) => a[0] - b[0])) {
+    if (to <= end) continue;
+    total += to - Math.max(from, end);
+    end = to;
+  }
+  return total;
 }
 
 /** 하는 노드가 없는 작업에서, 그 작업에 지금 붙어 있는 (닫히지 않은) 세션이 하는 일 */
@@ -491,7 +512,7 @@ const ORDER: Record<WorkState, number> = { waiting: 0, blocked: 1, doing: 2, sta
 /** 이만큼 지나도록 바뀐 것이 없으면 "지난 작업"으로 접는다. 지우지는 않는다 */
 export const PAST_DAYS = 7;
 
-export type WorkSummary = Pick<WorkView, 'work' | 'title' | 'request' | 'state' | 'between' | 'quiet' | 'unread' | 'updatedAt' | 'counts'> & {
+export type WorkSummary = Pick<WorkView, 'work' | 'title' | 'request' | 'state' | 'between' | 'quiet' | 'unread' | 'updatedAt' | 'counts' | 'spentMs'> & {
   /** 이 작업을 한 대화(세션)들: 계획을 낸 대화 먼저, 나머지는 최근에 본 순. 그래프 칸이 누를 때 그 대화로 간다 */
   talks?: string[];
   /**
@@ -550,6 +571,7 @@ export function loadBoard(dir: string, env: NodeJS.ProcessEnv = process.env): { 
         ...(v.unread ? { unread: true } : {}),
         updatedAt: v.updatedAt,
         counts: v.counts,
+        spentMs: v.spentMs,
         active: v.nodes
           .filter(n => n.status === 'waiting' || n.status === 'blocked' || n.status === 'doing')
           .map(n => {
