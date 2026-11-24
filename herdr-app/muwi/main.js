@@ -969,7 +969,7 @@ export default class Muwi extends View {
           .child(div().flex_1().min_w(0).truncate().text_color(item.ask ? c.waiting : c[w.state] ?? t.dim).child(line))
           .child(div().flex_none().text_color(t.dim).child(ago(w.updatedAt, now)))))
       // 이 작업에 붙어 있는 세션 (계획 없는 세션 줄과 같은 표시). 이 표시가 있는 줄은 누르면 그 터미널로 간다
-      .when(Boolean(best), (el) => el.child(this.agentStatus(t, best)));
+      .when(Boolean(best), (el) => el.child(this.sessionMark(t, best, `work-ses-${w.work}`)));
   }
 
   /** 계획 없이 일하는 세션 한 줄 (Herdr의 Agents 칸과 같은 모양). 누르면 그 터미널로 간다 */
@@ -993,7 +993,13 @@ export default class Muwi extends View {
       .child(h_flex().flex_1().min_w(0).gap(5).items_center().text_size(12)
         .child(div().min_w(0).max_w(more ? 110 : 220).truncate().text_color(quiet ? t.muted : t.foreground).child(name))
         .when(Boolean(more), (el) => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`· ${more}`))))
-      .child(this.agentStatus(t, a));
+      .child(this.sessionMark(t, a, `ag-ses-${a.address}`));
+  }
+
+  /** 줄 오른쪽의 세션 표시. 마우스를 올리면 뜻을 알려 준다 (표시 모양은 Herdr의 Agents 칸과 같다) */
+  sessionMark(t, a, id) {
+    const what = { working: "세션 작업 중", blocked: "세션이 입력을 기다림", done: "세션 쉬는 중 (다음 말을 기다림)", idle: "세션 쉬는 중 (다음 말을 기다림)" }[a.status] ?? "세션 있음";
+    return h_flex().id(id).flex_none().items_center().tooltip(`${what} · 누르면 그 터미널로 가요`).child(this.agentStatus(t, a));
   }
 
   /** 세션 상태 표시 (Herdr의 Agents 칸과 같은 모양): 일하는 중은 도는 원, 입력을 기다리면 !, 쉬는 중은 빈 원 */
