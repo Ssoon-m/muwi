@@ -9,7 +9,7 @@ import { Fail, dur, join, needPlan, out, parseArgs, resolveWork, str, type Args 
 import { fromSubagent, markNode } from './node.ts';
 import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
 import { readSession, sessionKey, sessionLabel } from './session.ts';
-import { installedTools, readInstall, refreshSetup, removeSetup, runSetup } from './setup.ts';
+import { installedTools, newerElsewhere, readInstall, refreshSetup, removeSetup, runSetup } from './setup.ts';
 import { adapterOf } from './connectors/index.ts';
 import { gaps } from './connectors/types.ts';
 import { TOOLS, toolById } from './connectors/tools.ts';
@@ -591,6 +591,13 @@ function cmdSetup(a: Args, dir: string) {
     const have = installedTools().map(t => t.id);
     out(`AI 도구에는 아직 넣지 않았어요. 넣으려면 muwi setup --tool <도구> 또는 muwi setup --all${have.length ? ` (이 컴퓨터에 깔린 도구: ${have.join(', ')})` : ''}`);
   } else out('이미 열려 있는 세션은 다시 시작해야 새로 넣은 훅이 돌아요.');
+  tellNewer();
+}
+
+/** 다른 자리(다른 Node 버전 등)에 더 새 muwi가 깔려 있으면 알린다. 지금 도는 판이 setup의 기준이 되기 때문이다 */
+function tellNewer() {
+  const newer = newerElsewhere(version());
+  if (newer) process.stderr.write(`더 새 muwi(${newer.version})가 다른 자리에 있어요: ${newer.bin}\n지금 도는 판은 ${version()} (${ROOT})예요. 새 판으로 옮기려면 그 자리의 명령으로 muwi setup을 실행하세요: "${newer.bin}" setup\n`);
 }
 
 /** 설정의 이름, 기본값, 설명은 화면이 정한다 (화면 규격의 config). 코어에는 설정이 없다 */
@@ -707,7 +714,9 @@ async function run(cmd: string | undefined, a: Args, dir: string) {
     case 'hook': return cmdHook(a, dir);
     case 'setup': return cmdSetup(a, dir);
     case 'config': return cmdConfig(a, dir);
-    case 'version': case '--version': case '-v': return out(version());
+    case 'version': case '--version': case '-v':
+      out(version());
+      return tellNewer();
     case 'skip': return cmdSkip();
     case 'session': return cmdSession(dir);
     case 'guide': return cmdGuide(dir);

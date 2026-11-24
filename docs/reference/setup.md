@@ -11,7 +11,7 @@ muwi가 무엇을 어디에 설치하는지, 설정으로 무엇을 바꿀 수 �
 | [Herdr 앱](https://herdr.dev) | 그래프를 보거나 새 세션을 띄울 때 필요합니다 (`herdr-muwi`) |
 | Git for Windows | Windows에서만. Claude Code가 훅을 Git Bash로 실행합니다. [Windows에서 쓰기](#windows에서-쓰기)를 보세요 |
 
-PATH에 Node가 없는 곳(Herdr가 띄우는 세션, 그래프 칸)에서는 muwi가 로그인 셸에 물어 Node를 찾고 `~/.cache/muwi/node`에 적어 둡니다. Node 버전을 바꿨다면 `muwi setup`을 다시 실행하세요. 캐시를 버리고 다시 찾습니다. 자세한 내용은 [문제 해결하기](../guides/troubleshooting.md#node-24-이상이-필요하다고-나올-때)에 있습니다.
+PATH에 Node가 없는 곳(Herdr가 띄우는 세션, 그래프 칸)에서는 muwi가 로그인 셸에 물어 Node를 찾고 `~/.cache/muwi/node`에 적어 둡니다. Node 버전을 바꿨다면 `muwi setup`을 다시 실행하세요. 캐시를 버리고 다시 찾습니다. 바꾼 Node에 muwi를 새로 깔았다면 [다른 자리에 새로 깔았을 때](#업데이트하기)를 보세요. 자세한 내용은 [문제 해결하기](../guides/troubleshooting.md#node-24-이상이-필요하다고-나올-때)에 있습니다.
 
 ## 설치하기
 
@@ -206,6 +206,14 @@ npm i -g herdr-muwi@latest       # muwi만 깔았으면 muwi@latest
 ```
 
 같은 자리에서 바뀌므로 이미 열려 있는 세션의 훅도 다음 호출부터 새 버전으로 돕니다. 지침이 바뀌었으면 그 세션의 다음 `muwi` 명령 출력에 새 지침이 한 번 붙고, 다음 세션이 시작될 때 터미널용 명령·그래프 칸·커넥터를 새 버전에 맞춥니다. 커넥터가 거는 훅의 종류가 바뀐 업데이트는 세션을 새로 열어야 적용됩니다.
+
+**다른 자리에 새로 깔았을 때.** npm은 Node마다 다른 자리에 깝니다. nvm 등으로 Node 버전을 바꾸고 그 Node에 새로 깔았다면, 훅과 `~/.local/bin/muwi`는 여전히 옛 자리를 가리킵니다. `~/.local/bin`이 PATH 앞에 있으면 `muwi`를 쳐도 옛 판이 돕니다. 새 자리의 명령으로 setup을 한 번 실행하세요.
+
+```sh
+"$(npm prefix -g)/bin/muwi" setup     # Windows: & "$(npm prefix -g)\muwi.cmd" setup
+```
+
+`muwi setup`과 `muwi --version`은 PATH에서 지금 도는 판보다 새 판을 찾으면 그 자리와 위 명령을 알려 줍니다.
 
 ## 제거하기
 

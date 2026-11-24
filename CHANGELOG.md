@@ -13,6 +13,7 @@
 - 그래프 배치에 쓰는 elkjs를 저장소에 넣어 두지 않고 `herdr-muwi`의 의존 패키지로 받습니다.
 - 저장소는 pnpm workspace 모노레포입니다 (`packages/muwi`, `packages/herdr-muwi`). 개발할 때는 TypeScript를 그대로 실행하고, 배포할 때만 `.js`로 바꿉니다 (`pnpm build`). `pnpm check:package`가 만든 패키지를 하나씩 `npm i -g`로 깔아서, npm이 PATH에 건 `muwi`(Windows는 npm이 만든 `muwi.cmd`)로 명령, 그래프 배치, setup, 훅, Claude Code 커넥터를 돌려 봅니다. CI에서 세 OS 모두 돌립니다.
 - 커넥터 코드의 폴더 이름을 `integrations`에서 `connectors`로 바꿨습니다.
+- `muwi setup`과 `muwi --version`이 PATH에서 더 새 muwi를 찾으면 알려 줍니다. nvm 등으로 Node를 바꾸고 다른 자리에 새로 깔면 훅과 `~/.local/bin/muwi`가 옛 판에 남기 때문입니다. 새 자리의 명령으로 `muwi setup`을 실행하면 옮겨 갑니다.
 
 ### 뺌
 

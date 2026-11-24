@@ -285,6 +285,45 @@ export function refreshSetup(o: SetupOptions): boolean {
 }
 
 /** a가 b보다 낮은 버전인가 (1.2.10 > 1.2.9) */
+/**
+ * PATH에 있는 다른 muwi 중 이 판보다 새 판. 없으면 null.
+ * npm i -g는 Node마다 다른 자리에 깐다 (nvm으로 Node를 바꾸고 새로 깔았을 때). 그러면 훅과 ~/.local/bin/muwi는 옛 자리를 가리키고,
+ * ~/.local/bin이 PATH 앞에 있으면 muwi setup도 옛 판이 돈다. 그 판이 스스로 알아챌 길은 PATH뿐이라 PATH를 본다.
+ *   macOS·Linux: <자리>/bin/muwi는 <자리>/lib/node_modules/<패키지>/bin/muwi.js로 가는 링크다
+ *   Windows: <자리>/muwi.cmd 옆의 <자리>/node_modules/<패키지>
+ */
+export function newerElsewhere(version: string, env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): { bin: string; version: string } | null {
+  let newest: { bin: string; version: string } | null = null;
+  for (const d of (env.PATH ?? '').split(path.delimiter).filter(Boolean)) {
+    for (const pkg of packagesAt(d, platform)) {
+      let v: string | undefined;
+      try {
+        const m = readJson<{ name?: string; version?: string }>(path.join(pkg.root, 'package.json'));
+        if (m?.name === 'muwi' || m?.name === 'herdr-muwi') v = m.version;
+      } catch {
+        continue;
+      }
+      if (v && olderThan(newest?.version ?? version, v)) newest = { bin: pkg.bin, version: v };
+    }
+  }
+  return newest;
+}
+
+function packagesAt(dir: string, platform: NodeJS.Platform): { bin: string; root: string }[] {
+  if (platform === 'win32') {
+    const bin = path.join(dir, 'muwi.cmd');
+    if (!fs.existsSync(bin)) return [];
+    return ['herdr-muwi', 'muwi'].map(name => ({ bin, root: path.join(dir, 'node_modules', name) }));
+  }
+  const bin = path.join(dir, 'muwi');
+  try {
+    const real = fs.realpathSync(bin);
+    return real.endsWith(`${path.sep}bin${path.sep}muwi.js`) ? [{ bin, root: path.dirname(path.dirname(real)) }] : [];
+  } catch {
+    return [];
+  }
+}
+
 export function olderThan(a: string, b: string): boolean {
   const pa = a.split('.').map(n => parseInt(n, 10) || 0);
   const pb = b.split('.').map(n => parseInt(n, 10) || 0);

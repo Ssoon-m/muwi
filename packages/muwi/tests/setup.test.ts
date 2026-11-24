@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import {
-  hookCommandFor, installBlock, installHooks, instructionText, mergeHooks, readInstall, refreshSetup, removeBlock, removeHooks,
+  hookCommandFor, installBlock, installHooks, instructionText, mergeHooks, newerElsewhere, readInstall, refreshSetup, removeBlock, removeHooks,
   olderThan, removeSetup, runSetup, uninstallBlock, uninstallHooks, upsertBlock,
 } from '../src/setup.ts';
 
@@ -208,6 +208,40 @@ test('npm이 거는 muwi 명령(bin/muwi.js): 다른 폴더에 걸린 링크로 
   const r = spawnSync(process.execPath, [path.join(bin, 'muwi'), '--version'], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout.trim(), JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version);
+});
+
+test('다른 자리의 더 새 muwi를 PATH에서 찾는다 (nvm으로 Node를 바꾸고 새로 깐 경우)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-newer-'));
+  /** npm i -g가 까는 모양: 패키지 폴더와 PATH에 걸리는 명령. 돌려주는 것은 PATH에 넣을 폴더 */
+  const npmGlobal = (prefix: string, name: string, version: string, platform: NodeJS.Platform) => {
+    const pkg = path.join(tmp, prefix, ...(platform === 'win32' ? [] : ['lib']), 'node_modules', name);
+    fs.mkdirSync(path.join(pkg, 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name, version }));
+    fs.writeFileSync(path.join(pkg, 'bin', 'muwi.js'), '');
+    if (platform === 'win32') {
+      fs.writeFileSync(path.join(tmp, prefix, 'muwi.cmd'), '@echo off');
+      return path.join(tmp, prefix);
+    }
+    fs.mkdirSync(path.join(tmp, prefix, 'bin'));
+    fs.symlinkSync(path.join(pkg, 'bin', 'muwi.js'), path.join(tmp, prefix, 'bin', 'muwi'));
+    return path.join(tmp, prefix, 'bin');
+  };
+  const PATH = (...dirs: string[]) => ({ PATH: dirs.join(path.delimiter) });
+  // Windows: muwi.cmd 옆의 node_modules
+  const w1 = npmGlobal('w-old', 'herdr-muwi', '0.7.0', 'win32');
+  const w2 = npmGlobal('w-new', 'herdr-muwi', '0.7.2', 'win32');
+  assert.deepEqual(newerElsewhere('0.7.0', PATH(w1, w2), 'win32'), { bin: path.join(w2, 'muwi.cmd'), version: '0.7.2' });
+  assert.equal(newerElsewhere('0.7.2', PATH(w1, w2), 'win32'), null);
+  if (process.platform === 'win32') return; // 링크는 macOS·Linux에서만 시험한다
+  // macOS·Linux: <자리>/bin/muwi가 패키지의 bin/muwi.js로 가는 링크. 우리 래퍼(~/.local/bin/muwi)나 다른 프로그램은 넘어간다
+  const old = npmGlobal('old', 'herdr-muwi', '0.7.0', 'linux');
+  const core = npmGlobal('core', 'muwi', '0.7.1', 'linux');
+  const other = path.join(tmp, 'other');
+  fs.mkdirSync(other);
+  fs.writeFileSync(path.join(other, 'muwi'), '#!/bin/sh\n');
+  assert.deepEqual(newerElsewhere('0.7.0', PATH(other, old, core), 'linux'), { bin: path.join(core, 'muwi'), version: '0.7.1' });
+  assert.equal(newerElsewhere('0.7.1', PATH(other, old, core), 'linux'), null);
+  assert.equal(newerElsewhere('0.7.0', PATH(path.join(tmp, 'missing')), 'linux'), null);
 });
 
 test('설치 기록은 setup.json에 적는다: install.json만 보는 옛 훅(0.4.0·0.5.0)이 새 설치를 되돌리지 못한다', () => {
