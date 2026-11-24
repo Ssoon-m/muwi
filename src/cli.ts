@@ -684,7 +684,7 @@ function cmdSetup(a: Args, dir: string) {
     const done = readInstall(dir)?.tools ?? {};
     for (const t of TOOLS) {
       const state = done[t.id] ? '통합 넣음' : t.id === 'claude' && !have.has(t.id) ? '없음' : have.has(t.id) ? '깔려 있음' : '없음';
-      out(`${t.id.padEnd(16)} ${t.name.padEnd(18)} ${state}${adapterOf(t.id) ? '' : '  (훅 없이 지침과 기록만)'}`);
+      out(`${t.id.padEnd(16)} ${t.name.padEnd(18)} ${state.padEnd(6)}${t.limits ? `  ${t.limits}` : ''}`);
     }
     out('넣기: muwi setup --tool <도구>[,<도구>] 또는 muwi setup --all. Claude Code는 플러그인이 넣어 줘요.');
     return;
@@ -878,8 +878,11 @@ function cmdRun(a: Args, dir: string) {
   const cwd = str(a, 'cwd') ?? process.cwd();
   // 띄울 명령을 주지 않으면 맡기는 세션과 같은 도구로 띄운다
   const me = sessionKey();
-  const template = launchCommand(me ? readSession(dir, me)?.tool : undefined);
-  const given = str(a, 'agent');
+  // --agent codex처럼 도구 이름을 주면 그 도구가 첫 말을 받는 모양으로 띄운다. 그 밖의 값은 명령으로 보고 그대로 실행한다
+  const asked = str(a, 'agent')?.trim();
+  const other = toolById(asked);
+  const template = other ? other.launch : launchCommand(me ? readSession(dir, me)?.tool : undefined);
+  const given = other ? undefined : asked;
   const agent = (given ?? template[0]).trim().split(/\s+/).filter(Boolean);
   if (!agent.length) throw new Fail('--agent에 띄울 명령이 없어요');
   const brief = `${task.trim()}\n\n(muwi) 작업 ${work}의 노드 ${id}(${node.title})를 맡았어요. 시작은 자동으로 적혀요. 끝나면 muwi node ${id} done "<결과 한 줄>"을 적고, hc send ${lead} "<결과나 막힌 점>"으로 알려요.`;

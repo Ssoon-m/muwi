@@ -46,7 +46,9 @@
 | --- | --- |
 | `muwi setup` | 터미널용 `muwi` 명령과 Herdr 앱의 그래프 칸을 설치합니다 |
 | `muwi setup --claude` | 플러그인 없이 쓸 때 Claude Code 훅과 사용법 skill도 설치합니다 |
-| `muwi setup --codex` | Codex에 지침과 사용법 skill을 넣습니다 |
+| `muwi setup --tools` | 아는 AI 도구와, 이 컴퓨터에 깔렸는지, muwi 통합을 넣었는지 보여 줍니다 |
+| `muwi setup --tool <도구>[,<도구>]` | 그 AI 도구에 muwi 통합(지침, 사용법 skill, 훅 또는 플러그인)을 넣습니다. `--codex`는 `--tool codex`와 같습니다 |
+| `muwi setup --all` | 깔려 있는 AI 도구 전부에 통합을 넣습니다. Claude Code는 플러그인이 넣어 주므로 뺍니다 |
 | `muwi setup --remove` | `muwi setup`으로 설치한 것을 지웁니다. `muwi layout`으로 바꾼 화면도 되돌립니다 |
 | `muwi config` | 현재 설정을 보여 줍니다 |
 | `muwi config nudge on\|off` | 계획 알림을 켜거나 끕니다. 기본값은 `on`입니다 |
@@ -149,7 +151,7 @@ Herdr 앱의 터미널 안에서만 동작합니다.
 | `--show pane\|tab` | 계획의 `show`, 없으면 칸 없음 | `pane`은 현재 터미널 오른쪽에, `tab`은 새 tab에 놓습니다 |
 | `--down` | 끔 | pane을 오른쪽 대신 아래에 놓습니다 |
 | `--cwd <폴더>` | 현재 폴더 | 그 세션이 일할 폴더입니다 |
-| `--agent "<명령>"` | `claude` | 띄울 명령입니다. 예: `"claude --model sonnet"` |
+| `--agent <도구>` 또는 `"<명령>"` | 맡기는 세션과 같은 도구 | 다른 도구에 맡기려면 도구 이름을 줍니다 (`--agent codex`). 명령을 직접 줄 수도 있습니다. 예: `"claude --model sonnet"` |
 | `--name <이름>` | 노드 id | Herdr의 목록에 나오는 이름입니다 |
 
 `--agent`의 값은 공백으로 나눕니다. 따옴표로 묶은 인자나 공백이 든 경로는 쓸 수 없습니다.

@@ -2,6 +2,21 @@
 
 버전마다 바뀐 내용을 추가, 변경, 수정으로 나눠 적습니다.
 
+## 0.6.0 (2026-11-24)
+
+### 추가
+
+- **Claude Code 말고도 Herdr가 지원하는 AI 도구에서 muwi를 씁니다.** 도구마다 통합을 넣으면 그 도구의 세션도 같은 기록에 적히고 같은 그래프에 나옵니다: Codex, GitHub Copilot CLI, Cursor CLI, Qwen Code, Qoder CLI, Kimi Code, Antigravity CLI, Droid, Devin CLI, Grok CLI, Mastra Code, Letta Code, OpenCode, Kilo CLI, Pi, oh-my-pi, Hermes Agent. 계획·진행 기록, 계획 없이 고칠 때 알림, 읽은 skill 기록이 그 도구에서도 됩니다. 도구의 훅이 주지 않아 안 되는 것은 [설치와 설정](docs/reference/setup.md#다른-ai-도구에-넣기)의 표에 있습니다.
+- `muwi setup --tools`로 아는 도구와 설치 상태를 보고, `muwi setup --tool <도구>`나 `muwi setup --all`로 통합을 넣습니다. 통합은 그 도구에 지침, 사용법 skill, 훅(또는 플러그인)을 넣고, `muwi setup --remove`가 우리 것만 뺍니다.
+- 한 작업을 여러 도구가 나눠 해도 그래프는 하나입니다 (리뷰는 Codex, 구현은 Claude Code처럼). `muwi run <노드> "<맡길 일>" --agent codex`처럼 도구 이름으로 맡기고, 그런 작업의 카드에는 어느 도구가 했는지 붙습니다.
+- 노드를 시작할 때 그 세션이 쓰던 모델을 노드마다 적습니다. 기록 칸의 "누가"와 `muwi show`에 도구와 모델이 나옵니다. 모델은 그 도구의 훅이 알려 줄 때만 적힙니다.
+
+### 변경
+
+- 구조를 코어와 도구별 통합으로 나눴습니다. 코어는 공통 사건(세션 시작, 사람이 말함, 고치려 함, skill을 읽음 …)만 받고, 도구마다 다른 훅 입력과 답의 형식은 그 도구의 통합이 바꿉니다 (`src/events.ts`, `src/integrations/`).
+- `muwi run`은 `--agent`를 주지 않으면 맡기는 세션과 같은 도구로 새 세션을 띄웁니다. 전에는 늘 `claude`였습니다. 그래프 칸의 "하던 대화 다시 열기"와 "새 대화로 이어 가기"도 그 세션의 도구에 맞는 명령을 씁니다.
+- Codex 통합이 훅까지 넣습니다 (`~/.codex/hooks.json`). 전에는 지침과 사용법 skill만 넣었습니다. 사용법 skill은 Codex가 읽는 `~/.agents/skills/muwi`에 넣습니다.
+
 ## 0.5.26 (2026-11-24)
 
 ### 변경
