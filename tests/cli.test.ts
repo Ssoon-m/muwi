@@ -350,3 +350,48 @@ test('그래프 흐름: 하던 노드 앞에 먼저 할 노드가 끼어들면 �
   // 직접 멈출 수도 있다
   assert.match(muwi(['node', 'check', 'pause']).out, /check 잠시 멈춤/);
 });
+
+test('서브에이전트가 스스로 밝힌다 (--sub): 그 노드는 서브에이전트가 한 것으로 적히고, --work를 붙여도 부모 세션이 붙은 작업은 그대로다', () => {
+  const { dir, muwi } = bench();
+  // 부모 세션이 작업 둘을 적었다. 지금 붙어 있는 것은 나중에 적은 b다
+  muwi(['plan', '--work', 'a', PLAN]);
+  muwi(['plan', '--work', 'b', PLAN]);
+  const attached = () => JSON.parse(fs.readFileSync(path.join(dir, '.sessions', 'lead.json'), 'utf8')).work;
+  assert.equal(attached(), 'b');
+  // 서브에이전트는 세션 id가 부모와 같다. 맡은 노드를 --sub로 시작한다 (훅이 서브에이전트를 알려 주지 않는 도구에서도 된다)
+  const start = muwi(['node', 'read', 'start', '--sub', '--work', 'a']);
+  assert.equal(start.code, 0, start.err);
+  assert.equal(attached(), 'b');
+  const who = () => JSON.parse(muwi(['show', 'a', '--json']).out).nodes.find((n: any) => n.id === 'read').who;
+  assert.equal(who().kind, 'subagent');
+  assert.match(who().agents[0].id, /^sub-[0-9a-f]{8}$/);
+  // 끝을 적을 때 --sub를 빼먹어도 서브에이전트가 맡은 노드라 부모는 옮겨지지 않는다
+  const done = muwi(['node', 'read', 'done', '결과', '--work', 'a']);
+  assert.equal(done.code, 0, done.err);
+  assert.equal(attached(), 'b');
+  assert.equal(who().kind, 'subagent');
+  assert.match(muwi(['show', 'a']).out, /서브에이전트/);
+  // 부모 세션이 직접 --work를 붙여 적으면 전처럼 그 작업에 붙는다
+  muwi(['node', 'impl', 'start', '--work', 'a']);
+  assert.equal(attached(), 'a');
+});
+
+test('지침: muwi guide가 원본을 보여 주고, muwi가 업데이트되면 부모 세션의 다음 적는 명령 끝에 새 지침이 한 번 붙는다', () => {
+  const { dir, muwi } = bench();
+  assert.match(muwi(['guide']).out, /## 작업 진행 방식 \(muwi\)/);
+  muwi(['plan', '--work', 'a', PLAN]);
+  // 지침이 그대로면 아무것도 붙지 않는다
+  assert.doesNotMatch(muwi(['node', 'read', 'start']).out, /업데이트됐다/);
+  // 이 세션이 옛 지침을 받은 것으로 해 둔다 (muwi가 그 뒤에 업데이트됐다)
+  const file = path.join(dir, '.sessions', 'lead.json');
+  const old = () => fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, 'utf8')), instructions: 'old-guide' }));
+  old();
+  // 읽기만 하는 명령에는 붙이지 않는다
+  assert.doesNotMatch(muwi(['status']).out, /업데이트됐다/);
+  // 서브에이전트의 명령에는 붙이지 않는다 (부모가 받아야 한다)
+  assert.doesNotMatch(muwi(['node', 'impl', 'start', '--sub']).out, /업데이트됐다/);
+  // 부모 세션의 다음 적는 명령에 붙는다. 한 번만
+  const told = muwi(['node', 'read', 'done', '읽음']).out;
+  assert.match(told, /✓ read 끝[\s\S]*muwi가 업데이트됐다 \(\d+\.\d+\.\d+\)[\s\S]*## 작업 진행 방식 \(muwi\)/);
+  assert.doesNotMatch(muwi(['node', 'check', 'start']).out, /업데이트됐다/);
+});

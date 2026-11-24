@@ -6,8 +6,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { LABEL_NODE, LABEL_WORK, hc, herdrApp, terminalName, type Ran } from './herdr.ts';
 import { layoutFor, layoutProblems, type Fit, type Flow } from './layout.ts';
-import { ROOT, handleHook } from './hook.ts';
-import { markNode } from './node.ts';
+import { ROOT, guideUpdate, handleHook, sessionInstructions } from './hook.ts';
+import { fromSubagent, markNode } from './node.ts';
 import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
 import { attach, markSettled, readSession, recentSessions, sessionKey, sessionLabel, touchSession } from './session.ts';
 import { resumeFacts } from './resume.ts';
@@ -41,7 +41,7 @@ const HELP = `사용법: muwi <명령>
   muwi tidy [<작업>]                    끝난 노드를 맡았던 새 세션의 터미널을 닫는다 (사람이 정리하라고 할 때)
 
   진행
-  muwi node <id> start                 노드를 시작한다
+  muwi node <id> start [--sub]         노드를 시작한다. 서브에이전트가 맡은 노드를 시작할 때는 --sub를 붙인다 (서브에이전트가 한 것으로 적힌다)
   muwi node <id> done ["<결과 한 줄>"]   노드를 끝낸다
   muwi node <id> wait "<물어볼 것>"     사람의 결정을 기다린다
   muwi node <id> block "<이유>"         막혔다
@@ -54,6 +54,7 @@ const HELP = `사용법: muwi <명령>
   muwi status [--all] [--json]         작업 목록 (응답 대기·막힘·새 결과가 위). 오래된 작업은 접어 두고, --all이면 다 보여 준다
   muwi show [<작업>] [--json]           작업 하나의 기록: 노드, 읽은 skill, 계획이 바뀐 이유, 문제 표시
   muwi session                         이 세션이 붙어 있는 작업과 읽은 skill
+  muwi guide                           작업 진행 방식(지침)을 보여 준다. muwi가 업데이트되면 muwi 명령의 출력 끝에도 한 번 나온다
   muwi open [--right]                  Herdr 앱에서 그래프 칸을 이 터미널 아래(--right면 오른쪽)에 연다
 
   Herdr 앱 화면
@@ -290,6 +291,30 @@ function pausePlanned(dir: string, work: string, paused: Paused[], say: (line: s
   }
 }
 
+/** 이번 명령을 서브에이전트가 실행했다 (바뀐 지침은 부모 세션의 명령에만 붙인다) */
+let bySubagent = false;
+
+/**
+ * muwi가 업데이트돼 지침이 바뀌었으면 이 명령의 출력 끝에 새 지침을 붙인다. 세션을 새로 열지 않아도 된다.
+ * 적는 명령(plan, node …)에만 붙인다. 훅으로 말을 넣을 수 없는 도구에서도 닿는 길이다
+ */
+function tellGuide(dir: string) {
+  const key = sessionKey();
+  if (!key || bySubagent) return;
+  const text = guideUpdate(dir, key);
+  if (text) out(`\n${text}`);
+}
+
+/** 지침의 원본. 지침 파일이나 훅으로 받지 못한 세션이 직접 읽을 수 있다 */
+function cmdGuide(dir: string) {
+  const guide = sessionInstructions(ROOT);
+  if (!guide) throw new Fail('지침 파일을 읽지 못했어요 (hooks/instructions.md)');
+  out(guide);
+  const key = sessionKey();
+  // 지금 판을 읽었다고 적어 둔다 (같은 것을 다시 붙이지 않게)
+  if (key) guideUpdate(dir, key);
+}
+
 function join(dir: string, work: string) {
   const key = sessionKey();
   if (key) attach(dir, key, work);
@@ -397,12 +422,15 @@ function cmdNode(id: string | undefined, action: string | undefined, text: strin
   if (status === 'blocked' && !note) throw new Fail('왜 막혔는지 적어요: muwi node <id> block "<이유>"');
   const work = resolveWork(a, dir);
   const key = sessionKey();
-  const result = markNode(dir, work, id, status, note, key);
+  // 서브에이전트가 실행한 명령이면 부모 세션이 붙은 작업을 바꾸지 않는다 (--work를 붙여 적어도). 부모에게 갈 말도 받지 않는다
+  const sub = fromSubagent(dir, work, id, key, Boolean(a.flags.sub));
+  const result = markNode(dir, work, id, status, note, key, process.env, { sub: Boolean(a.flags.sub) });
   if (!result) {
     const plan = needPlan(dir, work);
     throw new Fail(`없는 노드예요: ${id}. 있는 노드: ${plan.nodes.map(n => n.id).join(', ')}. 새 노드면 muwi add로 먼저 넣어요.`);
   }
-  join(dir, work);
+  if (sub) bySubagent = true;
+  else join(dir, work);
   const done = result.nodes.filter(n => n.status === 'done').length;
   const label = { doing: '시작', done: '끝', waiting: '응답 대기', blocked: '막힘', todo: '잠시 멈춤 (다시 start하면 같은 회차로 이어져요)' }[status];
   out(`${status === 'todo' ? '⏸' : MARK[status]} ${id} ${label} (${work}, ${done}/${result.nodes.length} 끝)`);
@@ -989,6 +1017,18 @@ async function main(argv: string[]) {
   const major = Number(process.versions.node.split('.')[0]);
   if (major < NODE_MIN) throw new Fail(`muwi는 Node ${NODE_MIN} 이상이 필요해요 (지금: ${process.version})`);
   const dir = runsDir();
+  // 적는 명령이 끝나면 바뀐 지침이 있는지 보고 출력 끝에 붙인다
+  if (cmd && TELLS.has(cmd)) {
+    await run(cmd, a, dir);
+    return tellGuide(dir);
+  }
+  return run(cmd, a, dir);
+}
+
+/** 지침이 바뀌었을 때 알려 줄 명령들: 세션이 계획과 진행을 적는 명령 */
+const TELLS = new Set(['plan', 'add', 'remove', 'node', 'start', 'done', 'wait', 'block', 'skip', 'run']);
+
+async function run(cmd: string | undefined, a: Args, dir: string) {
   switch (cmd) {
     case 'plan': return cmdPlan(a, dir);
     case 'add': return cmdAdd(a, dir);
@@ -1011,6 +1051,7 @@ async function main(argv: string[]) {
     case 'run': return cmdRun(a, dir);
     case 'tidy': return cmdTidy(a, dir);
     case 'session': return cmdSession(dir);
+    case 'guide': return cmdGuide(dir);
     case undefined: case 'help': case '--help': case '-h': return out(HELP);
     default: throw new Fail(`모르는 명령: ${cmd}\n\n${HELP}`);
   }
