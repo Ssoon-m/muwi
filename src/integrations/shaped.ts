@@ -4,10 +4,11 @@
 //   표준 출력의 JSON(hookSpecificOutput)이나 종료 코드로 답한다.
 // 도구마다 다른 것(파일 자리, 사건 이름, 도구 이름, 답하는 법)만 표(Shape)로 받아서 통합을 만든다.
 // 플러그인으로 붙는 도구(OpenCode, Pi …)도 그 플러그인이 같은 모양의 JSON을 넘기므로 이 번역기를 같이 쓴다.
+import fs from 'node:fs';
 import path from 'node:path';
 import { skillFromPath, type Happened, type Reply } from '../events.ts';
 import { sessionKey, terminalKey } from '../session.ts';
-import { shPath } from './files.ts';
+import { shPath, writeText } from './files.ts';
 import { installFlat, uninstallFlat } from './flat.ts';
 import { HOOK_MARK, installEntries, uninstallEntries, type HookEntry } from './settings-hooks.ts';
 import { toolById } from './tools.ts';
@@ -182,6 +183,48 @@ export function flatShaped(shape: Shape, o: { file: string; matcher: Wiring['mat
     },
     remove(wired) {
       for (const file of wired.settings ?? []) uninstallFlat(file, o);
+    },
+    from: (payload, mode, env) => fromShaped(shape, payload, mode, env),
+    to: (h, r) => toShaped(shape, h, r),
+  };
+}
+
+/** 플러그인이 넘기는 입력의 모양: Claude Code의 사건 이름과 도구 이름 그대로 (플러그인이 그 도구의 이름을 이렇게 바꿔 넘긴다) */
+export const PLUGIN_SHAPE = {
+  on: { start: 'SessionStart', prompt: 'UserPromptSubmit', before: 'PreToolUse', after: 'PostToolUse', subStart: 'SubagentStart', subStop: 'SubagentStop' },
+  tools: { edit: ['Edit', 'Write'], spawn: ['Agent'], shell: ['Bash'], read: ['Read'], skill: ['Skill'] },
+  ask: true,
+} satisfies Omit<Shape, 'id'>;
+
+/** 플러그인 파일 안에서 muwi 훅 스크립트의 자리를 가리키는 표시. 넣을 때 실제 경로로 바꾼다 */
+const HOOK_SLOT = '__MUWI_HOOK__';
+
+/**
+ * 플러그인(확장) 파일로 붙는 도구의 통합. 그 도구의 플러그인 폴더에 우리 파일을 넣는다 (muwi 설치 위치의 integrations/<도구>/).
+ * 플러그인은 그 도구의 사건을 Claude Code와 같은 모양의 JSON으로 바꿔 hooks/tool.sh <도구> [갈래]에 넘기고, 답을 그 도구에 적용한다.
+ * to: 설정 폴더 기준으로 넣을 폴더. files: 넣을 파일들 (integrations/<도구>/ 기준)
+ */
+export function plugged(id: string, o: { to: string; files: string[] }): Adapter {
+  const shape: Shape = { id, ...PLUGIN_SHAPE };
+  return {
+    install(ctx: SetupCtx) {
+      const script = path.join(ctx.root, 'hooks', 'tool.sh');
+      // 플러그인이 이 스크립트를 바로 실행한다
+      try {
+        fs.chmodSync(script, 0o755);
+      } catch {
+        // 권한을 바꾸지 못하면 그대로 둔다 (이미 실행할 수 있게 들어 있다)
+      }
+      const files = o.files.map(name => {
+        const file = path.join(ctx.home, o.to, name);
+        const source = fs.readFileSync(path.join(ctx.root, 'integrations', id, name), 'utf8');
+        writeText(file, source.split(HOOK_SLOT).join(shPath(script, ctx.platform)));
+        return file;
+      });
+      return { files };
+    },
+    remove(wired) {
+      for (const file of wired.files ?? []) fs.rmSync(file, { force: true });
     },
     from: (payload, mode, env) => fromShaped(shape, payload, mode, env),
     to: (h, r) => toShaped(shape, h, r),

@@ -42,6 +42,12 @@ export const TOOLS: Tool[] = [
   { id: 'grok', name: 'Grok CLI', home: { env: 'GROK_HOME', path: ['.grok'] }, instructions: 'AGENTS.md', skills: 'skills', command: 'grok', launch: ['grok', '{prompt}'], resume: ['grok', '--resume', '{id}'] },
   { id: 'mastracode', name: 'Mastra Code', home: { path: ['.mastracode'] }, instructions: 'AGENTS.md', skills: 'skills', command: 'mastracode', launch: ['mastracode', '--tui-initial-prompt', '{prompt}'], resume: ['mastracode', 'resume', '{id}'] },
   { id: 'letta', name: 'Letta Code', home: { env: 'LETTA_CONFIG_DIR', path: ['.letta'] }, skills: 'skills', command: 'letta', launch: ['letta'], resume: ['letta', '--conversation', '{id}'] },
+  { id: 'opencode', name: 'OpenCode', home: { path: ['.config', 'opencode'] }, instructions: 'AGENTS.md', skills: 'skills', command: 'opencode', launch: ['opencode', '--prompt', '{prompt}'], resume: ['opencode', '--session', '{id}'] },
+  { id: 'kilo', name: 'Kilo CLI', home: { path: ['.config', 'kilo'] }, instructions: 'AGENTS.md', skills: '~/.kilo/skills', command: 'kilo', launch: ['kilo', '--prompt', '{prompt}'], resume: ['kilo', '--session', '{id}'] },
+  // oh-my-pi는 Pi와 같은 환경 변수(PI_SESSION_ID)를 쓴다. OMPCODE로 먼저 알아보게 Pi보다 앞에 둔다
+  { id: 'omp', name: 'oh-my-pi', home: { path: ['.omp', 'agent'] }, instructions: 'AGENTS.md', skills: 'skills', command: 'omp', launch: ['omp', '{prompt}'], resume: ['omp', '--resume', '{id}'], env: ['OMPCODE'], sessionEnv: 'PI_SESSION_ID' },
+  { id: 'hermes', name: 'Hermes Agent', home: { env: 'HERMES_HOME', path: ['.hermes'] }, skills: 'skills', command: 'hermes', launch: ['hermes', 'chat', '-q', '{prompt}'], resume: ['hermes', '--resume', '{id}'], env: ['HERMES_SESSION_ID', 'HERMES_AGENT'], sessionEnv: 'HERMES_SESSION_ID', note: 'Hermes에서 플러그인을 한 번 켜 줘야 해요: hermes plugins enable muwi' },
+  { id: 'pi', name: 'Pi', home: { env: 'PI_CODING_AGENT_DIR', path: ['.pi', 'agent'] }, instructions: 'AGENTS.md', skills: 'skills', command: 'pi', launch: ['pi', '{prompt}'], resume: ['pi', '--session', '{id}'], env: ['PI_CODING_AGENT', 'PI_SESSION_ID'], sessionEnv: 'PI_SESSION_ID' },
 ];
 
 export const toolById = (id: string | undefined | null): Tool | null => TOOLS.find(t => t.id === id) ?? null;

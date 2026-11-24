@@ -117,18 +117,25 @@ for (const tool of TOOLS.filter(t => ADAPTERS[t.id])) {
     const done = readInstall(records)!.tools![tool.id];
     const wired = [...(done.settings ?? []), ...(done.files ?? [])];
     assert.ok(wired.length > 0, '훅을 넣은 파일이 없다');
-    for (const file of wired) assert.match(fs.readFileSync(file, 'utf8'), /MUWI_HOOK=1 sh \\?".*hooks\/(hook|tool)\.sh/);
+    // 설정 파일에는 우리 표시가 붙은 훅 명령이, 플러그인 파일에는 훅 스크립트의 실제 경로가 들어간다
+    for (const file of done.settings ?? []) assert.match(fs.readFileSync(file, 'utf8'), /MUWI_HOOK=1 sh \\?".*hooks\/(hook|tool)\.sh/);
+    const plugin = (done.files ?? []).map(file => fs.readFileSync(file, 'utf8')).join('\n');
+    if (done.files?.length) {
+      assert.match(plugin, /hooks\/tool\.sh/);
+      assert.doesNotMatch(plugin, /__MUWI_HOOK__/);
+    }
     if (mine) assert.match(fs.readFileSync(mine, 'utf8'), /^# 내 규칙\n\n<!-- muwi:start/);
     if (done.skill) assert.ok(fs.existsSync(path.join(done.skill, 'SKILL.md')));
     // 다시 해도 한 벌만
     runSetup({ root: ROOT, version: '0.0.0', dir: records, env });
-    const count = (text: string) => text.split('MUWI_HOOK=1').length - 1;
+    const count = (text: string) => text.split('MUWI_HOOK=1').length + text.split('tool.sh').length;
     const before = wired.map(file => count(fs.readFileSync(file, 'utf8')));
     runSetup({ root: ROOT, version: '0.0.0', dir: records, env });
     assert.deepEqual(wired.map(file => count(fs.readFileSync(file, 'utf8'))), before);
 
     removeSetup(records);
     for (const file of wired) if (fs.existsSync(file)) assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /MUWI_HOOK=1/);
+    for (const file of done.files ?? []) assert.equal(fs.existsSync(file), false);
     if (mine) assert.equal(fs.readFileSync(mine, 'utf8'), '# 내 규칙\n');
     if (done.skill) assert.equal(fs.existsSync(done.skill), false);
   });
