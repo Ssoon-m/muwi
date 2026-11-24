@@ -5,7 +5,8 @@
 // 계획을 적지 않은 세션이 파일을 고치거나 서브에이전트를 띄우려 하면 알려 준다 (before-edit, before-spawn). 지침만으로는 계획을 적지 않는 때가 있어서다.
 //   둘 다 여러 단계로 하는 일의 신호다. 계획은 파일을 고치는지가 아니라 일의 크기로 정한다 (PR 리뷰처럼 고치지 않는 일도 적는다).
 //   계획을 적거나(muwi plan, muwi node … start) 계획 없이 진행하겠다고 밝히면(muwi skip) 그 뒤로는 지나간다. 순서는 막지 않는다.
-// push·PR·댓글처럼 되돌릴 수 없는 명령 앞에서는 사람에게 묻게 한다 (before-command, 선택 설치).
+// 무엇을 승인받고 할지는 muwi가 정하지 않는다 (그 도구의 권한 설정과 사용자의 훅이 할 일이다). 셸 명령 앞(before-command)에서는 막지 않고,
+//   서브에이전트가 노드를 시작하는 명령인지만 본다.
 // 서브에이전트가 한 일은 사건의 agent로 구분한다 (서브에이전트는 세션 id가 부모와 같다).
 // muwi run으로 뜬 새 세션은 시작할 때 맡은 작업에 붙이고 노드를 시작한 것으로 적는다.
 import crypto from 'node:crypto';
@@ -44,36 +45,6 @@ export function skillFromPath(file: unknown): string | null {
   if (parts[parts.length - 1] !== 'SKILL.md' || parts.length < 3) return null;
   if (!parts.slice(0, -2).includes('skills')) return null;
   return parts[parts.length - 2] || null;
-}
-
-/** git 뒤에 오는 하위 명령. `git -C 폴더 push`처럼 옵션이 끼어 있어도 찾는다 */
-function gitSubcommand(tokens: string[]): string | null {
-  const i = tokens.findIndex(t => t === 'git' || t.endsWith('/git'));
-  if (i < 0) return null;
-  for (let j = i + 1; j < tokens.length; j++) {
-    const t = tokens[j];
-    if (t === '-C' || t === '-c' || t === '--git-dir' || t === '--work-tree') j++; // 값이 따라오는 옵션
-    else if (!t.startsWith('-')) return t;
-  }
-  return null;
-}
-
-/** 사람이 확인해야 하는 명령이면 무엇인지 돌려준다 */
-export function guardReason(command: unknown): string | null {
-  if (typeof command !== 'string') return null;
-  // 따옴표 안의 글(커밋 메시지 등)에 push라는 말이 있어도 걸리지 않게 따옴표 안은 비운다
-  const bare = command.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, '""');
-  for (const part of bare.split(/[;&|\n()]+/)) {
-    const tokens = part.trim().split(/\s+/).filter(Boolean);
-    if (gitSubcommand(tokens) === 'push') return 'git push';
-    const gh = tokens.findIndex(t => t === 'gh' || t.endsWith('/gh'));
-    if (gh >= 0 && tokens[gh + 1] === 'pr' && ['create', 'merge', 'comment', 'review', 'close', 'edit', 'ready'].includes(tokens[gh + 2])) {
-      return `gh pr ${tokens[gh + 2]}`;
-    }
-  }
-  const writes = /(-X\s*['"]?(POST|PUT|DELETE)|(^|\s)(-d|--data|--data-raw|--data-binary|--json)(\s|=))/i;
-  if (/api\.bitbucket\.org/.test(command) && /pullrequests/.test(command) && writes.test(command)) return 'Bitbucket PR 생성·댓글';
-  return null;
 }
 
 /** 명령에 `muwi node <id> start`가 있으면 그 노드(와 --work로 준 작업)를 돌려준다 */
@@ -189,8 +160,6 @@ export type Reply = {
   say?: string;
   /** 하려던 일을 막고 보여 줄 이유 (계획 없이 고치려 할 때) */
   stop?: string;
-  /** 사람에게 확인받게 하고 보여 줄 이유 (되돌릴 수 없는 명령) */
-  ask?: string;
 };
 
 export function handleEvent(h: Happened, dir: string, env: NodeJS.ProcessEnv = process.env, root: string = ROOT): Reply {
@@ -206,9 +175,7 @@ export function handleEvent(h: Happened, dir: string, env: NodeJS.ProcessEnv = p
       const starting = { ...(readSession(dir, key)?.starting ?? {}), [started.node]: { agent, at: nowIso() } };
       touchSession(dir, key, { starting, hooked: nowIso() }, env);
     }
-    if (!readConfig(dir).guard) return {};
-    const reason = guardReason(h.command);
-    return reason ? { ask: `muwi: ${reason}. 되돌릴 수 없는 행동이라 사람이 확인한 뒤에 실행해요` } : {};
+    return {};
   }
 
   if (!key) return {};

@@ -160,7 +160,7 @@ function normalizeTool(toolName: unknown, input: any) {
 }
 
 function modeFor(name: string): string | undefined {
-  if (name === "Bash") return "guard";
+  if (name === "Bash") return "command"; // links a node a subagent starts; never blocks
   if (name === "Edit" || name === "Write" || name === "Agent") return "nudge";
   return undefined;
 }
@@ -292,11 +292,6 @@ export default function (pi: any) {
       );
       const result = decisionOf(reply);
       if (result.decision === "deny") return { block: true, reason: result.reason || "Blocked by muwi" };
-      if (result.decision === "ask" && ctx?.hasUI && !isSub(ctx)) {
-        // OMP can ask: a confirm dialog. Without a UI (print mode, subagents) the call proceeds.
-        const allowed = await ctx.ui.confirm("muwi", result.reason || `Allow this ${tool.name} call?`);
-        if (!allowed) return { block: true, reason: `Rejected by the user. ${result.reason ?? ""}`.trim() };
-      }
       if (result.context) return { additionalContext: result.context };
     } catch {}
   });

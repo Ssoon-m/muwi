@@ -3,10 +3,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { guardReason, handleHook, isScratchPath, skillFromPath } from '../src/hook.ts';
+import { handleHook, isScratchPath, skillFromPath } from '../src/hook.ts';
 import { markNode } from '../src/node.ts';
 import { attach, readSession, recordSkill } from '../src/session.ts';
-import { appendEvent, clock, readEvents, writeConfig, writePlan, type NodeStatus, type Plan } from '../src/store.ts';
+import { appendEvent, clock, readConfig, readEvents, writeConfig, writePlan, type NodeStatus, type Plan } from '../src/store.ts';
 import { loadBoard, loadView } from '../src/view.ts';
 
 const ENV = {} as NodeJS.ProcessEnv;
@@ -208,23 +208,15 @@ test('SKILL.md 경로에서 skill 이름을 꺼낸다', () => {
   assert.equal(skillFromPath(undefined), null);
 });
 
-test('guard: push·PR·댓글 명령만 사람에게 묻는다', () => {
-  for (const cmd of [
-    'git push', 'git push origin feat/x', 'git -C /repo push -u origin HEAD', 'cd /repo && git push --force-with-lease',
-    'gh pr create --title x --body y', 'gh pr comment 12 --body ok',
-    `curl -s -u "$U:$T" -X POST https://api.bitbucket.org/2.0/repositories/acme/web-app/pullrequests -d '{}'`,
-  ]) assert.ok(guardReason(cmd), cmd);
-  for (const cmd of [
-    'git status', 'git commit -m "push 버튼 추가"', 'git log --oneline', 'git stash push', 'echo "git push"', 'gh pr view 12', 'gh pr list',
-    'curl -s https://api.bitbucket.org/2.0/repositories/acme/web-app/pullrequests/12',
-  ]) assert.equal(guardReason(cmd), null, cmd);
-  // 기본은 꺼져 있다. muwi config guard on 일 때만 묻는다
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-guard-'));
-  const push = { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git push' } };
-  assert.deepEqual(handleHook(push, dir, 'guard', ENV), {});
-  writeConfig(dir, { nudge: true, guard: true });
-  assert.equal(JSON.parse(handleHook(push, dir, 'guard', ENV).stdout!).hookSpecificOutput.permissionDecision, 'ask');
-  assert.deepEqual(handleHook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'ls' } }, dir, 'guard', ENV), {});
+test('셸 명령은 막지 않는다: push·PR 명령에도 아무 답을 하지 않는다 (승인은 muwi의 일이 아니다)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-command-'));
+  for (const command of ['git push', 'gh pr create --title x --body y', 'ls']) {
+    assert.deepEqual(handleHook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command } }, dir, 'command', ENV), {});
+  }
+  // 옛 설정에 guard가 켜져 있어도 읽지 않는다
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ nudge: true, guard: true, layout: false }));
+  assert.deepEqual(readConfig(dir), { nudge: true, layout: false });
+  assert.deepEqual(handleHook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git push' } }, dir, 'command', ENV), {});
 });
 
 const edit = (session: string, file = '/repo/src/app.ts') => ({ session_id: session, hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: file } });
@@ -319,7 +311,7 @@ test('nudge: 작업물이 아닌 곳(기록 폴더, 에이전트 설정, 임시 
 
 test('nudge: muwi config nudge off 이면 알리지 않는다', () => {
   const t = setup([{ id: 'impl' }]);
-  writeConfig(t.dir, { nudge: false, guard: false });
+  writeConfig(t.dir, { nudge: false, layout: true });
   assert.deepEqual(handleHook(edit('fresh'), t.dir, 'nudge', ENV), {});
 });
 

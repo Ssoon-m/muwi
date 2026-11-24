@@ -52,7 +52,6 @@
 | `muwi setup --remove` | `muwi setup`으로 설치한 것을 지웁니다. `muwi layout`으로 바꾼 화면도 되돌립니다 |
 | `muwi config` | 현재 설정을 보여 줍니다 |
 | `muwi config nudge on\|off` | 계획 알림을 켜거나 끕니다. 기본값은 `on`입니다 |
-| `muwi config guard on\|off` | push 전에 묻기를 켜거나 끕니다. 기본값은 `off`입니다 |
 | `muwi config layout on\|off` | 화면에 muwi 칸이 없을 때 `muwi layout`을 권하는 안내를 켜거나 끕니다. 기본값은 `on`입니다 |
 
 각 항목이 무엇을 설치하고 설정하는지는 [설치와 설정](setup.md)에 있습니다.

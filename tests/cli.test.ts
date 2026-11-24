@@ -210,11 +210,15 @@ test('muwi hook: 깨진 입력에도 조용히 끝난다 (세션을 방해하지
   assert.equal(r.code, 0);
   assert.equal(r.out, '');
   assert.match(fs.readFileSync(path.join(dir, '.hook-errors.log'), 'utf8'), /JSON/);
-  // push 앞에서 묻기는 켰을 때만
+  // 셸 명령은 막지 않는다. 무엇을 승인받고 할지는 muwi가 정하지 않는다 (push 앞에서 묻기는 0.6.0에서 뺐다).
+  // 0.5.x의 훅 설정이 부르는 이름(guard)도 그대로 받아서 조용히 지나간다
   const push = JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git push origin HEAD' } });
+  assert.equal(muwi(['hook', 'command'], { input: push }).out, '');
   assert.equal(muwi(['hook', 'guard'], { input: push }).out, '');
-  assert.match(muwi(['config', 'guard', 'on']).out, /guard\s+on/);
-  assert.equal(JSON.parse(muwi(['hook', 'guard'], { input: push }).out).hookSpecificOutput.permissionDecision, 'ask');
+  const gone = muwi(['config', 'guard', 'on']);
+  assert.notEqual(gone.code, 0);
+  assert.match(gone.err, /0\.6\.0에서 뺐어요/);
+  assert.equal(muwi(['hook', 'guard'], { input: push }).out, '');
   const editing = JSON.stringify({ session_id: 'new-session', hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: '/repo/src/a.ts' } });
   assert.equal(JSON.parse(muwi(['hook', 'nudge'], { input: editing }).out).hookSpecificOutput.permissionDecision, 'deny');
   assert.equal(JSON.parse(muwi(['hook', 'nudge'], { input: editing }).out).hookSpecificOutput.permissionDecision, 'deny');
@@ -237,7 +241,7 @@ test('이름 없이 낸 계획은 이 세션이 하던 작업만 바꾼다 (같�
 test('muwi config·version·setup', () => {
   const { dir, muwi } = bench();
   assert.match(muwi(['--version']).out, /^\d+\.\d+\.\d+\n$/);
-  assert.match(muwi(['config']).out, /nudge\s+on[\s\S]*guard\s+off[\s\S]*layout\s+on/);
+  assert.match(muwi(['config']).out, /nudge\s+on[\s\S]*layout\s+on/);
   assert.match(muwi(['config', 'layout', 'off']).out, /layout\s+off/);
   assert.match(muwi(['config', 'nudge', 'off']).out, /nudge\s+off/);
   assert.match(muwi(['config', 'nudge', 'maybe']).err, /사용법: muwi config/);

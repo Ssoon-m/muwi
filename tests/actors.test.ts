@@ -39,13 +39,13 @@ function setup(nodes: { id: string; after?: string[]; run?: RunBy }[], work = 'w
     attach(dir, session, work, ENV);
   };
   /** Claude Code가 훅에 넘기는 입력을 흉내 낸다 */
-  const hook = (payload: Record<string, unknown>, mode: 'record' | 'guard' | 'nudge' = 'record', session = 'lead', env: NodeJS.ProcessEnv = ENV) =>
+  const hook = (payload: Record<string, unknown>, mode: 'record' | 'command' | 'nudge' = 'record', session = 'lead', env: NodeJS.ProcessEnv = ENV) =>
     handleHook({ session_id: session, ...payload }, dir, mode, env, path.resolve(import.meta.dirname, '..'));
   const sub = {
     start: (agent: string, session = 'lead') => hook({ hook_event_name: 'SubagentStart', agent_id: agent, agent_type: 'general-purpose' }, 'record', session),
     stop: (agent: string, session = 'lead') => hook({ hook_event_name: 'SubagentStop', agent_id: agent, agent_type: 'general-purpose' }, 'record', session),
     reads: (agent: string, skill: string, session = 'lead') => hook({ hook_event_name: 'PostToolUse', tool_name: 'Skill', tool_input: { skill }, agent_id: agent, agent_type: 'general-purpose' }, 'record', session),
-    runs: (agent: string, command: string, session = 'lead') => hook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, agent_id: agent }, 'guard', session),
+    runs: (agent: string, command: string, session = 'lead') => hook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, agent_id: agent }, 'command', session),
   };
   const reads = (skill: string, session = 'lead') => hook({ hook_event_name: 'PostToolUse', tool_name: 'Skill', tool_input: { skill } }, 'record', session);
   // 빈 환경을 준다: Herdr에 물어보지 않는다 (테스트가 이 컴퓨터의 터미널 상태에 기대지 않게)
@@ -422,9 +422,9 @@ test('hook.sh: 서브에이전트의 시작·끝, 서브에이전트가 실행�
   attach(dir, 's1', 'w1', {} as NodeJS.ProcessEnv);
   markNode(dir, 'w1', 'main', 'doing', undefined, 's1', {} as NodeJS.ProcessEnv);
   run({ hook_event_name: 'SubagentStart', session_id: 's1', agent_id: 'ag9', agent_type: 'Explore' });
-  run({ hook_event_name: 'PreToolUse', session_id: 's1', tool_name: 'Bash', tool_input: { command: 'muwi node rev start' }, agent_id: 'ag9' }, ['guard']);
+  run({ hook_event_name: 'PreToolUse', session_id: 's1', tool_name: 'Bash', tool_input: { command: 'muwi node rev start' }, agent_id: 'ag9' }, ['command']);
   assert.equal(readSession(dir, 's1')!.starting!.rev.agent, 'ag9');
-  run({ hook_event_name: 'PreToolUse', session_id: 's1', tool_name: 'Bash', tool_input: { command: 'ls -la' }, agent_id: 'ag9' }, ['guard']);
+  run({ hook_event_name: 'PreToolUse', session_id: 's1', tool_name: 'Bash', tool_input: { command: 'ls -la' }, agent_id: 'ag9' }, ['command']);
   // 서브에이전트가 muwi node rev start를 실행한다 (명령에는 세션 id만 있다)
   markNode(dir, 'w1', 'rev', 'doing', undefined, 's1', {} as NodeJS.ProcessEnv);
   run({ hook_event_name: 'PostToolUse', session_id: 's1', tool_name: 'Read', tool_input: { file_path: '/x/skills/team-rules/SKILL.md' }, agent_id: 'ag9' });

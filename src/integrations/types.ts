@@ -2,7 +2,8 @@
 import type { Happened, Reply } from '../events.ts';
 
 /** 훅이 불린 갈래. 도구가 사건을 나눠 걸 수 있으면 갈래마다 따로 건다 (볼 필요 없는 호출을 줄인다) */
-export type HookMode = 'record' | 'guard' | 'nudge';
+/** record: 기록, nudge: 고치기·서브에이전트 띄우기 앞, command: 셸 명령 앞 (서브에이전트가 시작한 노드를 잇는다. 옛 설치는 guard라고 부른다) */
+export type HookMode = 'record' | 'command' | 'nudge';
 /** 훅이 도구에 돌려주는 것: 표준 출력, 표준 오류, 종료 코드 */
 export type HookResult = { stdout?: string; stderr?: string; code?: number };
 

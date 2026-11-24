@@ -70,8 +70,7 @@ const HELP = `사용법: muwi <명령>
   muwi setup --all                   이 컴퓨터에 깔린 도구 전부에 넣는다 (Claude Code는 플러그인이 넣어 주므로 뺀다)
   muwi setup --claude                플러그인 없이 쓸 때: Claude Code 훅과 사용법 skill도 넣는다
   muwi setup --remove                setup으로 넣은 것을 뺀다 (muwi layout으로 바꾼 화면도 되돌린다)
-  muwi config [nudge|guard|layout on|off]
-                                     계획 알림(nudge), push·PR 앞에서 묻기(guard), 화면 바꾸기 안내(layout)를 켜고 끈다
+  muwi config [nudge|layout on|off]  계획 알림(nudge), 화면 바꾸기 안내(layout)를 켜고 끈다
   muwi --version
 
 작업은 --work <이름>으로 고른다. 없으면 이 세션이 붙어 있는 작업을 쓴다.
@@ -631,7 +630,8 @@ function cmdHook(a: Args, dir: string) {
   // 훅이 실패해도 세션은 계속돼야 한다. 문제는 파일에만 남긴다
   try {
     const text = fs.readFileSync(0, 'utf8');
-    const mode = a.pos[0] === 'guard' || a.pos[0] === 'nudge' ? a.pos[0] : 'record';
+    // guard: 0.5.x까지의 훅 설정이 셸 명령 앞의 훅을 부르던 이름
+    const mode = a.pos[0] === 'command' || a.pos[0] === 'guard' ? 'command' : a.pos[0] === 'nudge' ? 'nudge' : 'record';
     const payload = JSON.parse(text);
     // 입력에 사건 이름을 넣지 않는 도구는 훅 명령이 알려 준다 (--event)
     const named = str(a, 'event');
@@ -768,16 +768,18 @@ function cmdLayout(a: Args, dir: string) {
   out(`되돌리려면 muwi layout --remove (${r.base} 레이아웃으로 돌아가요)`);
 }
 
-const CONFIG_KEYS: (keyof Config)[] = ['nudge', 'guard', 'layout'];
+const CONFIG_KEYS: (keyof Config)[] = ['nudge', 'layout'];
 const CONFIG_ABOUT: Record<keyof Config, string> = {
   nudge: '계획을 적지 않은 세션이 파일을 고치거나 서브에이전트를 띄우려 할 때 알린다',
-  guard: 'push·PR·댓글 앞에서 사람에게 묻는다',
   layout: 'Herdr 앱 화면에 muwi 칸이 없을 때 넣자고 안내한다 (muwi setup, 그래프 칸)',
 };
 
 function cmdConfig(a: Args, dir: string) {
   const [key, value] = a.pos;
   const config = readConfig(dir);
+  if (key === 'guard') {
+    throw new Fail('push·PR 앞에서 묻기(guard)는 0.6.0에서 뺐어요. 무엇을 승인받고 할지는 muwi가 정하지 않아요. 그 도구의 권한 설정이나 직접 둔 훅을 쓰세요.');
+  }
   if (key !== undefined) {
     if (!CONFIG_KEYS.includes(key as keyof Config) || (value !== 'on' && value !== 'off')) {
       throw new Fail(`사용법: muwi config [${CONFIG_KEYS.join('|')}] on|off`);

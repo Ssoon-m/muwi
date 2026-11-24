@@ -26,7 +26,7 @@ test('훅 넣기: 남의 훅은 그대로 두고 우리 것만 한 벌 넣는다
   assert.deepEqual(once.hooks!.PreToolUse, [
     theirs,
     { matcher: 'Edit|Write|MultiEdit|NotebookEdit|Agent|Task', hooks: [ours(' nudge')] },
-    { matcher: 'Bash', hooks: [ours(' guard')] },
+    { matcher: 'Bash', hooks: [ours(' command')] },
   ]);
   assert.deepEqual(removeHooks(once), start);
   // 설치 위치가 바뀌어도 옛 위치의 우리 훅을 알아보고 바꾼다
