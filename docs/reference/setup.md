@@ -221,7 +221,7 @@ npm i -g @muwi/herdr-app@latest   # @muwi/core만 깔았으면 @muwi/core@latest
 
 ```sh
 muwi setup --remove
-npm rm -g @muwi/herdr-app
+npm rm -g @muwi/herdr-app   # @muwi/core만 깔았으면 @muwi/core
 ```
 
 기록(`~/.muwi/`)과 Node 경로 캐시(`~/.cache/muwi/`)는 남습니다. 필요 없으면 폴더를 지우세요.
