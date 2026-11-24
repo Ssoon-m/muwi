@@ -26,4 +26,6 @@ export type Adapter = {
   from(payload: any, mode: HookMode, env: NodeJS.ProcessEnv): Happened | null;
   /** 코어의 답 → 그 도구가 알아듣는 출력 */
   to(h: Happened, r: Reply): HookResult;
+  /** 할 말이 없을 때도 꼭 내야 하는 출력 (빈 JSON을 요구하는 도구) */
+  empty?: string;
 };

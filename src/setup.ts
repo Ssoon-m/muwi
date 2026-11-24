@@ -10,7 +10,7 @@ import path from 'node:path';
 import { nowIso, readJson, writeJson } from './store.ts';
 import { copyDir, installBlock, shPath, uninstallBlock, writeText } from './integrations/files.ts';
 import { adapterOf } from './integrations/index.ts';
-import { TOOLS, toolHome, type Tool } from './integrations/tools.ts';
+import { TOOLS, toolHome, toolSkills, type Tool } from './integrations/tools.ts';
 import type { Wired } from './integrations/types.ts';
 
 export { BLOCK_END, BLOCK_START, installBlock, instructionText, removeBlock, uninstallBlock, upsertBlock } from './integrations/files.ts';
@@ -172,7 +172,8 @@ export function runSetup(o: SetupOptions): Install {
   ]);
   // 표의 순서대로 넣는다
   for (const tool of TOOLS.filter(t => want.has(t.id))) {
-    const done = installTool(tool, { root: o.root, env, platform, home: toolHome(tool, env, p.home) }, block, skill);
+    const done = installTool(tool, { root: o.root, env, platform, home: toolHome(tool, env, p.home) }, p.home, block, skill);
+    if (tool.note) log(`  ${tool.note}`);
     install.tools = { ...(install.tools ?? {}), [tool.id]: done };
     log(`${tool.name} 통합: ${[done.instructions, done.skill, ...(done.settings ?? []), ...(done.files ?? [])].filter(Boolean).join(', ')}`);
   }
@@ -187,14 +188,15 @@ export function runSetup(o: SetupOptions): Install {
 }
 
 /** 한 도구에 통합을 넣는다: 지침(늘 읽히는 파일이 있으면), 사용법 skill, 훅 */
-function installTool(tool: Tool, ctx: { root: string; env: NodeJS.ProcessEnv; platform: NodeJS.Platform; home: string }, block: string, skill: string): ToolInstall {
+function installTool(tool: Tool, ctx: { root: string; env: NodeJS.ProcessEnv; platform: NodeJS.Platform; home: string }, userHome: string, block: string, skill: string): ToolInstall {
   const done: ToolInstall = {};
   if (tool.instructions) {
     done.instructions = path.join(ctx.home, tool.instructions);
     installBlock(done.instructions, block);
   }
-  if (tool.skills) {
-    done.skill = path.join(ctx.home, tool.skills, 'muwi');
+  const skills = toolSkills(tool, ctx.home, userHome);
+  if (skills) {
+    done.skill = path.join(skills, 'muwi');
     fs.rmSync(done.skill, { recursive: true, force: true });
     copyDir(skill, done.skill);
   }

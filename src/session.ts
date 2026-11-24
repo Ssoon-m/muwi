@@ -1,7 +1,7 @@
 // 세션 이름표. "어느 세션이 한 일인가"를 muwi 명령과 훅이 같은 이름으로 적게 한다.
 //   muwi 명령은 환경 변수에서 세션을 읽고, 훅은 Claude Code가 넘겨주는 session_id를 쓴다. 둘은 같은 값이다.
 // 세션마다 파일 하나(<기록 폴더>/.sessions/<세션>.json)에 지금 붙어 있는 작업과 읽은 skill을 적어 둔다.
-import { detectTool } from './integrations/tools.ts';
+import { detectTool, sessionFromEnv } from './integrations/tools.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { appendEvent, nowIso, readEvents, readJson, readPlan, writeJson } from './store.ts';
@@ -13,6 +13,8 @@ export type Session = {
   tool: string;
   /** 그 세션이 쓰는 모델 (훅이 알려 줄 때). 도중에 바꾸면 마지막 것 */
   model?: string;
+  /** 그 도구가 붙인 대화 id. 터미널을 세션으로 본 도구에서 하던 대화를 다시 열 때 쓴다 */
+  native?: string;
   cwd?: string;
   /** Herdr 앱의 터미널 주소 ($HC_TERMINAL_ID). 그래프에서 세션 상태를 보고 그 터미널로 갈 때 쓴다 */
   terminal?: string;
@@ -44,8 +46,12 @@ export type Session = {
 /** muwi 명령을 실행한 세션. 알 수 없으면 null (세션 없이도 기록은 된다) */
 export function sessionKey(env: NodeJS.ProcessEnv = process.env): string | null {
   if (env.MUWI_SESSION) return env.MUWI_SESSION;
-  if (env.CLAUDE_CODE_SESSION_ID) return env.CLAUDE_CODE_SESSION_ID;
-  // Codex처럼 세션 id를 주지 않는 도구는 터미널을 세션으로 본다
+  // 셸 명령에 세션 id를 넘겨주는 도구 (Claude Code, Codex, Kimi Code)
+  return sessionFromEnv(env) ?? terminalKey(env);
+}
+
+/** 세션 id를 주지 않는 도구는 터미널을 세션으로 본다 (Herdr의 터미널). Herdr 밖이면 null */
+export function terminalKey(env: NodeJS.ProcessEnv = process.env): string | null {
   if (env.HC_TERMINAL_ID) return `hc-${env.HC_TERMINAL_ID}`;
   if (env.HERDR_PANE_ID) return `herdr-${env.HERDR_PANE_ID}`;
   return null;

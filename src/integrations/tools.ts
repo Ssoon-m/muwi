@@ -12,19 +12,36 @@ export type Tool = {
   home: { env?: string; path: string[] };
   /** 늘 읽히는 지침 파일 (설정 폴더 기준). 여기에 muwi 지침을 구간 표시로 넣는다. 없으면 세션이 시작될 때 훅이 넣는다 */
   instructions?: string;
-  /** 사용법 skill(SKILL.md)을 넣는 폴더 (설정 폴더 기준) */
+  /** 사용법 skill(SKILL.md)을 넣는 폴더. 설정 폴더 기준이고, ~/로 시작하면 홈 기준이다 (여러 도구가 같이 읽는 ~/.agents/skills) */
   skills?: string;
-  /** 새 대화를 띄우는 명령 */
+  /** 새 대화를 띄우는 명령 (그래프 칸의 목록과 muwi run이 쓴다) */
   command: string;
+  /** 첫 말과 함께 새 대화를 띄우는 명령. {prompt} 자리에 첫 말이 들어간다. {prompt}가 없으면 첫 말을 받지 못하는 도구다 */
+  launch: string[];
   /** 하던 대화를 다시 여는 명령. {id} 자리에 세션 id가 들어간다 */
   resume?: string[];
   /** 이 도구가 자식 프로세스에 주는 환경 변수. _로 끝나면 그렇게 시작하는 모든 변수. muwi 명령을 친 도구를 알아보는 데 쓴다 */
   env?: string[];
+  /** 셸 명령에 세션 id를 넘겨주는 환경 변수. 이게 없는 도구는 muwi 명령이 대화를 알 수 없어서, 훅도 터미널을 세션으로 본다 */
+  sessionEnv?: string;
+  /** 통합을 넣은 뒤 사람이 한 번 해야 하는 일 */
+  note?: string;
 };
 
 export const TOOLS: Tool[] = [
-  { id: 'claude', name: 'Claude Code', home: { env: 'CLAUDE_CONFIG_DIR', path: ['.claude'] }, skills: 'skills', command: 'claude', resume: ['claude', '--resume', '{id}'], env: ['CLAUDE_CODE_SESSION_ID', 'CLAUDECODE'] },
-  { id: 'codex', name: 'Codex', home: { env: 'CODEX_HOME', path: ['.codex'] }, instructions: 'AGENTS.md', skills: 'skills', command: 'codex', resume: ['codex', 'resume', '{id}'], env: ['CODEX_'] },
+  { id: 'claude', name: 'Claude Code', home: { env: 'CLAUDE_CONFIG_DIR', path: ['.claude'] }, skills: 'skills', command: 'claude', launch: ['claude', '{prompt}'], resume: ['claude', '--resume', '{id}'], env: ['CLAUDE_CODE_SESSION_ID', 'CLAUDECODE'], sessionEnv: 'CLAUDE_CODE_SESSION_ID' },
+  { id: 'codex', name: 'Codex', home: { env: 'CODEX_HOME', path: ['.codex'] }, instructions: 'AGENTS.md', skills: '~/.agents/skills', command: 'codex', launch: ['codex', '{prompt}'], resume: ['codex', 'resume', '{id}'], env: ['CODEX_'], sessionEnv: 'CODEX_THREAD_ID', note: 'Codex에서 /hooks를 열어 muwi 훅을 한 번 믿어 줘야 훅이 돌아요.' },
+  { id: 'copilot', name: 'GitHub Copilot CLI', home: { env: 'COPILOT_HOME', path: ['.copilot'] }, instructions: 'copilot-instructions.md', skills: 'skills', command: 'copilot', launch: ['copilot', '-i', '{prompt}'], resume: ['copilot', '--resume={id}'], note: 'Copilot CLI는 켤 때만 훅을 읽어요. 열려 있는 세션은 다시 켜요.' },
+  { id: 'cursor', name: 'Cursor CLI', home: { env: 'CURSOR_CONFIG_DIR', path: ['.cursor'] }, skills: 'skills', command: 'cursor-agent', launch: ['cursor-agent', '{prompt}'], resume: ['cursor-agent', '--resume', '{id}'], env: ['CURSOR_AGENT'] },
+  { id: 'qwen', name: 'Qwen Code', home: { env: 'QWEN_HOME', path: ['.qwen'] }, instructions: 'QWEN.md', skills: 'skills', command: 'qwen', launch: ['qwen', '-i', '{prompt}'], resume: ['qwen', '--resume', '{id}'], env: ['QWEN_CODE'] },
+  { id: 'qodercli', name: 'Qoder CLI', home: { env: 'QODER_CONFIG_DIR', path: ['.qoder'] }, instructions: 'AGENTS.md', skills: 'skills', command: 'qodercli', launch: ['qodercli', '-i', '{prompt}'], resume: ['qodercli', '--resume', '{id}'] },
+  { id: 'kimi', name: 'Kimi Code', home: { env: 'KIMI_CODE_HOME', path: ['.kimi-code'] }, instructions: 'AGENTS.md', skills: 'skills', command: 'kimi', launch: ['kimi'], resume: ['kimi', '--session', '{id}'], env: ['KIMI_CODE_'], sessionEnv: 'KIMI_CODE_SESSION_ID' },
+  { id: 'antigravity-cli', name: 'Antigravity CLI', home: { path: ['.gemini', 'config'] }, instructions: 'AGENTS.md', skills: 'skills', command: 'agy', launch: ['agy', '-i', '{prompt}'], resume: ['agy', '--conversation', '{id}'] },
+  { id: 'droid', name: 'Droid', home: { path: ['.factory'] }, instructions: 'AGENTS.md', skills: 'skills', command: 'droid', launch: ['droid', '{prompt}'], resume: ['droid', '--resume', '{id}'] },
+  { id: 'devin', name: 'Devin CLI', home: { path: ['.config', 'devin'] }, instructions: 'AGENTS.md', skills: 'skills', command: 'devin', launch: ['devin', '--', '{prompt}'], resume: ['devin', '-r', '{id}'] },
+  { id: 'grok', name: 'Grok CLI', home: { env: 'GROK_HOME', path: ['.grok'] }, instructions: 'AGENTS.md', skills: 'skills', command: 'grok', launch: ['grok', '{prompt}'], resume: ['grok', '--resume', '{id}'] },
+  { id: 'mastracode', name: 'Mastra Code', home: { path: ['.mastracode'] }, instructions: 'AGENTS.md', skills: 'skills', command: 'mastracode', launch: ['mastracode', '--tui-initial-prompt', '{prompt}'], resume: ['mastracode', 'resume', '{id}'] },
+  { id: 'letta', name: 'Letta Code', home: { env: 'LETTA_CONFIG_DIR', path: ['.letta'] }, skills: 'skills', command: 'letta', launch: ['letta'], resume: ['letta', '--conversation', '{id}'] },
 ];
 
 export const toolById = (id: string | undefined | null): Tool | null => TOOLS.find(t => t.id === id) ?? null;
@@ -45,6 +62,24 @@ export function detectTool(env: NodeJS.ProcessEnv): string {
   }
   return 'unknown';
 }
+
+/** 사용법 skill을 넣는 폴더 */
+export function toolSkills(t: Tool, toolHomeDir: string, home: string): string | null {
+  if (!t.skills) return null;
+  return t.skills.startsWith('~/') ? path.join(home, t.skills.slice(2)) : path.join(toolHomeDir, t.skills);
+}
+
+/** 셸 명령에 세션 id를 넘겨주는 도구면 그 id */
+export function sessionFromEnv(env: NodeJS.ProcessEnv): string | null {
+  for (const t of TOOLS) {
+    const v = t.sessionEnv ? env[t.sessionEnv] : undefined;
+    if (v) return v;
+  }
+  return null;
+}
+
+/** 첫 말과 함께 새 대화를 띄우는 명령 ({prompt} 자리는 그대로 둔다). 모르는 도구면 Claude Code */
+export const launchCommand = (tool: string | undefined): string[] => (toolById(tool) ?? TOOLS[0]).launch;
 
 /** 하던 대화를 다시 여는 명령. 그 도구가 이어 가기를 모르면 null */
 export function resumeCommand(tool: string | undefined, session: string): string[] | null {

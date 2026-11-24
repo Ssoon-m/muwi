@@ -111,6 +111,8 @@ export type SessionInfo = {
   cwd?: string;
   /** 그 세션이 쓰는 모델 (도구의 훅이 알려 줄 때) */
   model?: string;
+  /** 그 도구가 붙인 대화 id (터미널을 세션으로 본 도구) */
+  native?: string;
   /** 이 세션이 지금 붙어 있는 작업 */
   work?: string;
   /** Herdr가 알려 준 지금 상태: working(일하는 중), blocked(입력을 기다림), done·idle(멈춰서 다음 말을 기다림). 모르면 없다 */
@@ -444,6 +446,7 @@ export function sessionsOf(dir: string, events: Event[]): Record<string, Session
       ...(s?.seenAt ? { seenAt: s.seenAt } : {}),
       ...(s?.cwd ? { cwd: s.cwd } : {}),
       ...(s?.model ? { model: s.model } : {}),
+      ...(s?.native ? { native: s.native } : {}),
       ...(s?.work ? { work: s.work } : {}),
     };
   }

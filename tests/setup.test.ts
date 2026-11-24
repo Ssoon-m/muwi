@@ -124,13 +124,14 @@ test('muwi setup: Herdr 앱 칸을 넣고, --codex를 주면 Codex 지침·skill
   assert.deepEqual(fs.readdirSync(mod).sort(), ['arc.svg', 'main.js', 'mod.json']);
   const agents = fs.readFileSync(path.join(h.dir, '.codex', 'AGENTS.md'), 'utf8');
   assert.match(agents, /^# 내 Codex 규칙\n\n<!-- muwi:start/);
-  assert.ok(fs.existsSync(path.join(h.dir, '.codex', 'skills', 'muwi', 'SKILL.md')));
+  // 사용법 skill은 Codex가 읽는 ~/.agents/skills에 넣는다
+  assert.ok(fs.existsSync(path.join(h.dir, '.agents', 'skills', 'muwi', 'SKILL.md')));
 
   removeSetup(h.records);
   assert.equal(fs.existsSync(mod), false);
   assert.equal(fs.existsSync(path.join(h.dir, '.local', 'bin', 'muwi')), false);
   assert.equal(fs.readFileSync(path.join(h.dir, '.codex', 'AGENTS.md'), 'utf8'), '# 내 Codex 규칙\n');
-  assert.equal(fs.existsSync(path.join(h.dir, '.codex', 'skills', 'muwi')), false);
+  assert.equal(fs.existsSync(path.join(h.dir, '.agents', 'skills', 'muwi')), false);
   assert.equal(readInstall(h.records), null);
 });
 

@@ -35,6 +35,8 @@ export const uninstallHooks = (settingsFile: string) => uninstallEntries(setting
 /** Claude Code 훅 입력 → 공통 사건. 코어가 볼 일이 아니면 null */
 export function fromClaude(payload: any, mode: HookMode, env: NodeJS.ProcessEnv = process.env): Happened | null {
   if (payload == null || typeof payload !== 'object') return null;
+  // Cursor는 Claude Code의 설정(~/.claude/settings.json)에 건 훅도 돌린다. 그건 Cursor 통합이 따로 본다
+  if (payload.cursor_version) return null;
   const event = payload.hook_event_name;
   const tool = payload.tool_name;
   const session: string | null = typeof payload.session_id === 'string' && payload.session_id ? payload.session_id : sessionKey(env);
