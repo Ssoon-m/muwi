@@ -123,6 +123,8 @@ export function adoptSpawn(dir: string, key: string, env: NodeJS.ProcessEnv): st
   if (joined && joined.session !== key) return '';
   if (!joined && node.status === 'done') return '';
   attach(dir, key, got.work, env);
+  // 훅이 모델을 알려 주지 않았으면 띄울 때 준 모델을 그 세션의 모델로 적는다 (훅이 알려 준 값이 있으면 그것이 더 정확하다)
+  if (got.model && !readSession(dir, key)?.model) touchSession(dir, key, { model: got.model }, env);
   if (!joined) {
     appendEvent(dir, got.work, { type: 'join', node: got.node, terminal }, key);
     // 기다리는 노드는 그대로 둔다
