@@ -166,9 +166,11 @@ export function runSetup(o: SetupOptions): Install {
   // 적어 둔 것을 불러오지 못했다 (패키지를 지웠거나 옮겼다). 무엇을 넣었는지 모르므로 전 기록을 그대로 둔다.
   // 지우면 그 뒤로 명령과 훅이 다시 불러오지 않고, setup --remove가 보기가 넣은 것을 빼지 못한다
   const failed = pluginFailures();
+  // 불러오지 못한 까닭에는 절대 경로가 적힌다 (Windows에서는 드라이브 글자가 붙는다). 적어 둔 경로도 같은 꼴로 맞춰 비교한다
+  const lostPath = (p: string) => failed.some(f => f.from === path.resolve(p));
   if (failed.length && before) {
-    if (!install.terminals && before.terminals && failed.some(f => f.from === before!.terminals)) install.terminals = before.terminals;
-    const lost = (before.views ?? []).filter(v => failed.some(f => f.from === v.path));
+    if (!install.terminals && before.terminals && lostPath(before.terminals)) install.terminals = before.terminals;
+    const lost = (before.views ?? []).filter(v => lostPath(v.path));
     if (lost.length) install.views = [...(install.views ?? []), ...lost];
     for (const f of failed) log(`불러오지 못해서 그대로 뒀어요: ${f.from} (${f.reason}). 패키지를 옮겼으면 그 패키지의 muwi로 muwi setup을 다시 실행하세요.`);
   }
