@@ -4,8 +4,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, adoptSpawn, guideUpdate, handleHook, sessionInstructions } from './hook.ts';
-import { host, hostFailure, hostPath, loadHost } from './host.ts';
-import { Fail, dur, join, needPlan, out, parseArgs, resolveWork, str, type Args, SCREEN_COMMANDS } from './kit.ts';
+import { cmdBoard } from './board.ts';
+import { cmdPeek, cmdResume, cmdRun, cmdTell, cmdTidy, cmdWait } from './delegate.ts';
+import { Fail, dur, join, needPlan, out, parseArgs, resolveWork, str, type Args } from './kit.ts';
+import { hasTerminals, loadPlugins, pluginFailures, terminals, views } from './plugins.ts';
 import { fromSubagent, markNode } from './node.ts';
 import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
 import { readSession, sessionKey, sessionLabel } from './session.ts';
@@ -41,21 +43,32 @@ const HELP = `사용법: muwi <명령>
   muwi node <id> block "<이유>"         막혔다
   muwi node <id> pause                 하던 노드를 잠시 멈춘다 (다른 노드를 먼저 할 때). 다시 start하면 같은 회차로 이어진다
   muwi flag [<id>] "<메모>"             문제 지점을 표시한다
-  muwi viewed [--work <작업>]          끝난 작업을 본 것으로 적는다 (새 결과에서 뺀다. 그래프 칸이 그 작업을 보여 줄 때 적는다)
+  muwi viewed [--work <작업>]          끝난 작업을 본 것으로 적는다 (새 결과에서 뺀다. 보기가 그 작업을 보여 줄 때 적는다)
+
+  새 세션에 맡기기 (터미널 연결이 있을 때. 멀티플렉서의 터미널 안에서)
+  muwi run <id> "<맡길 일>" [--show pane|tab] [--down] [--name <이름>] [--agent "<도구나 명령>"] [--cwd <폴더>]
+                                       노드를 맡을 세션을 띄운다. 그 세션은 뜨면서 이 작업의 그 노드에 붙는다
+  muwi wait [<id>…] [--timeout <초>]   맡긴 노드가 끝나거나, 사람을 기다리거나, 막히거나, 세션이 멈출 때까지 기다린다
+  muwi peek <id> [--all]               그 노드를 맡은 세션의 화면을 본다
+  muwi tell "<말>"                     (맡은 세션에서) 맡긴 세션에 알린다
+  muwi tell <id> "<말>"                그 노드를 맡은 세션에 말을 보낸다
+  muwi tidy [<작업>]                    끝난 노드를 맡았던 새 세션의 터미널을 닫는다 (사람이 정리하라고 할 때)
+  muwi resume <id> [--new] [--show pane|tab]   닫힌 세션이 하던 노드를 이어 한다 (하던 대화를 다시 열거나 새 대화로)
 
   보기
   muwi status [--all] [--json]         작업 목록 (응답 대기·막힘·새 결과가 위). 오래된 작업은 접어 두고, --all이면 다 보여 준다
   muwi show [<작업>] [--json]           작업 하나의 기록: 노드, 읽은 skill, 계획이 바뀐 이유, 문제 표시
   muwi session                         이 세션이 붙어 있는 작업과 읽은 skill
   muwi guide                           작업 진행 방식(지침)을 보여 준다. muwi가 업데이트되면 muwi 명령의 출력 끝에도 한 번 나온다
+  muwi board [--work <작업>] [--down] [--fit WxH]   보기가 읽는 기록 (JSON)
 
   설치와 설정
-  muwi setup                         터미널용 muwi 명령과 화면(Herdr 앱의 그래프 칸)을 넣는다
+  muwi setup                         터미널용 muwi 명령과, 붙은 터미널 연결·보기를 넣는다
   muwi setup --tools                 아는 AI 도구와, 깔렸는지, muwi 커넥터를 넣었는지 본다
   muwi setup --tool <도구>[,<도구>]   그 AI 도구에 muwi 커넥터(지침·사용법 skill·훅)를 넣는다
   muwi setup --all                   이 컴퓨터에 깔린 도구 전부에 넣는다
-  muwi setup --remove                setup으로 넣은 것을 뺀다 (muwi layout으로 바꾼 화면도 되돌린다)
-  muwi config [<이름> on|off]         설정을 보고 켜고 끈다 (화면이 정하는 설정)
+  muwi setup --remove                setup으로 넣은 것을 뺀다 (보기가 바꾼 것도 보기가 되돌린다)
+  muwi config [<이름> on|off]         설정을 보고 켜고 끈다 (보기가 정하는 설정)
   muwi --version
 
 작업은 --work <이름>으로 고른다. 없으면 이 세션이 붙어 있는 작업을 쓴다.
@@ -525,21 +538,20 @@ function cmdHook(a: Args, dir: string) {
   // 훅이 실패해도 세션은 계속돼야 한다. 문제는 파일에만 남긴다
   try {
     const text = fs.readFileSync(0, 'utf8');
-    // guard: 0.5.x까지의 훅 설정이 셸 명령 앞의 훅을 부르던 이름
-    // 0.5.x의 훅 설정이 부르던 갈래: 계획 없이 고칠 때 알림(nudge)은 0.6.0에서 뺐다
-    if (a.pos[0] === 'nudge') return;
-    const mode = a.pos[0] === 'command' || a.pos[0] === 'guard' ? 'command' : 'record';
+    const mode = a.pos[0] === 'command' ? 'command' : 'record';
     const payload = JSON.parse(text);
     // 입력에 사건 이름을 넣지 않는 도구는 훅 명령이 알려 준다 (--event)
     const named = str(a, 'event');
     if (named && payload && typeof payload === 'object' && !payload.hook_event_name) payload.hook_event_name = named;
-    // muwi가 업데이트돼 버전이나 설치 위치가 바뀌었으면, 전에 setup으로 넣어 둔 명령·화면·커넥터를 새 판으로 맞춘다.
+    // muwi가 업데이트돼 버전이나 설치 위치가 바뀌었으면, 전에 setup으로 넣어 둔 명령·보기·커넥터를 새 판으로 맞춘다.
     // 새 세션이 열릴 때뿐 아니라 열려 있는 세션에 말을 걸 때도 맞춘다 (더 낮은 버전으로는 맞추지 않는다)
-    const result = handleHook(payload, dir, mode, process.env, ROOT, str(a, 'from') ?? 'claude', h => {
+    // 어느 도구의 훅인지는 훅 명령(hooks/tool.sh <도구>)이 알려 준다. 기본 도구는 없다
+    const from = str(a, 'from');
+    if (!from) throw new Error('muwi hook에 --from <도구>가 없어요. muwi setup을 다시 실행하면 훅 명령을 새로 넣어요');
+    const result = handleHook(from, payload, dir, mode, process.env, ROOT, h => {
       if (h.kind === 'session-start' || h.kind === 'prompt') refreshSetup({ root: ROOT, version: version(), dir });
-      // 적어 둔 화면을 불러오지 못했으면 세션이 시작될 때 한 번 남긴다 (그래프 칸과 세션 상태가 안 나오는 까닭)
-      const failed = hostFailure();
-      if (failed && h.kind === 'session-start') hookError(dir, `화면을 불러오지 못했어요: ${failed.from} (${failed.reason})`);
+      // 적어 둔 터미널 연결이나 보기를 불러오지 못했으면 세션이 시작될 때 한 번 남긴다 (그래프와 세션 상태가 안 나오는 까닭)
+      if (h.kind === 'session-start') for (const f of pluginFailures()) hookError(dir, `불러오지 못했어요: ${f.from} (${f.reason})`);
     });
     if (result.stdout) out(result.stdout);
     // 종료 코드와 표준 오류로 답을 받는 도구가 있다 (막을 때 2와 이유)
@@ -565,7 +577,7 @@ function version(): string {
 }
 
 function cmdSetup(a: Args, dir: string) {
-  // 화면이 넣은 것(Herdr 앱의 칸, 바꾼 레이아웃)은 화면이 뺀다
+  // 보기가 넣은 것(그래프 칸, 바꾼 레이아웃)은 보기가 뺀다
   if (a.flags.remove) return removeSetup(dir, out);
   if (a.flags.tools) {
     // 아는 도구와, 이 컴퓨터에 깔렸는지, muwi 커넥터를 넣었는지
@@ -580,13 +592,13 @@ function cmdSetup(a: Args, dir: string) {
     out('넣기: muwi setup --tool <도구>[,<도구>] 또는 muwi setup --all');
     return;
   }
-  // --tool codex,cursor처럼 고르거나, --all로 이 컴퓨터에 깔린 도구 전부에 넣는다. --claude, --codex는 옛 이름
+  // --tool codex,cursor처럼 고르거나, --all로 이 컴퓨터에 깔린 도구 전부에 넣는다
   const picked = (str(a, 'tool') ?? '').split(',').map(x => x.trim()).filter(Boolean);
   const unknown = picked.filter(id => !toolById(id));
   if (unknown.length) throw new Fail(`모르는 도구예요: ${unknown.join(', ')}. 아는 도구: ${TOOLS.map(t => t.id).join(', ')}`);
   const all = a.flags.all ? installedTools().map(t => t.id) : [];
-  // 화면이 있으면 화면도 넣는다 (Herdr 앱의 칸). 화면은 점검하고 지금 화면이 어떤지도 알린다
-  const install = runSetup({ root: ROOT, version: version(), dir, tools: [...picked, ...all], claude: Boolean(a.flags.claude), codex: Boolean(a.flags.codex), log: out, report: true });
+  // 붙은 보기가 있으면 보기도 넣는다 (그래프 칸 같은 것). 보기는 점검하고 지금 어떤지도 알린다
+  const install = runSetup({ root: ROOT, version: version(), dir, tools: [...picked, ...all], log: out, report: true });
   const done = Object.keys(install.tools ?? {});
   if (!done.length) {
     const have = installedTools().map(t => t.id);
@@ -601,43 +613,28 @@ function tellNewer() {
   if (newer) process.stderr.write(`더 새 muwi(${newer.version})가 다른 자리에 있어요: ${newer.bin}\n지금 도는 판은 ${version()} (${ROOT})예요. 새 판으로 옮기려면 그 자리의 명령으로 muwi setup을 실행하세요: "${newer.bin}" setup\n`);
 }
 
-/** 설정의 이름, 기본값, 설명은 화면이 정한다 (화면 규격의 config). 코어에는 설정이 없다 */
+/** 설정의 이름, 기본값, 설명은 보기가 정한다 (보기 규격의 config). 코어에는 설정이 없다 */
 function cmdConfig(a: Args, dir: string) {
   const [key, value] = a.pos;
-  const about = host().config ?? {};
+  const about = Object.assign({}, ...views().map(v => v.config ?? {})) as Record<string, { default: boolean; about: string }>;
   const keys = Object.keys(about);
   const config = readConfig(dir, Object.fromEntries(keys.map(k => [k, about[k].default])));
-  if (key === 'guard') {
-    throw new Fail('push·PR 앞에서 묻기(guard)는 0.6.0에서 뺐어요. 무엇을 승인받고 할지는 muwi가 정하지 않아요. 그 도구의 권한 설정이나 직접 둔 훅을 쓰세요.');
-  }
-  if (key === 'nudge') {
-    throw new Fail('계획 알림(nudge)은 0.6.0에서 뺐어요. muwi는 계획이 없어도 AI가 하려는 일을 막지 않아요. 계획을 적을지는 AI가 일의 크기를 보고 정해요.');
-  }
   if (key !== undefined) {
     if (!keys.includes(key) || (value !== 'on' && value !== 'off')) {
-      throw new Fail(keys.length ? `사용법: muwi config [${keys.join('|')}] on|off` : '바꿀 설정이 없어요 (설정은 화면이 정해요. 화면 없이 쓰고 있어요)');
+      throw new Fail(keys.length ? `사용법: muwi config [${keys.join('|')}] on|off` : '바꿀 설정이 없어요 (설정은 보기가 정해요. 붙은 보기가 없어요)');
     }
     config[key] = value === 'on';
     writeConfig(dir, config);
   }
-  if (!keys.length) return out('설정이 없어요 (설정은 화면이 정해요)');
+  if (!keys.length) return out('설정이 없어요 (설정은 보기가 정해요)');
   for (const k of keys) out(`${k.padEnd(6)} ${config[k] ? 'on ' : 'off'}  ${about[k].about}`);
-}
-
-/** 이 세션은 계획 없이 진행한다고 밝힌다. 계획을 적지 않은 세션의 파일 수정을 막던 안내가 그친다 */
-/**
- * 0.5.x의 명령. 계획 없이 고칠 때의 알림을 넘기려고 있었다. 알림을 뺐으니 적을 것이 없다.
- * 옛 지침을 받은 세션이 불러도 실패하지 않게 받아 준다
- */
-function cmdSkip() {
-  out('계획 없이 진행해요. 0.6.0부터는 muwi skip을 적지 않아도 돼요 (muwi는 계획이 없어도 막지 않아요).');
 }
 
 function cmdSession(dir: string) {
   const key = sessionKey();
-  if (!key) return out('세션을 알 수 없어요 (세션 없이도 기록은 돼요. skill 기록은 Claude Code 훅이 있을 때만 붙어요)');
+  if (!key) return out('세션을 알 수 없어요 (세션 없이도 기록은 돼요. skill 기록은 그 AI 도구의 훅이 알려 줄 때만 붙어요)');
   const s = readSession(dir, key);
-  out(`세션 ${key}${s?.work ? ` · 작업 ${s.work}` : ' · 붙어 있는 작업 없음'}${s?.terminal ? ` · 터미널 ${s.terminal}` : ''}`);
+  out(`세션 ${key}${s?.work ? ` · 작업 ${s.work}` : ' · 붙어 있는 작업 없음'}${s?.terminal ? ` · 터미널 ${s.terminal}${hasTerminals() ? ` (${terminals().name})` : ''}` : ''}`);
   const loaded = Object.keys(s?.loaded ?? {});
   if (loaded.length) out(`읽은 skill: ${loaded.join(', ')}`);
 }
@@ -648,15 +645,14 @@ async function main(argv: string[]) {
   const major = Number(process.versions.node.split('.')[0]);
   if (major < NODE_MIN) throw new Fail(`muwi는 Node ${NODE_MIN} 이상이 필요해요 (지금: ${process.version})`);
   const dir = runsDir();
-  // 화면(Herdr 등)을 불러온다. 없으면 화면 없이 돈다
-  await loadHost(dir);
-  // 화면이 더하는 명령 (muwi run, muwi layout …): 인자는 그 명령이 읽는다
-  const hosted = cmd ? host().commands?.[cmd] : undefined;
-  if (hosted && cmd) {
-    await hosted(rest, dir);
-    if (TELLS.has(cmd)) tellGuide(dir);
-    return;
-  }
+  // 터미널 연결과 보기를 불러온다. 없으면 없는 채로 돈다
+  await loadPlugins(dir);
+  // muwi <명령> --help: 명령을 실행하지 않고 사용법을 보여 준다
+  const opts = rest.indexOf('--') < 0 ? rest : rest.slice(0, rest.indexOf('--'));
+  if (cmd && (opts.includes('--help') || opts.includes('-h'))) return out(help());
+  // 보기가 더하는 명령 (muwi layout …): 인자는 그 명령이 읽는다. 코어의 명령과 이름이 겹치면 코어가 먼저다
+  const viewed = cmd && !CORE.has(cmd) ? views().find(v => v.commands?.[cmd])?.commands?.[cmd] : undefined;
+  if (viewed) return viewed(rest, dir);
   const a = parseArgs(rest);
   // 적는 명령이 끝나면 바뀐 지침이 있는지 보고 출력 끝에 붙인다
   if (cmd && TELLS.has(cmd)) {
@@ -673,8 +669,8 @@ async function main(argv: string[]) {
  */
 function adoptHere(dir: string) {
   const key = sessionKey();
-  if (!key || !host().place(process.env)) return;
-  // 이미 작업에 붙은 세션은 다시 묻지 않는다 (명령마다 화면에 묻지 않게)
+  if (!key) return;
+  // 이미 작업에 붙은 세션은 다시 묻지 않는다 (명령마다 다시 찾지 않게)
   if (readSession(dir, key)?.work) return;
   try {
     adoptSpawn(dir, key, process.env);
@@ -683,19 +679,25 @@ function adoptHere(dir: string) {
   }
 }
 
-/** 사용법: 코어의 명령과 화면이 더하는 명령 */
+/** 사용법: 코어의 명령과 보기가 더하는 명령 */
 const help = () => {
-  const extra = host().help;
+  const extra = views().map(v => v.help).filter(Boolean).join('\n\n');
   if (!extra) return HELP;
   const at = HELP.indexOf('\n  설치와 설정');
   return `${HELP.slice(0, at)}\n${extra}\n${HELP.slice(at)}`;
 };
 
+/** 코어의 명령. 보기가 같은 이름의 명령을 더해도 코어가 먼저다 */
+const CORE = new Set([
+  'plan', 'add', 'remove', 'node', 'flag', 'viewed', 'show', 'status', 'session', 'guide', 'board',
+  'run', 'wait', 'peek', 'tell', 'tidy', 'resume', 'hook', 'setup', 'config', 'version', '--version', '-v', 'help', '--help', '-h',
+]);
+
 /** 맡은 세션이 처음 실행할 만한 명령들: 맡은 노드의 진행을 적는 명령 */
-const ADOPTS = new Set(['node', 'start', 'done', 'wait', 'block', 'add', 'remove']);
+const ADOPTS = new Set(['node', 'add', 'remove', 'tell']);
 
 /** 지침이 바뀌었을 때 알려 줄 명령들: 세션이 계획과 진행을 적는 명령 */
-const TELLS = new Set(['plan', 'add', 'remove', 'node', 'start', 'done', 'wait', 'block', 'run']);
+const TELLS = new Set(['plan', 'add', 'remove', 'node', 'run', 'tell']);
 
 async function run(cmd: string | undefined, a: Args, dir: string) {
   switch (cmd) {
@@ -703,37 +705,39 @@ async function run(cmd: string | undefined, a: Args, dir: string) {
     case 'add': return cmdAdd(a, dir);
     case 'remove': return cmdRemove(a, dir);
     case 'node': return cmdNode(a.pos[0], a.pos[1], a.pos[2], a, dir);
-    // 짧게: muwi start <id>, muwi done <id> "<결과>"
-    case 'start': case 'done': case 'wait': case 'block': return cmdNode(a.pos[0], cmd, a.pos[1], a, dir);
     case 'flag': return cmdFlag(a, dir);
     case 'viewed': return cmdViewed(a, dir);
     case 'show': return cmdShow(a, dir);
     case 'status': return cmdStatus(a, dir);
+    case 'board': return cmdBoard(a, dir);
+    case 'run': return cmdRun(a, dir);
+    case 'wait': return cmdWait(a, dir);
+    case 'peek': return cmdPeek(a, dir);
+    case 'tell': return cmdTell(a, dir);
+    case 'tidy': return cmdTidy(a, dir);
+    case 'resume': return cmdResume(a, dir);
     case 'hook': return cmdHook(a, dir);
     case 'setup': return cmdSetup(a, dir);
     case 'config': return cmdConfig(a, dir);
     case 'version': case '--version': case '-v':
       out(version());
       return tellNewer();
-    case 'skip': return cmdSkip();
     case 'session': return cmdSession(dir);
     case 'guide': return cmdGuide(dir);
     case undefined: case 'help': case '--help': case '-h': return out(help());
-    default:
-      // 화면이 더하는 명령인데 화면이 없다
-      if (cmd && SCREEN_COMMANDS.has(cmd)) {
-        const failed = hostFailure();
-        if (failed) throw new Fail(`muwi ${cmd}는 화면이 더하는 명령인데, 화면을 불러오지 못했어요: ${failed.from} (${failed.reason}). 화면 패키지를 옮겼으면 그 패키지의 muwi로 muwi setup을 다시 실행하세요.`);
-        throw new Fail(`muwi ${cmd}는 Herdr 앱 화면과 함께 쓰는 명령이에요. @muwi/herdr-app으로 깔면 생겨요.`);
-      }
+    default: {
+      // 보기가 더하는 명령일 수 있는데 보기를 불러오지 못했다
+      const failed = pluginFailures();
+      if (failed.length) throw new Fail(`모르는 명령: ${cmd}. 적어 둔 모듈을 불러오지 못했어요: ${failed.map(f => `${f.from} (${f.reason})`).join(', ')}. 패키지를 옮겼으면 그 패키지의 muwi로 muwi setup을 다시 실행하세요.`);
       throw new Fail(`모르는 명령: ${cmd}\n\n${help()}`);
+    }
   }
 }
 
 const argv = process.argv.slice(2);
 main(argv)
   // 사람이 터미널에서 친 명령이면 npm에 새 판이 있을 때 알린다 (update.ts)
-  .then(() => afterCommand({ cmd: argv[0], current: version(), root: ROOT, hostFile: hostPath() }))
+  .then(() => afterCommand({ cmd: argv[0], current: version(), root: ROOT, plugins: [...views().map(v => v.package), terminals().package] }))
   .catch(e => {
     process.stderr.write((e instanceof Error ? e.message : String(e)) + '\n');
     process.exit(e instanceof Fail ? e.code : 1);

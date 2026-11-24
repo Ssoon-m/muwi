@@ -1,0 +1,32 @@
+{
+  "name": "@muwi/herdr",
+  "version": "0.7.1",
+  "description": "muwi를 Herdr 터미널에: 새 세션에 맡기기, 세션이 살아 있는지 보기",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "muwi": "bin/muwi.js"
+  },
+  "exports": {
+    "./terminals": "./src/terminals.ts",
+    "./hc": "./src/hc.ts",
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@muwi/core": "workspace:*"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ssoon-m/muwi.git",
+    "directory": "packages/herdr"
+  },
+  "scripts": {
+    "test": "node --test \"tests/*.test.ts\""
+  }
+}

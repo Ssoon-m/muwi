@@ -15,7 +15,7 @@ export const STATUSES: NodeStatus[] = ['todo', 'doing', 'waiting', 'blocked', 'd
 /** 누가 하나: me 계획을 낸 세션이 직접, subagent 서브에이전트, session 새 세션. 정하는 것은 계획을 쓰는 쪽(AI)이다 */
 export type RunBy = 'me' | 'subagent' | 'session';
 export const RUN_BY: RunBy[] = ['me', 'subagent', 'session'];
-/** 새 세션을 Herdr 앱의 어디에 보여 줄지 */
+/** 새 세션을 어디에 보여 줄지: 부른 터미널 옆의 칸, 새 탭. 터미널 연결이 그 멀티플렉서에 맞게 놓는다 */
 export type ShowIn = 'pane' | 'tab';
 export const SHOW_IN: ShowIn[] = ['pane', 'tab'];
 
@@ -73,10 +73,15 @@ export type EventBody =
   | ({ type: 'skill'; skill: string; via: 'tool' | 'file'; carried?: boolean; agent?: string } & Where)
   /** 서브에이전트가 시작하고 끝난 것. 훅이 적는다. node·attempt: 뜰 때 그 세션이 하고 있던 노드 (그 노드를 도운 것으로 본다) */
   | ({ type: 'agent'; agent: string; what: 'start' | 'stop'; kind?: string } & Where)
-  /** 노드를 맡길 새 세션을 띄웠다 (muwi run). terminal은 Herdr 터미널 주소, task는 그 세션에 맡긴 말 */
-  | { type: 'spawn'; node: string; terminal: string; name?: string; show?: ShowIn; task?: string; /** 새 세션을 띄운 폴더 */ cwd?: string; /** 띄우는 명령에 준 모델 */ model?: string }
-  /** muwi run으로 뜬 세션이 맡은 노드에 붙었다. 그 터미널에서 나중에 시작한 다른 대화는 다시 붙이지 않는다 */
-  | { type: 'join'; node: string; terminal: string }
+  /**
+   * 노드를 맡길 새 세션을 띄웠다 (muwi run). id: 이번에 띄운 것의 이름표 (뜬 세션이 환경 변수로 받는다).
+   * terminal: 터미널 연결이 알려 준 주소, from: 띄운 쪽의 터미널 (맡은 세션이 muwi tell로 알릴 곳), task: 그 세션에 맡긴 말
+   */
+  | { type: 'spawn'; id: string; node: string; terminal: string; from?: string; name?: string; show?: ShowIn; task?: string; /** 새 세션을 띄운 폴더 */ cwd?: string; /** 띄우는 명령에 준 모델 */ model?: string }
+  /** muwi run으로 뜬 세션이 맡은 노드에 붙었다. spawn: 붙은 spawn의 id. 같은 터미널에서 나중에 시작한 다른 대화는 다시 붙이지 않는다 */
+  | { type: 'join'; node: string; spawn: string; terminal?: string }
+  /** 맡은 세션이 맡긴 쪽에 알렸다 (muwi tell) */
+  | { type: 'tell'; node?: string; text: string; to?: string; sent: boolean }
   | { type: 'flag'; node?: string; text: string }
   | { type: 'session'; what: 'compact' }
   /** 사람이 끝난 작업을 봤다 (그래프 칸이 사람이 고른 그 작업을 보여 줄 때 적는다). 끝난 뒤 처음 볼 때만 적는다 */

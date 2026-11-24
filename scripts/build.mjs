@@ -2,7 +2,7 @@
 // 배포할 패키지를 만든다: packages/<이름>/dist에 .ts를 .js로 바꾼 사본과 배포용 package.json을 둔다.
 // Node는 node_modules 안의 .ts를 실행하지 않아서(타입 지우기를 하지 않는다) 배포할 때만 .js로 바꾼다. 개발할 때는 .ts를 그대로 실행한다.
 // 타입은 Node에 든 stripTypeScriptTypes로 지운다 (따로 받을 도구가 없다). 타입 자리는 빈칸으로 바뀌어 줄 위치가 그대로다.
-//   node scripts/build.mjs            두 패키지 모두
+//   node scripts/build.mjs            모든 패키지
 //   node scripts/build.mjs core       하나만 (packages/의 폴더 이름)
 import fs from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
@@ -14,6 +14,7 @@ const ROOT = path.resolve(import.meta.dirname, '..');
 /** 패키지(packages/<폴더>)마다 그대로 옮길 것 (.ts를 바꾸지 않는다: 도구에 넣는 플러그인 파일처럼 .ts로 남아야 하는 것이 있다) */
 const PACKAGES = {
   core: ['bin', 'hooks', 'skills', 'connectors', 'src/find-node.sh'],
+  herdr: ['bin'],
   'herdr-app': ['bin', 'app'],
 };
 

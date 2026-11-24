@@ -1,19 +1,23 @@
 #!/usr/bin/env node
-// 릴리스: 두 패키지(@muwi/core, @muwi/herdr-app)를 같은 버전으로 올리고, 버전 커밋과 태그를 push한다.
+// 릴리스: 모든 패키지(@muwi/core, @muwi/herdr, @muwi/herdr-app)를 같은 버전으로 올리고, 버전 커밋과 태그를 push한다.
 // npm에 올리는 것은 태그를 받은 GitHub Actions(.github/workflows/release.yml)가 한다.
 // CHANGELOG는 릴리스할 때 사람이 정리한다. 그 버전의 섹션이 없으면 지난 릴리스 이후 커밋을 패키지별로 보여 주고 멈춘다.
 //   pnpm release 0.7.1             CHANGELOG를 확인하고 버전 커밋과 v0.7.1 태그를 push한다
 //   pnpm release 0.7.1 --dry-run   무엇을 할지만 보여 준다
-//   node scripts/release.mjs verify 0.7.1   (release.yml) 두 패키지 버전과 CHANGELOG 섹션이 맞는지
+//   node scripts/release.mjs verify 0.7.1   (release.yml) 모든 패키지 버전과 CHANGELOG 섹션이 맞는지
 //   node scripts/release.mjs notes 0.7.1    (release.yml) 그 버전의 CHANGELOG 내용. GitHub 릴리스 노트로 쓴다
+//   node scripts/release.mjs registered     (release.yml) 모든 패키지가 npm에 있는지. 처음 올리는 패키지가 있으면 멈춘다
+//   pnpm release stage                      npm에 아직 없는 패키지를 자리만 잡아 올린다 (0.0.0-stage). npm 로그인이 필요하다
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-/** 함께 올리는 패키지 (packages/<폴더>). 코어가 먼저다 */
+/** 함께 올리는 패키지 (packages/<폴더>). 기대는 패키지보다 먼저 온다: 코어 → 터미널 연결 → 보기 */
 const PACKAGES = [
   { folder: 'core', name: '@muwi/core' },
+  { folder: 'herdr', name: '@muwi/herdr' },
   { folder: 'herdr-app', name: '@muwi/herdr-app' },
 ];
 const CHANGELOG = path.join(ROOT, 'CHANGELOG.md');
@@ -94,7 +98,7 @@ function missingNotes(version) {
     '',
     groups,
     '',
-    '적는 모양 (패키지별 소제목, 둘 다 해당하면 ### 공통):',
+    '적는 모양 (패키지별 소제목, 여럿에 해당하면 ### 공통):',
     '',
     `## ${version} (${today()})`,
     '',
@@ -104,6 +108,80 @@ function missingNotes(version) {
     '',
     '- …',
   ].join('\n');
+}
+
+// ---- 처음 올리는 패키지
+// Actions는 Trusted Publishing(토큰 없이)으로 올린다. Trusted Publisher는 npm에 이미 있는 패키지에만 등록할 수 있어서,
+// 새 패키지는 사람이 자리만 잡아 한 번 올리고(0.0.0-stage) 등록한 뒤에 릴리스한다.
+// 그 전에 태그를 달면 앞 패키지만 올라가고 새 패키지에서 멈춰 패키지마다 버전이 어긋난다. 그래서 릴리스 앞뒤에서 확인한다
+
+const STAGE = '0.0.0-stage';
+const npmCmd = (args, o = {}) => execFileSync('npm', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], shell: process.platform === 'win32', ...o });
+
+/** npm에 아직 없는 패키지들. npm에 물어보지 못하면(네트워크 등) 멈춘다 */
+export function missingOnNpm(view = name => npmCmd(['view', name, 'name'])) {
+  const missing = [];
+  for (const p of PACKAGES) {
+    try {
+      view(p.name);
+    } catch (e) {
+      const said = `${e.stderr ?? ''}${e.message ?? ''}`;
+      if (/E404|404 Not Found|is not in this registry/.test(said)) missing.push(p);
+      else throw new Stop(`npm에 ${p.name}이 있는지 확인하지 못했어요: ${said.trim().split('\n')[0]}`);
+    }
+  }
+  return missing;
+}
+
+function firstPublishHelp(missing) {
+  const names = missing.map(p => p.name).join(', ');
+  return [
+    `npm에 아직 없는 패키지가 있어요: ${names}`,
+    'Actions는 Trusted Publishing으로 올리는데, Trusted Publisher는 npm에 있는 패키지에만 등록할 수 있어요. 릴리스 전에 한 번만 하세요.',
+    '  1. npm login 뒤 pnpm release stage   (자리만 잡는 0.0.0-stage를 올려요)',
+    ...missing.map(p => `  2. https://www.npmjs.com/package/${p.name}/access 의 Trusted Publisher에 GitHub Actions, Ssoon-m/muwi, release.yml 등록`),
+    '  3. 다시 실행하세요',
+  ].join('\n');
+}
+
+/** 태그를 받은 Actions가 아무것도 올리기 전에 부른다 */
+function registered() {
+  const missing = missingOnNpm();
+  if (missing.length) throw new Stop(firstPublishHelp(missing));
+  console.log(`npm에 모든 패키지가 있어요: ${PACKAGES.map(p => p.name).join(', ')}`);
+}
+
+/** npm에 없는 패키지를 자리만 잡아 올린다: package.json과 README만 든 0.0.0-stage. 이미 있는 패키지는 건드리지 않는다 */
+function stage(dryRun) {
+  const missing = missingOnNpm();
+  if (!missing.length) {
+    console.log('npm에 없는 패키지가 없어요. 할 일이 없어요.');
+    return;
+  }
+  if (!dryRun) {
+    try {
+      npmCmd(['whoami']);
+    } catch {
+      throw new Stop('npm에 로그인하지 않았어요. npm login 뒤에 다시 실행하세요.');
+    }
+  }
+  for (const p of missing) {
+    const manifest = JSON.parse(fs.readFileSync(manifestFile(p.folder), 'utf8'));
+    if (dryRun) {
+      console.log(`--dry-run: ${p.name}@${STAGE}를 올릴 거예요`);
+      continue;
+    }
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-stage-'));
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
+      name: p.name, version: STAGE, description: 'Temporary package placeholder for staged publishing',
+      license: manifest.license, repository: manifest.repository,
+    }, null, 2));
+    fs.writeFileSync(path.join(dir, 'README.md'), `# ${p.name}\n\nmuwi 릴리스 전에 자리만 잡아 둔 판입니다. https://github.com/Ssoon-m/muwi\n`);
+    // 2단계 인증을 묻는 프롬프트가 보이도록 입출력을 이 터미널에 잇는다
+    npmCmd(['publish', '--access', 'public'], { cwd: dir, stdio: 'inherit' });
+    fs.rmSync(dir, { recursive: true, force: true });
+    console.log(`올렸어요: ${p.name}@${STAGE}. Trusted Publisher 등록: https://www.npmjs.com/package/${p.name}/access (GitHub Actions, Ssoon-m/muwi, release.yml)`);
+  }
 }
 
 /** package.json의 version만 바꾼다 (다른 줄의 모양은 그대로 둔다) */
@@ -119,7 +197,7 @@ function release(version, dryRun) {
   checkVersion(version);
   const current = PACKAGES.map(p => versionOf(p.folder));
   if (new Set(current).size !== 1) {
-    throw new Stop(`두 패키지의 버전이 달라요: ${PACKAGES.map((p, i) => `${p.name} ${current[i]}`).join(', ')}. 같게 맞춘 뒤 실행하세요.`);
+    throw new Stop(`패키지들의 버전이 달라요: ${PACKAGES.map((p, i) => `${p.name} ${current[i]}`).join(', ')}. 같게 맞춘 뒤 실행하세요.`);
   }
   if (!higher(version, current[0])) throw new Stop(`새 버전은 지금 버전보다 높아야 해요 (새 버전: ${version}, 지금: ${current[0]}).`);
 
@@ -137,6 +215,9 @@ function release(version, dryRun) {
 
   const notes = notesOf(version);
   if (!notes) throw new Stop(missingNotes(version));
+  // 처음 올리는 패키지가 있으면 태그를 달기 전에 멈춘다 (Actions에서 앞 패키지만 올라가고 멈추지 않게)
+  const missing = missingOnNpm();
+  if (missing.length) throw new Stop(firstPublishHelp(missing));
 
   const who = `${tryGit('config', 'user.name') ?? '?'} <${tryGit('config', 'user.email') ?? '?'}>`;
   const plan = [
@@ -158,7 +239,7 @@ function release(version, dryRun) {
   console.log([...plan, '', 'GitHub Actions가 npm에 올리고 GitHub 릴리스를 만들어요: https://github.com/Ssoon-m/muwi/actions/workflows/release.yml'].join('\n'));
 }
 
-/** 태그를 받은 Actions가 부른다: 두 패키지 버전이 태그와 같고, CHANGELOG에 그 섹션이 있는지 */
+/** 태그를 받은 Actions가 부른다: 모든 패키지 버전이 태그와 같고, CHANGELOG에 그 섹션이 있는지 */
 function verify(version) {
   checkVersion(version);
   const wrong = PACKAGES.filter(p => versionOf(p.folder) !== version);
@@ -179,6 +260,8 @@ if (import.meta.main) {
   try {
     if (cmd === 'verify') verify(rest[0]);
     else if (cmd === 'notes') notes(rest[0]);
+    else if (cmd === 'registered') registered();
+    else if (cmd === 'stage') stage(rest.includes('--dry-run'));
     else release(cmd, rest.includes('--dry-run'));
   } catch (e) {
     if (!(e instanceof Stop)) throw e;

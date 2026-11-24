@@ -14,11 +14,11 @@ muwi를 설치하고, AI에게 일을 하나 맡겨서 그 진행을 그래프�
 
 | 필요한 것 | 확인하는 방법 |
 | --- | --- |
-| AI 도구 (이 문서는 Claude Code로 설명합니다) | 터미널에서 `claude --version` |
+| AI 도구 (이 문서는 예로 Claude Code를 씁니다. 다른 도구도 `muwi setup --tool <도구>`로 같습니다) | 터미널에서 그 도구의 버전 확인 (예: `claude --version`) |
 | [Herdr 앱](https://herdr.dev) | 앱을 열고, 그 안의 터미널에서 진행합니다 |
 | Node 24 이상과 npm | `node -v`, `npm -v` |
 
-Windows에서는 Git for Windows도 필요합니다. Claude Code가 훅을 Git Bash로 실행합니다. 다른 점은 [Windows에서 쓰기](reference/setup.md#windows에서-쓰기)에 있습니다.
+Windows에서는 Git for Windows도 필요합니다. AI 도구가 muwi 훅을 Git Bash의 `sh`로 실행합니다. 다른 점은 [Windows에서 쓰기](reference/setup.md#windows에서-쓰기)에 있습니다.
 
 nvm이나 mise로 Node를 골라도 됩니다. Herdr가 띄우는 세션은 셸 설정을 읽지 않지만, muwi가 로그인 셸에 물어 터미널과 같은 Node를 찾습니다. 찾는 방법은 [문제 해결하기](guides/troubleshooting.md#node-24-이상이-필요하다고-나올-때)에 있습니다.
 
@@ -33,19 +33,19 @@ npm i -g @muwi/herdr-app
 ## 2. AI 도구에 커넥터 넣기
 
 ```sh
-muwi setup --tool claude     # 깔린 AI 도구 전부에 넣으려면 muwi setup --all
+muwi setup --tool claude     # 쓰는 도구 이름으로 (codex, gemini …). 깔린 AI 도구 전부에 넣으려면 muwi setup --all
 ```
 
 `muwi setup`이 넣는 것은 이렇습니다.
 
 - 터미널과 그래프 칸이 쓰는 `muwi` 명령 (`~/.local/bin/muwi`, Windows는 `muwi.cmd`도)
 - Herdr 앱의 그래프 칸
-- 고른 AI 도구의 커넥터: AI에게 주는 지침, 사용법 skill, 진행을 지켜보는 훅. Claude Code는 훅을 `~/.claude/settings.json`에, 사용법을 `~/.claude/skills/muwi`에 넣습니다. 고치기 전의 설정은 `settings.json.muwi.bak`으로 남기고, 다른 훅은 건드리지 않습니다.
+- 고른 AI 도구의 커넥터: AI에게 주는 지침, 사용법 skill, 진행을 지켜보는 훅. Claude Code라면 훅을 `~/.claude/settings.json`에, 사용법을 `~/.claude/skills/muwi`에 넣습니다 (도구마다 넣는 곳은 [다른 AI 도구에 넣기](reference/setup.md#다른-ai-도구에-넣기)). 고치기 전의 설정은 `settings.json.muwi.bak`으로 남기고, 다른 훅은 건드리지 않습니다.
 
-그다음 Claude Code 세션을 새로 여세요. 훅은 새로 연 세션부터 돕니다.
+그다음 그 도구의 세션을 새로 여세요. 훅은 새로 연 세션부터 돕니다.
 
 ```sh
-claude
+claude          # 예: Claude Code. 쓰는 도구를 켜세요 (codex, gemini …)
 ```
 
 ## 3. 화면에 muwi 넣기
@@ -69,7 +69,7 @@ muwi layout
 
 ## 4. 일 맡기기
 
-연습할 저장소에서 Claude Code 세션을 열고, 파일을 몇 개 고쳐야 하는 일을 시키세요. 명령을 붙이지 않고 평소처럼 말하면 됩니다.
+연습할 저장소에서 AI 도구의 세션을 열고, 파일을 몇 개 고쳐야 하는 일을 시키세요. 명령을 붙이지 않고 평소처럼 말하면 됩니다.
 
 ```
 formatPrice가 1000 이상이면 천 단위 쉼표를 넣게 해줘. 테스트도 추가해줘.

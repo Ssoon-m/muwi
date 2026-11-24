@@ -39,16 +39,17 @@ test('새 버전 알림: 캐시만 보고 알릴지와 다시 물어볼지를 �
 test('새 버전 알림: 업데이트 명령에 쓸 패키지는 사람이 npm으로 깐 패키지다', () => {
   const t = tmp();
   // 저장소에서 .ts로 돌 때는 묻지 않는다
-  assert.equal(installedPackage(pkg(path.join(t, 'repo', 'packages', 'core'), '@muwi/core', false), null), null);
+  assert.equal(installedPackage(pkg(path.join(t, 'repo', 'packages', 'core'), '@muwi/core', false)), null);
   // 코어만 깔았다
-  assert.equal(installedPackage(pkg(path.join(t, 'g1', 'lib', 'node_modules', '@muwi', 'core'), '@muwi/core'), null), '@muwi/core');
-  // @muwi/herdr-app을 깔았다: 코어는 그 안에 따라 들어온다. 화면을 아직 적어 두지 않았어도 안다
+  assert.equal(installedPackage(pkg(path.join(t, 'g1', 'lib', 'node_modules', '@muwi', 'core'), '@muwi/core')), '@muwi/core');
+  // 다른 muwi 패키지(@muwi/herdr-app)를 깔았다: 코어는 그 안에 따라 들어온다. 보기를 아직 적어 두지 않았어도 안다
   const herdr = pkg(path.join(t, 'g2', 'lib', 'node_modules', '@muwi', 'herdr-app'), '@muwi/herdr-app');
   const nested = pkg(path.join(herdr, 'node_modules', '@muwi', 'core'), '@muwi/core');
-  assert.equal(installedPackage(nested, null), '@muwi/herdr-app');
-  // 화면을 불러왔으면 화면 패키지로 안다 (pnpm처럼 코어가 다른 자리에 있어도)
+  assert.equal(installedPackage(nested), '@muwi/herdr-app');
+  // 보기나 터미널 연결을 불러왔으면 그 패키지로 안다 (pnpm처럼 코어가 다른 자리에 있어도). 보기가 먼저다
   const elsewhere = pkg(path.join(t, 'g3', 'store', '@muwi', 'core'), '@muwi/core');
-  assert.equal(installedPackage(elsewhere, path.join(herdr, 'src', 'host.js')), '@muwi/herdr-app');
+  assert.equal(installedPackage(elsewhere, ['@muwi/herdr-app', '@muwi/herdr']), '@muwi/herdr-app');
+  assert.equal(installedPackage(elsewhere, [undefined, '@muwi/herdr']), '@muwi/herdr');
 });
 
 test('새 버전 알림: 사람이 터미널에서 친 명령에서만, 하루 한 번 알리고 npm에는 따로 묻는다', () => {
@@ -62,7 +63,7 @@ test('새 버전 알림: 사람이 터미널에서 친 명령에서만, 하루 �
   const run = (o: { cmd?: string; tty?: boolean; env?: NodeJS.ProcessEnv; at?: number } = {}) => {
     const said: string[] = [];
     const asked: string[] = [];
-    afterCommand({ cmd: o.cmd ?? 'status', current: '0.7.0', root, hostFile: null, env: o.env ?? env, tty: o.tty ?? true, now: o.at ?? now, write: x => said.push(x), check: name => asked.push(name) });
+    afterCommand({ cmd: o.cmd ?? 'status', current: '0.7.0', root, env: o.env ?? env, tty: o.tty ?? true, now: o.at ?? now, write: x => said.push(x), check: name => asked.push(name) });
     return { said: said.join(''), asked };
   };
   // AI 도구가 실행한 명령(터미널이 아님), 훅, 그래프 칸, 끈 경우에는 조용하다

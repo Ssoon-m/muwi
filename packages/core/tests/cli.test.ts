@@ -5,13 +5,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 
-/** sh 스크립트(hook.sh, find-node.sh, bin/muwi)를 직접 시험하는 테스트. Windows에서는 CI가 Git Bash로 따로 확인한다 */
+/** sh 스크립트(tool.sh, find-node.sh, bin/muwi)를 직접 시험하는 테스트. Windows에서는 CI가 Git Bash로 따로 확인한다 */
 const SH = process.platform === 'win32' ? { skip: 'sh 스크립트를 시험한다 (Windows는 CI의 Git Bash 단계에서 본다)' } : {};
 
 
 const CLI = path.resolve(import.meta.dirname, '../src/cli.ts');
-/** 시험용 화면 모듈 (화면이 더하는 명령·설정) */
-const FIXTURE_HOST = path.resolve(import.meta.dirname, 'fixture-host.ts');
+/** 시험용 보기 모듈 (보기가 더하는 명령·설정) */
+const FAKE_VIEW = path.resolve(import.meta.dirname, 'fake-view.ts');
+/** 시험용 터미널 연결 */
+const FAKE_TERMINALS = path.resolve(import.meta.dirname, 'fake-terminals.ts');
 
 
 /** 깨끗한 환경에서 muwi를 실행한다 (바깥 세션의 환경 변수가 섞이지 않게) */
@@ -78,7 +80,7 @@ test('진행: 노드 상태를 적는다. 순서는 막지 않고, 없는 노드
   assert.equal(muwi(['node', 'check', 'start']).code, 0);
   assert.match(muwi(['node', 'read', 'start']).out, /● read 시작 \(w, 0\/3 끝\)/);
   assert.match(muwi(['node', 'read', 'done', '요구사항 2건']).out, /✓ read 끝 \(w, 1\/3 끝\)/);
-  assert.match(muwi(['done', 'check']).out, /2\/3 끝/); // 짧은 꼴
+  assert.match(muwi(['node', 'check', 'done']).out, /2\/3 끝/);
   assert.match(muwi(['node', 'nope', 'start']).err, /없는 노드예요: nope\. 있는 노드: read, impl, check/);
   assert.match(muwi(['node', 'impl', 'wait']).err, /무엇을 기다리는지/);
   assert.match(muwi(['node', 'impl', 'block']).err, /왜 막혔는지/);
@@ -154,7 +156,7 @@ test('muwi show·status: 사람이 읽는 글과 JSON', () => {
   const { muwi } = bench();
   muwi(['plan', '--work', 'w', '--request', '작업해줘', PLAN]);
   muwi(['node', 'read', 'start']);
-  muwi(['hook'], { input: JSON.stringify({ session_id: 'lead', hook_event_name: 'PostToolUse', tool_name: 'Skill', tool_input: { skill: 'spec-reader' }, tool_response: { success: true } }) });
+  muwi(['hook', '--from', 'claude'], { input: JSON.stringify({ session_id: 'lead', hook_event_name: 'PostToolUse', tool_name: 'Skill', tool_input: { skill: 'spec-reader' }, tool_response: { success: true } }) });
   muwi(['node', 'read', 'done', '요구사항 2건']);
   muwi(['node', 'impl', 'wait', 'A안과 B안 중 어느 쪽?']);
   muwi(['flag', 'read', '미정 항목을 놓침']);
@@ -177,34 +179,29 @@ test('훅이 돌지 않는 Claude Code 세션이 계획을 적으면 무엇이 �
   assert.equal(plain.code, 0, plain.err);
   assert.match(plain.out, /이 세션에서는 muwi 훅이 돌지 않아요[\s\S]*읽은 skill과 서브에이전트가 한 일은 기록되지 않아요/);
   // 훅이 보고 있는 세션은 알리지 않는다
-  muwi(['hook'], { session: null, env: { CLAUDE_CODE_SESSION_ID: 'new-1', CLAUDECODE: '1' }, input: JSON.stringify({ session_id: 'new-1', hook_event_name: 'SessionStart', source: 'startup' }) });
+  muwi(['hook', '--from', 'claude'], { session: null, env: { CLAUDE_CODE_SESSION_ID: 'new-1', CLAUDECODE: '1' }, input: JSON.stringify({ session_id: 'new-1', hook_event_name: 'SessionStart', source: 'startup' }) });
   const hooked = muwi(['plan', '--work', 'w2', '--request', '작업해줘', PLAN], { session: null, env: { CLAUDE_CODE_SESSION_ID: 'new-1', CLAUDECODE: '1' } });
   assert.doesNotMatch(hooked.out, /훅이 돌지 않아요/);
 });
 
 test('muwi hook: 깨진 입력에도 조용히 끝난다 (세션을 방해하지 않는다)', () => {
   const { dir, muwi } = bench();
-  const r = muwi(['hook'], { input: '{not json' });
+  const r = muwi(['hook', '--from', 'claude'], { input: '{not json' });
   assert.equal(r.code, 0);
   assert.equal(r.out, '');
   assert.match(fs.readFileSync(path.join(dir, '.hook-errors.log'), 'utf8'), /JSON/);
-  // 셸 명령은 막지 않는다. 무엇을 승인받고 할지는 muwi가 정하지 않는다 (push 앞에서 묻기는 0.6.0에서 뺐다).
-  // 0.5.x의 훅 설정이 부르는 이름(guard)도 그대로 받아서 조용히 지나간다
+  // 셸 명령은 막지 않는다. 무엇을 승인받고 할지는 muwi가 정하지 않는다
   const push = JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git push origin HEAD' } });
-  assert.equal(muwi(['hook', 'command'], { input: push }).out, '');
-  assert.equal(muwi(['hook', 'guard'], { input: push }).out, '');
-  const gone = muwi(['config', 'guard', 'on']);
-  assert.notEqual(gone.code, 0);
-  assert.match(gone.err, /0\.6\.0에서 뺐어요/);
-  assert.equal(muwi(['hook', 'guard'], { input: push }).out, '');
+  assert.equal(muwi(['hook', 'command', '--from', 'claude'], { input: push }).out, '');
+  // 계획 없는 세션의 파일 수정도 막지 않는다
   const editing = JSON.stringify({ session_id: 'new-session', hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: '/repo/src/a.ts' } });
-  // 계획 없는 세션의 파일 수정도 막지 않는다 (0.5.x의 계획 알림은 0.6.0에서 뺐다). 옛 훅 설정이 부르는 nudge도 조용히 지나간다
-  assert.equal(muwi(['hook', 'nudge'], { input: editing }).out, '');
-  assert.equal(muwi(['hook'], { input: editing }).out, '');
-  // 옛 지침을 받은 세션이 muwi skip을 불러도 실패하지 않는다
-  const skip = muwi(['skip', '오타 수정'], { session: 'new-session' });
-  assert.equal(skip.code, 0);
-  assert.match(skip.out, /적지 않아도 돼요/);
+  assert.equal(muwi(['hook', '--from', 'claude'], { input: editing }).out, '');
+  // 어느 도구의 훅인지 모르면 읽지 않는다 (기본 도구는 없다). 세션은 막지 않고 까닭만 남긴다
+  const start = JSON.stringify({ session_id: 's9', hook_event_name: 'SessionStart', source: 'startup' });
+  const unnamed = muwi(['hook'], { input: start });
+  assert.equal(unnamed.code, 0);
+  assert.equal(unnamed.out, '');
+  assert.match(fs.readFileSync(path.join(dir, '.hook-errors.log'), 'utf8'), /--from <도구>가 없어요/);
 });
 
 test('이름 없이 낸 계획은 이 세션이 하던 작업만 바꾼다 (같은 폴더의 남의 작업을 덮어쓰지 않는다)', () => {
@@ -220,7 +217,7 @@ test('이름 없이 낸 계획은 이 세션이 하던 작업만 바꾼다 (같�
 test('muwi config·version·setup', () => {
   const { dir, muwi } = bench();
   assert.match(muwi(['--version']).out, /^\d+\.\d+\.\d+\n$/);
-  assert.match(muwi(['config', 'nudge', 'off']).err, /계획 알림\(nudge\)은 0\.6\.0에서 뺐어요/);
+  assert.match(muwi(['config', 'nudge', 'off']).err, /바꿀 설정이 없어요/);
   // 빈 홈 폴더에 setup: 터미널용 명령만 생긴다
   const setup = muwi(['setup']);
   assert.equal(setup.code, 0, setup.err);
@@ -235,11 +232,11 @@ test('muwi config·version·setup', () => {
   assert.equal(fs.existsSync(wrapper), false);
 });
 
-test('hook.sh: 볼 것만 넘기고, 세션 시작에는 지침을 돌려준다', SH, () => {
+test('tool.sh claude: 볼 것만 넘기고, 세션 시작에는 지침을 돌려준다. 세션이 일하는지·말을 끝냈는지·끝났는지도 넘긴다', SH, () => {
   const { dir } = bench();
-  const script = path.resolve(import.meta.dirname, '../hooks/hook.sh');
+  const script = path.resolve(import.meta.dirname, '../hooks/tool.sh');
   const hook = (payload: object, ...args: string[]) =>
-    spawnSync('sh', [script, ...args], { input: JSON.stringify(payload), encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir } }).stdout;
+    spawnSync('sh', [script, 'claude', ...args], { input: JSON.stringify(payload), encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir } }).stdout;
   const started = hook({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup', cwd: '/repo' });
   assert.match(JSON.parse(started).hookSpecificOutput.additionalContext, /muwi plan --work/);
   // skill과 상관없는 파일 읽기는 기록하지 않는다
@@ -249,8 +246,14 @@ test('hook.sh: 볼 것만 넘기고, 세션 시작에는 지침을 돌려준다'
   // 계획 없는 세션의 파일 수정에도 답하지 않는다 (0.5.x의 훅 설정이 부르는 nudge 갈래는 조용히 지나간다)
   const edit = { session_id: 's1', hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: '/repo/src/app.ts' } };
   assert.equal(hook(edit, 'nudge'), '');
-  // 사람이 말할 때의 입력은 넘기지 않는다
+  // 사람이 말하면 일하는 중, 말을 끝내면 멈춤, 세션이 끝나면 닫힘으로 적는다 (문맥은 넣지 않는다)
+  const session = () => JSON.parse(fs.readFileSync(path.join(dir, '.sessions', 's1.json'), 'utf8'));
   assert.equal(hook({ session_id: 's1', hook_event_name: 'UserPromptSubmit', prompt: '다음 일' }), '');
+  assert.equal(session().turn, 'working');
+  assert.equal(hook({ session_id: 's1', hook_event_name: 'Stop', stop_hook_active: false }), '');
+  assert.equal(session().turn, 'done');
+  assert.equal(hook({ session_id: 's1', hook_event_name: 'SessionEnd', reason: 'exit' }), '');
+  assert.ok(session().endedAt);
 });
 
 test('출력을 받는 쪽이 먼저 닫아도 (muwi show | head) 오류를 쏟지 않는다', SH, () => {
@@ -366,60 +369,63 @@ test('계획은 선으로 이어진 그래프다: muwi add에 자리를 주지 �
   assert.doesNotMatch(flat.out, /이어지지 않은 노드/);
 });
 
-test('화면 없이: 기록과 보기는 되고, 화면이 더하는 명령은 무엇이 필요한지 알린다. 화면은 setup이 적어 둔 경로에서 불러오고, 불러오지 못해도 훅은 그대로 돈다', () => {
+test('터미널 연결과 보기 없이: 기록과 보기는 되고, 새 세션 명령은 무엇이 필요한지 알린다. 연결과 보기는 setup이 적어 둔 경로에서 불러오고, 불러오지 못해도 훅은 그대로 돈다', () => {
   const { dir, muwi } = bench();
   assert.equal(muwi(['plan', '--work', 'w', '--request', '작업해줘', PLAN]).code, 0);
   assert.match(muwi(['status']).out, /작업 중 +w/);
   assert.match(muwi(['show', 'w']).out, /연수원명 클릭 시 상세 이동/);
-  // Herdr 화면이 더하는 명령
+  // 새 세션에 맡기는 명령은 코어에 있다. 터미널 연결이 없으면 무엇이 필요한지 알린다
   const run = muwi(['run', 'impl', '구현해줘']);
   assert.equal(run.code, 1);
-  assert.match(run.err, /Herdr 앱 화면과 함께 쓰는 명령이에요\. @muwi\/herdr-app으로 깔면 생겨요/);
-  assert.doesNotMatch(muwi(['--help']).out, /muwi run/);
-  // 설정은 화면이 정한다
+  assert.match(run.err, /새 세션을 띄우려면 터미널 연결이 필요한데, 붙은 연결이 없어요/);
+  assert.match(muwi(['--help']).out, /muwi run <id>/);
+  // 설정은 보기가 정한다
   assert.match(muwi(['config']).out, /설정이 없어요/);
-  // $MUWI_HOST로 준 화면: 화면의 명령, 사용법, 설정이 붙는다
-  const withHost = { env: { MUWI_HOST: FIXTURE_HOST } };
-  assert.match(muwi(['hello', '여러분'], withHost).out, /^hello 여러분/);
-  assert.match(muwi(['--help'], withHost).out, /시험 화면\n  muwi hello <말>[\s\S]*설치와 설정/);
-  assert.match(muwi(['config'], withHost).out, /demo +on +시험용 설정/);
-  assert.match(muwi(['config', 'demo', 'off'], withHost).out, /demo +off/);
-  assert.match(muwi(['config', 'nope', 'on'], withHost).err, /사용법: muwi config \[demo\] on\|off/);
-  // muwi setup은 화면의 경로를 적어 둔다. 그 뒤로는 $MUWI_HOST 없이도(훅, 그래프 칸이 부르는 명령) 그 화면을 쓴다
-  assert.equal(muwi(['setup'], withHost).code, 0);
+  // $MUWI_VIEWS로 준 보기: 보기의 명령, 사용법, 설정, board에 더한 값이 붙는다
+  const withView = { env: { MUWI_VIEWS: FAKE_VIEW, MUWI_TERMINALS: FAKE_TERMINALS } };
+  assert.match(muwi(['hello', '여러분'], withView).out, /^hello 여러분/);
+  assert.match(muwi(['--help'], withView).out, /시험 보기\n  muwi hello <말>[\s\S]*설치와 설정/);
+  // 어느 명령이든 --help는 실행하지 않고 사용법을 보여 준다 (보기의 명령도)
+  assert.match(muwi(['hello', '--help'], withView).out, /^사용법: muwi <명령>/);
+  assert.match(muwi(['config'], withView).out, /demo +on +시험용 설정/);
+  assert.match(muwi(['config', 'demo', 'off'], withView).out, /demo +off/);
+  assert.match(muwi(['config', 'nope', 'on'], withView).err, /사용법: muwi config \[demo\] on\|off/);
+  assert.equal(JSON.parse(muwi(['board'], withView).out).demo, 'from-view');
+  // muwi setup은 연결과 보기의 경로를 적어 둔다. 그 뒤로는 환경 변수 없이도(훅, 보기가 부르는 명령) 같은 것을 쓴다
+  assert.equal(muwi(['setup'], withView).code, 0);
   const setupFile = path.join(dir, 'setup.json');
-  assert.equal(JSON.parse(fs.readFileSync(setupFile, 'utf8')).host, FIXTURE_HOST);
+  const saved = JSON.parse(fs.readFileSync(setupFile, 'utf8'));
+  assert.equal(saved.terminals, FAKE_TERMINALS);
+  assert.deepEqual(saved.views, [{ path: FAKE_VIEW, installed: { mod: path.join(dir, 'fixture-mod') } }]);
   assert.match(muwi(['hello', '다시']).out, /^hello 다시/);
-  // 적어 둔 화면이 없어졌으면 화면 없이 돈다. 훅도 그대로 지침을 돌려준다
-  fs.writeFileSync(setupFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(setupFile, 'utf8')), host: '/no/such/host.ts' }));
+  // 적어 둔 보기가 없어졌으면 보기 없이 돈다. 훅도 그대로 지침을 돌려준다
+  fs.writeFileSync(setupFile, JSON.stringify({ ...saved, views: [{ path: '/no/such/view.ts' }] }));
   assert.doesNotMatch(muwi(['--help']).out, /muwi hello/);
-  const hook = muwi(['hook'], { session: null, input: JSON.stringify({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' }) });
+  assert.match(muwi(['hello']).err, /모르는 명령: hello\. 적어 둔 모듈을 불러오지 못했어요: .*no.such.view\.ts/);
+  const hook = muwi(['hook', '--from', 'claude'], { session: null, input: JSON.stringify({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' }) });
   assert.equal(hook.code, 0);
   assert.match(JSON.parse(hook.out).hookSpecificOutput.additionalContext, /작업 진행 방식 \(muwi\)/);
 });
 
-test('적어 둔 화면을 불러오지 못할 때: 업데이트 뒤에 다시 맞춰도 화면이 넣은 것을 잃지 않고, 까닭을 남기고, 빼면 화면 칸도 뺀다', () => {
+test('적어 둔 보기를 불러오지 못할 때: 업데이트 뒤에 다시 맞춰도 기록을 잃지 않고, 까닭을 남기고, 뺄 때 알린다', () => {
   const { dir, muwi } = bench();
-  assert.equal(muwi(['setup'], { env: { MUWI_HOST: FIXTURE_HOST } }).code, 0);
+  assert.equal(muwi(['setup'], { env: { MUWI_VIEWS: FAKE_VIEW } }).code, 0);
   const setupFile = path.join(dir, 'setup.json');
   const mod = path.join(dir, 'fixture-mod');
   assert.ok(fs.existsSync(mod));
-  // muwi를 업데이트했는데(기록된 버전이 다르다) 화면 패키지는 옮겨져서 불러오지 못한다
-  fs.writeFileSync(setupFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(setupFile, 'utf8')), version: '0.0.1', host: '/no/such/host.ts' }));
-  const hook = muwi(['hook'], { session: null, input: JSON.stringify({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' }) });
+  // muwi를 업데이트했는데(기록된 버전이 다르다) 보기 패키지는 옮겨져서 불러오지 못한다
+  const lost = { path: '/no/such/view.ts', installed: { mod } };
+  fs.writeFileSync(setupFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(setupFile, 'utf8')), version: '0.0.1', views: [lost] }));
+  const hook = muwi(['hook', '--from', 'claude'], { session: null, input: JSON.stringify({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' }) });
   assert.equal(hook.code, 0);
   const after = JSON.parse(fs.readFileSync(setupFile, 'utf8'));
   assert.notEqual(after.version, '0.0.1');
-  assert.equal(after.host, '/no/such/host.ts');
-  assert.deepEqual(after.hosted, { mod });
-  assert.match(fs.readFileSync(path.join(dir, '.hook-errors.log'), 'utf8'), /화면을 불러오지 못했어요: .*no.such.host\.ts/);
-  // 화면 명령은 화면이 없다고 하지 않고 불러오지 못한 까닭을 알린다
-  assert.match(muwi(['run', 'impl', '구현해줘']).err, /화면이 더하는 명령인데, 화면을 불러오지 못했어요: .*no.such.host\.ts/);
-  // 화면 없이 빼도 화면이 넣은 칸은 뺀다
+  assert.deepEqual(after.views, [lost]);
+  assert.match(fs.readFileSync(path.join(dir, '.hook-errors.log'), 'utf8'), /불러오지 못했어요: .*no.such.view\.ts/);
+  // 보기 없이 빼면 그 보기가 넣은 것은 모르므로 알린다
   const removed = muwi(['setup', '--remove']);
   assert.equal(removed.code, 0, removed.err);
-  assert.match(removed.out, /화면을 불러오지 못해서 화면 칸만 뺐어요/);
-  assert.equal(fs.existsSync(mod), false);
+  assert.match(removed.out, /보기를 불러오지 못해서 그 보기가 넣은 것은 빼지 못했어요: .*no.such.view\.ts/);
 });
 
 test('setup.json이 깨져도 명령과 훅은 돈다 (훅은 지침을 준다). muwi setup은 새로 적는다', () => {
@@ -427,7 +433,7 @@ test('setup.json이 깨져도 명령과 훅은 돈다 (훅은 지침을 준다).
   const setupFile = path.join(dir, 'setup.json');
   fs.writeFileSync(setupFile, '{"root": "/x", "version"');
   assert.equal(muwi(['status']).code, 0);
-  const hook = muwi(['hook'], { session: null, input: JSON.stringify({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' }) });
+  const hook = muwi(['hook', '--from', 'claude'], { session: null, input: JSON.stringify({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' }) });
   assert.equal(hook.code, 0);
   assert.match(JSON.parse(hook.out).hookSpecificOutput.additionalContext, /작업 진행 방식 \(muwi\)/);
   assert.match(fs.readFileSync(path.join(dir, '.hook-errors.log'), 'utf8'), /setup\.json \(JSON이 아니에요\)/);

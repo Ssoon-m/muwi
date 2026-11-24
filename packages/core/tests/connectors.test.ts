@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { handleHook } from '../src/hook.ts';
-import { setHost } from '../src/host.ts';
-import { placeHost } from './place-host.ts';
+import { setTerminals } from '../src/plugins.ts';
+import { fakeTerminals } from './fake-terminals.ts';
 import { ADAPTERS, adapterOf } from '../src/connectors/index.ts';
 import { gaps } from '../src/connectors/types.ts';
 import { removeTomlRegion } from '../src/connectors/hooked.ts';
@@ -14,7 +14,7 @@ import { TOOLS, detectTool, launchCommand, resumeCommand, toolById, toolHome } f
 import { readInstall, removeSetup, runSetup } from '../src/setup.ts';
 
 // 세션 id를 주지 않는 도구는 자리(터미널)를 세션으로 본다. 자리를 알려 주는 화면이 있을 때를 시험한다
-setHost(placeHost);
+setTerminals(fakeTerminals);
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const tmp = (name: string) => fs.mkdtempSync(path.join(os.tmpdir(), `muwi-${name}-`));
@@ -67,7 +67,7 @@ test('어느 도구에서도 파일을 고치려는 입력에는 아무 답도 �
   for (const [id, payload] of Object.entries(EDITS)) {
     // 고치기 전의 입력은 코어가 볼 일이 아니다
     assert.equal(ADAPTERS[id].from(payload, 'record', ENV(tmp('home'))), null, id);
-    const r = handleHook(payload, dir, 'record', ENV(tmp('home')), ROOT, id);
+    const r = handleHook(id, payload, dir, 'record', ENV(tmp('home')), ROOT);
     assert.ok(!r.code, `${id}: 종료 코드로 막았다 (${r.code})`);
     assert.ok(!r.stderr, `${id}: 표준 오류로 답했다`);
     // 답이 늘 JSON이어야 하는 도구는 빈 JSON을, 나머지는 아무것도 내지 않는다
@@ -78,14 +78,14 @@ test('어느 도구에서도 파일을 고치려는 입력에는 아무 답도 �
 test('세션: 셸 명령에 세션 id를 넘겨주지 않는 도구는 훅도 터미널을 세션으로 보고, 그 도구의 대화 id는 따로 적는다', () => {
   const herdr = { HOME: tmp('home'), TEST_PLACE: 't9' } as NodeJS.ProcessEnv;
   const qwen = ADAPTERS.qwen.from({ hook_event_name: 'SessionStart', session_id: 's1' }, 'record', herdr)!;
-  assert.deepEqual([qwen.session, qwen.native], ['place-t9', 's1']);
+  assert.deepEqual([qwen.session, qwen.native], ['terminal-t9', 's1']);
   // Codex는 셸 명령에도 같은 id를 준다 (CODEX_THREAD_ID): 그 id가 세션이다
   const codex = ADAPTERS.codex.from({ hook_event_name: 'SessionStart', session_id: 's1', model: 'gpt-x' }, 'record', herdr)!;
   assert.deepEqual([codex.session, codex.native, codex.model], ['s1', undefined, 'gpt-x']);
 });
 
 test('세션이 시작될 때: 지침 파일이 없는 도구에는 훅이 지침을 넣고, 있는 도구에는 두 번 넣지 않는다', () => {
-  const start = (id: string, payload: any) => handleHook(payload, tmp('rec'), 'record', ENV(tmp('home')), ROOT, id);
+  const start = (id: string, payload: any) => handleHook(id, payload, tmp('rec'), 'record', ENV(tmp('home')), ROOT);
   // Claude Code, Cursor, Letta Code: 지침 파일이 없다
   assert.match(JSON.parse(start('claude', { hook_event_name: 'SessionStart', session_id: 's1' }).stdout!).hookSpecificOutput.additionalContext, /작업 진행 방식 \(muwi\)/);
   assert.match(JSON.parse(start('cursor', { hook_event_name: 'sessionStart', conversation_id: 's1' }).stdout!).additional_context, /작업 진행 방식 \(muwi\)/);
@@ -219,7 +219,7 @@ test('Gemini CLI: 사건 이름이 달라도 같은 사건으로 바꾸고, 설�
   // 셸 명령에 세션 id를 넘겨주지 않아서 터미널을 세션으로 본다
   // 셸 명령에 세션 id를 넘겨주지 않아서 터미널을 세션으로 본다
   const start = g.from({ hook_event_name: 'SessionStart', session_id: 'g1', source: 'startup' }, 'record', env)!;
-  assert.deepEqual([start.kind, start.session, start.native], ['session-start', 'place-t5', 'g1']);
+  assert.deepEqual([start.kind, start.session, start.native], ['session-start', 'terminal-t5', 'g1']);
   // 파일을 고치려는 입력은 보지 않는다 (막지 않는다)
   assert.equal(g.from({ hook_event_name: 'BeforeTool', session_id: 'g1', tool_name: 'write_file', tool_input: { file_path: FILE } }, 'record', env), null);
   const skill = g.from({ hook_event_name: 'AfterTool', session_id: 'g1', tool_name: 'activate_skill', tool_input: { name: 'team-rules' } }, 'record', env) as any;

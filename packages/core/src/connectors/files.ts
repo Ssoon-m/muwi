@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-/** Git Bash가 읽을 경로: Windows에서는 C:\\… 대신 C:/… (Windows의 Claude Code는 훅을 Git Bash로 실행한다) */
+/** Git Bash가 읽을 경로: Windows에서는 C:\\… 대신 C:/… (Windows의 AI 도구는 훅 명령을 Git Bash의 sh로 실행한다) */
 export const shPath = (p: string, platform: NodeJS.Platform) => (platform === 'win32' ? p.replace(/\\/g, '/') : p);
 
 export const BLOCK_START = '<!-- muwi:start';

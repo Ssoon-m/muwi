@@ -13,7 +13,7 @@ import { modelIn } from '../src/connectors/tools.ts';
 import { appendEvent, clock, readEvents, readPlan, writePlan, type NodeStatus, type Plan, type RunBy } from '../src/store.ts';
 import { PAST_DAYS, loadBoard, loadView } from '../src/view.ts';
 
-/** sh 스크립트(hook.sh, find-node.sh, bin/muwi)를 직접 시험하는 테스트. Windows에서는 CI가 Git Bash로 따로 확인한다 */
+/** sh 스크립트(tool.sh, find-node.sh, bin/muwi)를 직접 시험하는 테스트. Windows에서는 CI가 Git Bash로 따로 확인한다 */
 const SH = process.platform === 'win32' ? { skip: 'sh 스크립트를 시험한다 (Windows는 CI의 Git Bash 단계에서 본다)' } : {};
 
 
@@ -39,7 +39,7 @@ function setup(nodes: { id: string; after?: string[]; run?: RunBy }[], work = 'w
   };
   /** Claude Code가 훅에 넘기는 입력을 흉내 낸다 */
   const hook = (payload: Record<string, unknown>, mode: 'record' | 'command' = 'record', session = 'lead', env: NodeJS.ProcessEnv = ENV) =>
-    handleHook({ session_id: session, ...payload }, dir, mode, env, path.resolve(import.meta.dirname, '..'));
+    handleHook('claude', { session_id: session, ...payload }, dir, mode, env, path.resolve(import.meta.dirname, '..'));
   const sub = {
     start: (agent: string, session = 'lead') => hook({ hook_event_name: 'SubagentStart', agent_id: agent, agent_type: 'general-purpose' }, 'record', session),
     stop: (agent: string, session = 'lead') => hook({ hook_event_name: 'SubagentStop', agent_id: agent, agent_type: 'general-purpose' }, 'record', session),
@@ -249,11 +249,11 @@ test('명령에서 노드 시작을 읽는다', () => {
   assert.equal(nodeStartIn('mymuwi node x start'), null);
 });
 
-test('hook.sh: 서브에이전트의 시작·끝과 서브에이전트가 실행한 muwi 명령을 넘긴다', SH, () => {
+test('tool.sh claude: 서브에이전트의 시작·끝과 서브에이전트가 실행한 muwi 명령을 넘긴다', SH, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-hooksh-'));
-  const sh = path.resolve(import.meta.dirname, '../hooks/hook.sh');
+  const sh = path.resolve(import.meta.dirname, '../hooks/tool.sh');
   const run = (payload: object, mode: string[] = []) =>
-    spawnSync('sh', [sh, ...mode], { input: JSON.stringify(payload), encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir, MUWI_SESSION: '' } });
+    spawnSync('sh', [sh, 'claude', ...mode], { input: JSON.stringify(payload), encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir, MUWI_SESSION: '' } });
   const plan: Plan = { work: 'w1', createdAt: '', updatedAt: '', nodes: [{ id: 'main', title: '구현', after: [], status: 'todo' }, { id: 'rev', title: '리뷰', after: [], status: 'todo' }] };
   writePlan(dir, plan);
   clock.now = () => new Date();
@@ -295,15 +295,14 @@ test('Node가 낮으면 무엇이 필요한지 알린다 (조용히 실패하지
   // 기록 폴더에 node 경로 같은 것을 남기지 않는다
   assert.deepEqual(fs.readdirSync(dir), []);
 
-  // 훅은 실패해도 세션을 방해하지 않으므로, 세션이 시작될 때 한 번 알려 준다
-  const sh = path.resolve(import.meta.dirname, '../hooks/hook.sh');
+  // 훅도 같다: 어느 도구든 무엇이 필요한지 알리고 실패로 끝난다 (도구는 훅의 실패로 세션을 막지 않는다)
+  const sh = path.resolve(import.meta.dirname, '../hooks/tool.sh');
   const start = JSON.stringify({ hook_event_name: 'SessionStart', session_id: 's1' });
-  const told = spawnSync('sh', [sh], { input: start, encoding: 'utf8', env: env(`${old}:/usr/bin:/bin`) });
-  assert.equal(told.status, 0);
-  const note = JSON.parse(told.stdout).hookSpecificOutput;
-  assert.equal(note.hookEventName, 'SessionStart');
-  assert.match(note.additionalContext, /Node가 v22\.14\.0라서 muwi가 동작하지 않는다\. Node 24 이상이 필요하다/);
-  const fine = spawnSync('sh', [sh], { input: start, encoding: 'utf8', env: env(`${path.dirname(process.execPath)}:/usr/bin:/bin`) });
+  const told = spawnSync('sh', [sh, 'claude'], { input: start, encoding: 'utf8', env: env(`${old}:/usr/bin:/bin`) });
+  assert.notEqual(told.status, 0);
+  assert.equal(told.stdout, '');
+  assert.match(told.stderr, /muwi: Node 24 이상이 필요해요 \(지금: v22\.14\.0\)/);
+  const fine = spawnSync('sh', [sh, 'claude'], { input: start, encoding: 'utf8', env: env(`${path.dirname(process.execPath)}:/usr/bin:/bin`) });
   assert.match(JSON.parse(fine.stdout).hookSpecificOutput.additionalContext, /작업 진행 방식 \(muwi\)/);
 });
 
@@ -362,7 +361,7 @@ test('셸 설정 없이 실행되면 로그인 셸의 PATH에서 Node를 찾고 
   assert.equal(ran.status, 0, ran.stderr);
   assert.match(ran.stdout, /^\d+\.\d+\.\d+/);
   const start = JSON.stringify({ hook_event_name: 'SessionStart', session_id: 's1' });
-  const hook = spawnSync('sh', [path.resolve(import.meta.dirname, '../hooks/hook.sh')], { input: start, encoding: 'utf8', env: env('/usr/bin:/bin') });
+  const hook = spawnSync('sh', [path.resolve(import.meta.dirname, '../hooks/tool.sh'), 'claude'], { input: start, encoding: 'utf8', env: env('/usr/bin:/bin') });
   assert.match(JSON.parse(hook.stdout).hookSpecificOutput.additionalContext, /작업 진행 방식 \(muwi\)/);
 });
 
@@ -439,7 +438,7 @@ test('뺀 노드의 기록은 남는다. 하던 노드를 빼면 알려 주고, 
 
 test('muwi show: 다시 한 노드는 회차별로, 훅이 보지 못한 세션과 한꺼번에 적은 노드는 그렇게 적는다', () => {
   const { dir, muwi } = bench();
-  const hook = (payload: object) => spawnSync(process.execPath, [CLI, 'hook'], { input: JSON.stringify(payload), encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir } });
+  const hook = (payload: object) => spawnSync(process.execPath, [CLI, 'hook', '--from', 'claude'], { input: JSON.stringify(payload), encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir } });
   // 훅이 한 번도 돌지 않은 세션
   assert.equal(muwi(['node', 'read', 'start'], { MUWI_SESSION: 'bare', HC_TERMINAL_ID: '' }).code, 1); // 붙은 작업이 없다
   assert.equal(muwi(['node', 'read', 'start', '--work', 'shop-1'], { MUWI_SESSION: 'bare' }).code, 0);

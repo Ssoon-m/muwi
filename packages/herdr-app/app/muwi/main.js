@@ -65,8 +65,6 @@ const QUIET_SINCE = new Map();
 const RUN_NAME = { me: "직접", subagent: "서브에이전트", session: "새 세션" };
 /** 세션 상태의 급한 정도 (Herdr의 Agents 칸과 같은 순서) */
 const AGENT_RANK = { blocked: 3, working: 2, done: 1, idle: 0 };
-/** 세션이 시작될 때 muwi 훅이 터미널에 붙이는 이름표 (그 터미널에서 지금 도는 세션) */
-const LABEL_SESSION = "muwi.session";
 /** Herdr가 직접 내는 레이아웃. muwi layout은 이걸 복제해서 바꾼다 */
 const SHIPPED = ["main", "terminals", "win98"];
 
@@ -191,6 +189,7 @@ const SAMPLE = (() => {
     ],
     errors: [],
     sessions: [{ key: "s1", terminal: "t1", work: "sample", seenAt: "2026-01-01T00:00:00.000Z" }],
+    owners: { t1: "s1" },
     suggest: false,
     selected: {
       ...work, nodes, edges: [], outside: [], compacts: [], flags: [], lead: "s1", helpers: { sessions: 1, subagents: 2 },
@@ -497,19 +496,20 @@ export default class Muwi extends View {
 
   /**
    * 터미널 → 그 터미널에서 지금 도는 세션이 붙어 있는 작업 (계획이 없으면 undefined).
-   * 세션이 시작될 때 터미널에 붙인 이름표가 있으면 그것을, 없으면 그 터미널에서 가장 최근에 본 세션을 쓴다
+   * muwi board가 알려 준 그 터미널의 지금 세션(owners: 그 터미널에서 가장 늦게 시작해 아직 끝나지 않은 세션)을 쓰고,
+   * 없으면 그 터미널에서 가장 최근에 본 세션을 쓴다
    */
   links() {
     const sessions = this.data?.sessions ?? [];
     const map = new Map();
     for (const s of sessions) if (!map.has(s.terminal)) map.set(s.terminal, s.work); // 최근 것이 먼저 온다
-    if (checking()) return map;
-    for (const t of terminals() ?? []) {
-      const key = t.labels?.[LABEL_SESSION];
-      if (!key) continue;
-      map.set(t.address, sessions.find((x) => x.key === key)?.work);
-    }
+    for (const [terminal, key] of Object.entries(this.data?.owners ?? {})) map.set(terminal, sessions.find((x) => x.key === key)?.work);
     return map;
+  }
+
+  /** 그 터미널에서 지금 도는 세션 (muwi board의 owners). 모르면 null */
+  ownerOf(terminal) {
+    return this.data?.owners?.[terminal] ?? null;
   }
 
   /**
@@ -570,12 +570,12 @@ export default class Muwi extends View {
     const terminal = this.terminalOf(view, n);
     if (!terminal) return null;
     if (!this.alive(terminal)) return { why: "터미널이 닫혔어요", closed: terminal };
-    // 띄우는 중인 새 세션은 아직 이름표가 붙기 전이다
+    // 띄우는 중인 새 세션은 아직 그 터미널의 세션으로 적히기 전이다
     if (n.status === "todo" && n.spawn?.terminal === terminal) return { go: terminal };
     // 그 노드를 한 대화가 아직 그 터미널에 있으면 간다 (그 뒤에 다른 작업을 했어도 그 대화는 이 노드를 기억한다).
-    // 이름표가 없으면 옛 판에서 시작한 대화라 그 대화로 본다
-    const label = checking() ? null : (terminals() ?? []).find((x) => x.address === terminal)?.labels?.[LABEL_SESSION];
-    if (!label || label === n.session) return { go: terminal };
+    // 그 터미널의 세션을 모르면 그 대화로 본다
+    const owner = checking() ? null : this.ownerOf(terminal);
+    if (!owner || owner === n.session) return { go: terminal };
     return { why: "그 터미널에서는 지금 다른 대화가 돌고 있어요" };
   }
 
@@ -731,7 +731,7 @@ export default class Muwi extends View {
                 view.helpers?.subagents ? `서브에이전트 ${view.helpers.subagents}` : null,
                 talk ? `대화: ${talk.name} · 열려 있음` : "대화: 닫힘"].filter(Boolean).join(" · ") : `${works.length}개 작업`))
           // 대화가 닫혔으면 새 대화가 muwi 기록을 읽고 이어 가게 연다 (그 작업을 하던 폴더에서)
-          .when(Boolean(continuable), (el) => el.child(div().id("head-continue").flex_none().text_color(t.accent).cursor_pointer()
+          .when(Boolean(continuable) && Boolean(view.launcher), (el) => el.child(div().id("head-continue").flex_none().text_color(t.accent).cursor_pointer()
             .hover((s) => s.text_color(t.foreground))
             .on_click((_e, cx) => { this.openTerminal("head-continue", this.launchWith(view.launcher, `${view.work} 작업 이어서 해줘`), view.cwd, view.work); cx.notify(); })
             .child("새 대화로 이어 가기 ›")))))
@@ -832,14 +832,15 @@ export default class Muwi extends View {
     const folder = [want, view.cwd].find((p) => this.folderOk(view, p)) ?? null;
     const moved = want && !this.folderOk(view, want) ? want : null;
     // 띄우는 명령과 다시 여는 명령은 muwi가 그 세션의 도구에 맞게 알려 준다 (Claude Code, Codex …)
-    const tool = (key && view.launch?.[key]) || view.launcher || ["claude", "{prompt}"];
+    // 어느 도구로 띄울지 모르면(기록에 도구가 없다) 새 대화 버튼을 내지 않는다. 기본 도구는 없다
+    const tool = (key && view.launch?.[key]) || view.launcher || null;
     const again = key ? view.resume?.[key] : null;
     const buttons = [];
     // 대화가 남아 있고 그 폴더가 그대로일 때만 다시 열 수 있다 (아니면 "No conversation found" 같은 말로 끝난다)
     if (again && !moved) {
       buttons.push(this.openRow(t, `resume-${n.id}`, "하던 대화 다시 열기", "전에 하던 대화 내용이 그대로 남아 있어요", again, folder, n.id));
     }
-    if (n.status !== "done") {
+    if (n.status !== "done" && tool) {
       buttons.push(this.openRow(t, `continue-${n.id}`, "새 대화로 이어 가기", unstarted ? "muwi 기록(계획·맡긴 말)을 읽고 이어 가요" : "muwi 기록(계획·결과)을 읽고 이어 가요",
         this.launchWith(tool, `${view.work} 작업의 ${n.id} 노드 이어서 해줘`), folder, n.id));
     }
@@ -873,8 +874,7 @@ export default class Muwi extends View {
 
   /** 첫 말과 함께 새 대화를 띄우는 명령. muwi가 그 도구의 모양으로 알려 준 것에 첫 말을 넣는다 (첫 말을 못 받는 도구는 명령만) */
   launchWith(template, prompt) {
-    const list = Array.isArray(template) && template.length ? template : ["claude", "{prompt}"];
-    return list.map((part) => (part === "{prompt}" ? prompt : part));
+    return template.map((part) => (part === "{prompt}" ? prompt : part));
   }
 
   /** 새 탭에서 명령을 연다 (그 세션이 일하던 폴더에서). 연달아 눌러도 한 번만 연다 */
@@ -1044,7 +1044,7 @@ export default class Muwi extends View {
 
   /**
    * 그 작업을 한 대화가 지금 열려 있는 터미널. 그 작업에 지금 붙어 있는 대화 → 계획을 낸 대화 → 나머지 순.
-   * 열려 있다 = 그 터미널에 그 대화(세션)의 이름표가 그대로 붙어 있고 에이전트가 돌고 있다 (/clear나 새로 띄운 대화는 다른 이름표다)
+   * 열려 있다 = 그 터미널의 지금 세션(muwi board의 owners)이 그 대화이고 에이전트가 돌고 있다 (/clear나 새로 띄운 대화는 다른 세션이다)
    */
   talkOf(w, links) {
     if (!w || checking()) return null;
@@ -1052,9 +1052,9 @@ export default class Muwi extends View {
     if (!keys.length) return null;
     const running = agents();
     const live = new Set(running.map((a) => a.address));
-    const open = (terminals() ?? []).filter((x) => live.has(x.address) && keys.includes(x.labels?.[LABEL_SESSION]));
+    const open = (terminals() ?? []).filter((x) => live.has(x.address) && keys.includes(this.ownerOf(x.address)));
     if (!open.length) return null;
-    const rank = (x) => (links.get(x.address) === w.work ? 0 : 1000) + keys.indexOf(x.labels[LABEL_SESSION]);
+    const rank = (x) => (links.get(x.address) === w.work ? 0 : 1000) + keys.indexOf(this.ownerOf(x.address));
     const best = open.sort((a, b) => rank(a) - rank(b))[0];
     const a = running.find((y) => y.address === best.address);
     return { terminal: best.address, name: a?.space_name || a?.tab_name || best.address };
@@ -1631,8 +1631,8 @@ export default class Muwi extends View {
           .children(loose.map((f) => line(`⚑ ${f.text}`, t.blocked)))))
         .when(view.state === "stalled", (el) => el.child(v_flex().gap(8).child(label("이어서 하려면"))
           .child(div().text_size(10.5).text_color(t.dim).child(view.between === "gone" ? "이 작업을 맡은 세션이 없어요" : "하던 세션이 모두 닫혔어요"))
-          .child(this.openRow(t, "continue-work", "새 대화로 이어 가기", "muwi 기록(계획·결과)을 읽고 멈춘 노드부터 이어 가요", this.launchWith(view.launcher, `${view.work} 작업 이어서 해줘`),
-            this.folderOk(view, view.cwd) ? view.cwd : null, view.work))
+          .when(Boolean(view.launcher), (el2) => el2.child(this.openRow(t, "continue-work", "새 대화로 이어 가기", "muwi 기록(계획·결과)을 읽고 멈춘 노드부터 이어 가요", this.launchWith(view.launcher, `${view.work} 작업 이어서 해줘`),
+            this.folderOk(view, view.cwd) ? view.cwd : null, view.work)))
           .when(Boolean(view.cwd), (el2) => el2.child(div().text_size(10.5).text_color(t.dim).child(this.folderOk(view, view.cwd)
             ? `누르면 ${this.shortPath(view.cwd)}에서 새 탭으로 열려요` : `작업 폴더(${this.shortPath(view.cwd)})가 없어져서 기본 폴더에서 새 탭으로 열려요`)))));
     }

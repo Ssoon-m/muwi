@@ -1,6 +1,6 @@
 #!/bin/sh
 # muwi 명령. src/cli.ts를 Node로 바로 실행한다 (npm으로 받은 사본은 .js로 바꾼 src/cli.js). Node 24 이상이 필요하다.
-# 셸 설정 없이 실행될 때(Herdr가 띄운 세션, 그래프 칸)도 Node를 찾도록 src/find-node.sh를 쓴다.
+# 셸 설정 없이 실행될 때(멀티플렉서가 띄운 세션, 보기)도 Node를 찾도록 src/find-node.sh를 쓴다.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 . "$ROOT/src/find-node.sh"
 NODE=$(muwi_find_node)

@@ -3,7 +3,7 @@
 //   세션이 시작되면 세션 파일을 만들고, skill을 읽으면 사건 기록에 한 줄 남긴다.
 //   읽은 skill은 AI가 스스로 적지 않는다. 여기서 관찰한 것만 기록이 된다.
 // muwi는 AI가 하려는 일을 막지 않는다. 계획을 적을지는 AI가 일의 크기를 보고 정하고, 적지 않았으면 작은 일이라고 본 것이다.
-//   그래서 코어의 답은 "말해 주기(say)" 하나다. 훅은 관찰만 한다: 세션 시작, 읽은 skill, 서브에이전트.
+//   그래서 코어의 답은 "말해 주기(say)" 하나다. 훅은 관찰만 한다: 세션 시작과 끝, 말을 걸고 끝낸 때, 읽은 skill, 서브에이전트.
 // 무엇을 승인받고 할지는 muwi가 정하지 않는다 (그 도구의 권한 설정과 사용자의 훅이 할 일이다). 셸 명령 앞(before-command)에서는 막지 않고,
 //   서브에이전트가 노드를 시작하는 명령인지만 본다.
 // 서브에이전트가 한 일은 사건의 agent로 구분한다 (서브에이전트는 세션 id가 부모와 같다).
@@ -15,7 +15,7 @@ import path from 'node:path';
 import { appendEvent, nowIso, readEvents, readJson, readPlan } from './store.ts';
 import type { PlanNode } from './store.ts';
 import { attach, readSession, recordSkill, touchSession, whereNow, type Session } from './session.ts';
-import { host } from './host.ts';
+import { terminals } from './plugins.ts';
 import { markNode } from './node.ts';
 import { BLOCK_END, BLOCK_START, instructionText } from './connectors/files.ts';
 import { toolById, toolHome } from './connectors/tools.ts';
@@ -105,28 +105,52 @@ export function childNote(work: string, node: Pick<PlanNode, 'id' | 'title'>): s
     '- 계획을 새로 만들지 않는다. 맡은 일을 쪼개야 하면 `muwi add`로 같은 계획에 노드를 넣는다.',
     `- 끝나면 \`muwi node ${node.id} done "<결과 한 줄>"\`을 적는다.`,
     `- 사람의 결정이 필요하면 \`muwi node ${node.id} wait "<물어볼 것>"\`, 스스로 풀 수 없으면 \`muwi node ${node.id} block "<이유>"\`을 적는다.`,
+    '- 끝났거나 막혔으면 `muwi tell "<결과나 막힌 점>"`으로 맡긴 세션에 알린다.',
     '- 전체 계획과 다른 노드의 진행은 `muwi show`로 본다.',
   ].join('\n');
 }
 
+/** muwi run이 띄운 프로그램에 넘기는 환경 변수: 띄운 것의 이름표, 맡긴 작업과 노드 */
+export const RUN_ENV = { id: 'MUWI_RUN', work: 'MUWI_RUN_WORK', node: 'MUWI_RUN_NODE', model: 'MUWI_RUN_MODEL' } as const;
+
+/** muwi run이 띄운 터미널마다 남기는 표 (환경 변수를 넘기지 못하는 연결을 위한 것). 기록 폴더의 .spawns/<터미널>.json */
+export const spawnFile = (dir: string, terminal: string) => path.join(dir, '.spawns', `${terminal.replace(/[^A-Za-z0-9_.-]/g, '_')}.json`);
+
+type Assigned = { id: string; work: string; node: string; model?: string };
+
+/**
+ * 이 프로세스가 muwi run으로 뜬 것이면 그 이름표와 작업·노드(와 띄울 때 준 모델). 환경 변수에서 읽고, 없으면 이 터미널에 남긴 표에서 읽는다.
+ * 표는 맡은 세션이 붙으면 지운다 (그 터미널 주소가 나중에 다른 프로그램에 다시 쓰여도 붙이지 않게)
+ */
+export function assignedHere(dir: string, env: NodeJS.ProcessEnv): Assigned | null {
+  const model = env[RUN_ENV.model] ? { model: env[RUN_ENV.model]! } : {};
+  if (env[RUN_ENV.id] && env[RUN_ENV.work] && env[RUN_ENV.node]) return { id: env[RUN_ENV.id]!, work: env[RUN_ENV.work]!, node: env[RUN_ENV.node]!, ...model };
+  const terminal = terminals().place(env)?.terminal;
+  if (!terminal) return null;
+  const got = readJson<Partial<Assigned>>(spawnFile(dir, terminal));
+  return got?.id && got.work && got.node ? { id: got.id, work: got.work, node: got.node, ...(got.model ? { model: got.model } : {}) } : null;
+}
+
 /** muwi run으로 뜬 세션이면 맡은 작업에 붙이고 노드를 시작한 것으로 적는다. 그 세션에 알려 줄 말을 돌려준다 */
 export function adoptSpawn(dir: string, key: string, env: NodeJS.ProcessEnv): string {
-  // 맡긴 노드를 하라고 띄운 자리인지는 화면이 안다 (muwi run이 띄울 때 붙인 이름표)
-  const got = host().assigned(env);
+  const got = assignedHere(dir, env);
   if (!got) return '';
-  const terminal = got.terminal;
   const node = readPlan(dir, got.work)?.nodes.find(n => n.id === got.node);
   if (!node) return '';
-  // 라벨은 터미널이 닫힐 때까지 남는다. 그 터미널에서 처음 뜬 세션만 맡은 것으로 본다.
-  // 나중에 같은 칸에서 /clear 하고 시작한 다른 대화를 옛 노드에 다시 붙이지 않는다
-  const joined = readEvents(dir, got.work).find(e => e.type === 'join' && e.node === got.node && e.terminal === terminal);
+  // muwi run은 터미널을 띄운 뒤에 spawn을 적으므로, 뜬 세션이 그보다 먼저 시작할 수 있다. 붙는 데는 spawn 기록이 필요 없다
+  const events = readEvents(dir, got.work);
+  // 환경 변수는 그 터미널에서 나중에 뜬 프로그램에도 남는다. 처음 붙은 세션만 맡은 것으로 본다.
+  // 나중에 같은 터미널에서 /clear 하고 시작한 다른 대화를 옛 노드에 다시 붙이지 않는다
+  const joined = events.find(e => e.type === 'join' && e.spawn === got.id);
   if (joined && joined.session !== key) return '';
   if (!joined && node.status === 'done') return '';
   attach(dir, key, got.work, env);
   // 훅이 모델을 알려 주지 않았으면 띄울 때 준 모델을 그 세션의 모델로 적는다 (훅이 알려 준 값이 있으면 그것이 더 정확하다)
   if (got.model && !readSession(dir, key)?.model) touchSession(dir, key, { model: got.model }, env);
   if (!joined) {
-    appendEvent(dir, got.work, { type: 'join', node: got.node, terminal }, key);
+    const terminal = terminals().place(env)?.terminal;
+    appendEvent(dir, got.work, { type: 'join', node: got.node, spawn: got.id, ...(terminal ? { terminal } : {}) }, key);
+    if (terminal) fs.rmSync(spawnFile(dir, terminal), { force: true });
     // 기다리는 노드는 그대로 둔다
     if (node.status === 'todo' || node.status === 'doing') markNode(dir, got.work, got.node, 'doing', undefined, key, env);
   }
@@ -142,8 +166,12 @@ export function adoptSpawn(dir: string, key: string, env: NodeJS.ProcessEnv): st
 export type Happened = { tool: Session['tool']; session: string | null; agent?: string; cwd?: string; model?: string; native?: string } & (
   /** 대화가 시작됐다. resumed: 대화가 요약돼 다시 시작했다 */
   | { kind: 'session-start'; resumed?: 'compact' }
-  /** 사람이 새로 말을 걸었다 (0.5.x의 훅 설정이 알려 준다. 지금은 걸지 않는다) */
+  /** 사람이 새로 말을 걸었다 */
   | { kind: 'prompt' }
+  /** 에이전트가 말을 끝내고 다음 말을 기다린다 */
+  | { kind: 'turn-end' }
+  /** 세션이 끝났다 (도구를 닫았거나 /clear) */
+  | { kind: 'session-end' }
   /** 셸 명령을 실행하려 한다 */
   | { kind: 'before-command'; command?: unknown }
   /** skill을 읽었다. via: 도구로 불렀나(tool), SKILL.md 파일을 읽었나(file) */
@@ -185,10 +213,12 @@ export function handleEvent(h: Happened, dir: string, env: NodeJS.ProcessEnv = p
     // 그 세션이 받은 지침은 그 파일에 들어 있는 판이다 (muwi setup을 다시 하지 않았으면 옛 판일 수 있고, 그러면 다음 muwi 명령이 새 지침을 전한다)
     const inFile = Boolean(toolById(h.tool)?.instructions);
     const got = inFile ? fileGuideHash(h.tool, env) : guide ? instructionsHash(guide) : undefined;
-    const session = touchSession(dir, key, { ...patch, ...(got ? { instructions: got } : {}) }, env);
-    // 이 자리에서 지금 도는 세션이 누구인지 화면에 알린다. 나중에 "그 세션이 아직 살아 있나"를 볼 때 쓴다.
-    // 같은 자리에서 /clear 하거나 새로 띄우면 새 이름으로 바뀌고, 앞 세션은 닫힌 것으로 보인다
-    host().sessionStarted(key, env);
+    // 다시 연 세션(--resume)은 세션 이름이 같다. 시작한 때를 새로 적고 끝났다는 표시를 지운다 (live.ts가 닫혔다고 보지 않게).
+    // 요약돼 다시 시작한 것(compact)은 같은 대화가 이어지는 것이라 시작한 때를 그대로 둔다
+    const fresh = h.resumed === 'compact' ? {} : { startedAt: nowIso() };
+    const session = touchSession(dir, key, { ...patch, ...fresh, endedAt: undefined, ...(got ? { instructions: got } : {}) }, env);
+    // 세션 파일에 이 세션이 도는 터미널과 시작한 때가 적힌다. 같은 터미널에서 /clear 하거나 새로 띄우면
+    // 더 늦게 시작한 세션이 생기므로 앞 세션은 닫힌 것으로 보인다 (live.ts)
     // 대화가 요약되면 앞에서 읽은 skill 내용이 흐려질 수 있다. 기록에 남겨 두면 나중에 원인을 볼 때 단서가 된다
     if (h.resumed === 'compact' && session.work && readPlan(dir, session.work)) {
       appendEvent(dir, session.work, { type: 'session', what: 'compact' }, key);
@@ -197,10 +227,18 @@ export function handleEvent(h: Happened, dir: string, env: NodeJS.ProcessEnv = p
     return text ? { say: text } : {};
   }
 
-  if (h.kind === 'prompt') {
-    // 사람이 새로 말을 걸었다. 여기서 할 일은 없다 (세션을 봤다는 것만 적는다).
+  if (h.kind === 'prompt' || h.kind === 'turn-end') {
+    // 사람이 말을 걸었거나 에이전트가 말을 끝냈다. 세션이 지금 일하는지 기다리는지를 적어 둔다 (live.ts가 읽는다).
     // 지침이 바뀐 것은 여기서 넣지 않는다. 말할 때 문맥을 넣을 수 없는 도구가 있어서, 어느 도구에서나 되는 muwi 명령의 출력으로 전한다 (guideUpdate)
-    touchSession(dir, key, patch, env);
+    // 서브에이전트가 끝난 것은 세션의 차례가 아니다
+    if (agent) return {};
+    touchSession(dir, key, { ...patch, turn: h.kind === 'prompt' ? 'working' : 'done' }, env);
+    return {};
+  }
+
+  if (h.kind === 'session-end') {
+    if (agent) return {};
+    touchSession(dir, key, { ...patch, endedAt: nowIso() }, env);
     return {};
   }
 

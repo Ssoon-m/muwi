@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { herdrApp } from './hc.ts';
+import { herdrApp } from '@muwi/herdr/hc';
 import { layoutPreview } from './preview.ts';
 import { readJson, writeJson } from '@muwi/core/store';
 
