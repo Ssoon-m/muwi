@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, adoptSpawn, guideUpdate, handleHook, sessionInstructions } from './hook.ts';
-import { host, hostFailure, loadHost } from './host.ts';
+import { host, hostFailure, hostPath, loadHost } from './host.ts';
 import { Fail, dur, join, needPlan, out, parseArgs, resolveWork, str, type Args, SCREEN_COMMANDS } from './kit.ts';
 import { fromSubagent, markNode } from './node.ts';
 import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
@@ -17,6 +17,7 @@ import {
   SCHEMA, appendEvent, listWorks, nowIso, readConfig, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
   type NodeStatus, type Plan, type RunBy, type ShowIn,
 } from './store.ts';
+import { afterCommand } from './update.ts';
 import { PAST_DAYS, loadBoard, loadView, type Actor, type Between, type NodeView, type Quiet, type Try, type WorkView } from './view.ts';
 
 const HELP = `사용법: muwi <명령>
@@ -729,7 +730,11 @@ async function run(cmd: string | undefined, a: Args, dir: string) {
   }
 }
 
-main(process.argv.slice(2)).catch(e => {
-  process.stderr.write((e instanceof Error ? e.message : String(e)) + '\n');
-  process.exit(e instanceof Fail ? e.code : 1);
-});
+const argv = process.argv.slice(2);
+main(argv)
+  // 사람이 터미널에서 친 명령이면 npm에 새 판이 있을 때 알린다 (update.ts)
+  .then(() => afterCommand({ cmd: argv[0], current: version(), root: ROOT, hostFile: hostPath() }))
+  .catch(e => {
+    process.stderr.write((e instanceof Error ? e.message : String(e)) + '\n');
+    process.exit(e instanceof Fail ? e.code : 1);
+  });
