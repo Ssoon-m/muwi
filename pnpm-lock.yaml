@@ -8,4 +8,10 @@ importers:
 
   .: {}
 
+  packages/herdr-muwi:
+    dependencies:
+      muwi:
+        specifier: workspace:*
+        version: link:../muwi
+
   packages/muwi: {}

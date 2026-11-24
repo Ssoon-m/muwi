@@ -3,8 +3,8 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { copyDir } from '../connectors/files.ts';
-import type { HostInstall } from '../host.ts';
+import { copyDir } from 'muwi/connectors/files';
+import type { HostInstall } from 'muwi/host';
 import { config, describeScreen, guardScreen, layoutRemoved } from './commands.ts';
 import { ensurePreview, removeLayout, screenState } from './screen.ts';
 
@@ -12,7 +12,7 @@ import { ensurePreview, removeLayout, screenState } from './screen.ts';
 export const appHome = (env: NodeJS.ProcessEnv) => env.HERDR_APP_HOME || path.join(env.HOME || os.homedir(), '.config', 'herdr-app');
 
 /** 이 패키지에 든 그래프 칸 */
-const MOD = path.resolve(import.meta.dirname, '..', '..', 'herdr-app', 'muwi');
+const MOD = path.resolve(import.meta.dirname, '..', 'app', 'muwi');
 
 /** Herdr 앱 칸을 넣는다. 앱은 저장하는 즉시 다시 불러오므로 main.js를 마지막에 쓴다 */
 function installMod(home: string): string {

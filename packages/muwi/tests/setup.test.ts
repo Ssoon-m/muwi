@@ -8,11 +8,8 @@ import {
   hookCommandFor, installBlock, installHooks, instructionText, mergeHooks, readInstall, refreshSetup, removeBlock, removeHooks,
   olderThan, removeSetup, runSetup, uninstallBlock, uninstallHooks, upsertBlock,
 } from '../src/setup.ts';
-import { setHost } from '../src/host.ts';
-import herdr from '../src/herdr/host.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-const HERDR_HOST = path.resolve(import.meta.dirname, '../src/herdr/host.ts');
 /** sh 래퍼는 Windows에서도 슬래시 경로로 적는다 (Git Bash가 읽기 쉽게) */
 const posix = (p: string) => (process.platform === 'win32' ? p.replace(/\\/g, '/') : p);
 const HOOK = hookCommandFor('/Users/me/tools/muwi');
@@ -81,9 +78,8 @@ test('지침 구간: 파일에 쓰고 뺀다', () => {
 });
 
 /** 빈 홈 폴더를 만든다. with에 적은 도구만 설치돼 있는 것으로 친다 */
-function home(...tools: ('herdr' | 'codex')[]) {
+function home(...tools: 'codex'[]) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-home-'));
-  if (tools.includes('herdr')) fs.mkdirSync(path.join(dir, '.config', 'herdr-app', 'mods'), { recursive: true });
   if (tools.includes('codex')) fs.mkdirSync(path.join(dir, '.codex'), { recursive: true });
   const env = { HOME: dir } as NodeJS.ProcessEnv;
   return { dir, env, records: path.join(dir, '.muwi') };
@@ -113,17 +109,8 @@ test('muwi setup: 있는 도구에만 넣고, 무엇을 넣었는지 적어 둔�
   assert.deepEqual(readInstall(h.records), install);
 });
 
-test('muwi setup: Herdr 앱 칸을 넣고, --codex를 주면 Codex 지침·skill도 넣고, --remove로 뺀다', t => {
-  // Herdr 화면이 있을 때. 화면을 불러온 경로를 적어 두면 muwi 명령과 훅이 그 화면을 쓴다
-  setHost(herdr, HERDR_HOST);
-  t.after(() => setHost(null));
-  // Herdr 앱이 없으면 칸은 건너뛴다
-  const none = home();
-  const lines: string[] = [];
-  const skipped = runSetup({ root: ROOT, version: '0.1.0', dir: none.records, env: none.env, log: l => lines.push(l) });
-  assert.match(lines.join('\n'), /Herdr 앱이 없어/);
-  assert.equal(skipped.hosted, undefined);
-  const h = home('herdr', 'codex');
+test('muwi setup: --codex를 주면 Codex 지침·skill을 넣고, --remove로 뺀다', () => {
+  const h = home('codex');
   fs.writeFileSync(path.join(h.dir, '.codex', 'AGENTS.md'), '# 내 Codex 규칙\n');
   // Codex가 있어도 --codex를 주지 않으면 건드리지 않는다
   runSetup({ root: ROOT, version: '0.1.0', dir: h.records, env: h.env });
@@ -131,16 +118,12 @@ test('muwi setup: Herdr 앱 칸을 넣고, --codex를 주면 Codex 지침·skill
   runSetup({ root: ROOT, version: '0.1.0', dir: h.records, env: h.env, codex: true });
   // 한 번 넣은 뒤로는 옵션 없이 다시 실행해도 유지한다 (업데이트 때 새 위치로 맞추기 위해)
   runSetup({ root: ROOT, version: '0.1.0', dir: h.records, env: h.env });
-  const mod = path.join(h.dir, '.config', 'herdr-app', 'mods', 'muwi');
-  assert.deepEqual(fs.readdirSync(mod).sort(), ['arc.svg', 'main.js', 'mod.json']);
-  assert.deepEqual([readInstall(h.records)!.host, readInstall(h.records)!.hosted], [HERDR_HOST, { mod }]);
   const agents = fs.readFileSync(path.join(h.dir, '.codex', 'AGENTS.md'), 'utf8');
   assert.match(agents, /^# 내 Codex 규칙\n\n<!-- muwi:start/);
   // 사용법 skill은 Codex가 읽는 ~/.agents/skills에 넣는다
   assert.ok(fs.existsSync(path.join(h.dir, '.agents', 'skills', 'muwi', 'SKILL.md')));
 
   removeSetup(h.records);
-  assert.equal(fs.existsSync(mod), false);
   assert.equal(fs.existsSync(path.join(h.dir, '.local', 'bin', 'muwi')), false);
   assert.equal(fs.readFileSync(path.join(h.dir, '.codex', 'AGENTS.md'), 'utf8'), '# 내 Codex 규칙\n');
   assert.equal(fs.existsSync(path.join(h.dir, '.agents', 'skills', 'muwi')), false);
@@ -174,7 +157,7 @@ test('muwi setup: 남이 만든 muwi 명령은 덮어쓰지 않는다', () => {
 });
 
 test('업데이트로 설치 위치나 버전이 바뀌면, setup을 한 적이 있을 때만 다시 맞춘다', () => {
-  const h = home('herdr');
+  const h = home();
   // setup을 한 적이 없으면 아무것도 넣지 않는다
   assert.equal(refreshSetup({ root: ROOT, version: '0.1.0', dir: h.records, env: h.env }), false);
   assert.equal(fs.existsSync(path.join(h.dir, '.local')), false);
@@ -182,7 +165,7 @@ test('업데이트로 설치 위치나 버전이 바뀌면, setup을 한 적이 
   assert.equal(refreshSetup({ root: ROOT, version: '0.1.0', dir: h.records, env: h.env }), false);
   // 새 버전이 다른 위치에 깔렸다
   const next = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-next-'));
-  for (const d of ['hooks', 'skills', 'herdr-app']) fs.cpSync(path.join(ROOT, d), path.join(next, d), { recursive: true });
+  for (const d of ['hooks', 'skills']) fs.cpSync(path.join(ROOT, d), path.join(next, d), { recursive: true });
   assert.equal(refreshSetup({ root: next, version: '0.2.0', dir: h.records, env: h.env }), true);
   assert.ok(fs.readFileSync(path.join(h.dir, '.local', 'bin', 'muwi'), 'utf8').includes(`"${posix(path.join(next, 'bin', 'muwi'))}"`));
   assert.equal(readInstall(h.records)!.version, '0.2.0');
@@ -229,7 +212,7 @@ test('플러그인의 bin/muwi.cmd: CRLF로 cli.ts를 실행한다 (Windows의 P
 });
 
 test('설치 기록은 setup.json에 적는다: install.json만 보는 옛 훅(0.4.0·0.5.0)이 새 설치를 되돌리지 못한다', () => {
-  const h = home('herdr');
+  const h = home();
   const legacy = path.join(h.records, 'install.json');
   // 0.5.4 이하가 남긴 기록에서 올라온다: 읽을 수 있고, 새로 적을 때 지운다
   fs.mkdirSync(h.records, { recursive: true });

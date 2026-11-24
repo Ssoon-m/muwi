@@ -10,8 +10,8 @@ const SH = process.platform === 'win32' ? { skip: 'sh 스크립트를 시험한�
 
 
 const CLI = path.resolve(import.meta.dirname, '../src/cli.ts');
-/** Herdr 화면 모듈. muwi 명령을 자식 프로세스로 띄울 때 $MUWI_HOST로 넘긴다 */
-const HERDR_HOST = path.resolve(import.meta.dirname, '../src/herdr/host.ts');
+/** 시험용 화면 모듈 (화면이 더하는 명령·설정) */
+const FIXTURE_HOST = path.resolve(import.meta.dirname, 'fixture-host.ts');
 
 
 /** 깨끗한 환경에서 muwi를 실행한다 (바깥 세션의 환경 변수가 섞이지 않게) */
@@ -19,7 +19,7 @@ function bench() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-cli-'));
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-cwd-'));
   const muwi = (args: string[], o: { session?: string | null; input?: string; cwd?: string; env?: Record<string, string> } = {}) => {
-    const env: Record<string, string> = { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir, MUWI_HOST: HERDR_HOST, ...o.env };
+    const env: Record<string, string> = { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir, ...o.env };
     if (o.session !== null) env.MUWI_SESSION = o.session ?? 'lead';
     const r = spawnSync(process.execPath, [CLI, ...args], { env, cwd: o.cwd ?? cwd, input: o.input ?? '', encoding: 'utf8' });
     return { code: r.status, out: r.stdout, err: r.stderr };
@@ -150,7 +150,7 @@ test('새 결과: 끝났는데 안 본 작업은 status에 새 결과로 보이�
   assert.match(muwi(['viewed', '--work', 'nr']).out, /새 결과가 아니에요 \(이미 봤어요\)/);
 });
 
-test('muwi show·status·board: 사람이 읽는 글과 화면이 읽는 JSON', () => {
+test('muwi show·status: 사람이 읽는 글과 JSON', () => {
   const { muwi } = bench();
   muwi(['plan', '--work', 'w', '--request', '작업해줘', PLAN]);
   muwi(['node', 'read', 'start']);
@@ -164,16 +164,10 @@ test('muwi show·status·board: 사람이 읽는 글과 화면이 읽는 JSON', 
   assert.match(show, /기다리는 것: A안과 B안 중 어느 쪽\?/);
   assert.match(show, /⚑ 문제 표시 .*미정 항목을 놓침/);
   assert.match(muwi(['status']).out, /응답 대기\s+w\s+1\/3/);
-
-  const board = JSON.parse(muwi(['board']).out);
-  assert.equal(board.works[0].work, 'w');
-  assert.equal(board.selected.work, 'w');
-  assert.deepEqual(board.selected.layoutProblems, []);
-  assert.equal(board.selected.layout.nodes.length, 3);
-  assert.equal(board.selected.layout.edges.length, 2);
-  assert.deepEqual(board.selected.nodes[0].skills, [{ skill: 'spec-reader', state: 'read', count: 1, via: 'tool' }]);
+  assert.equal(JSON.parse(muwi(['status', '--json']).out).works[0].work, 'w');
   const json = JSON.parse(muwi(['show', 'w', '--json']).out);
   assert.equal(json.flags[0].node, 'read');
+  assert.deepEqual(json.nodes[0].skills, [{ skill: 'spec-reader', state: 'read', count: 1, via: 'tool' }]);
 });
 
 test('훅이 돌지 않는 Claude Code 세션이 계획을 적으면 무엇이 빠지는지 알린다', () => {
@@ -186,25 +180,6 @@ test('훅이 돌지 않는 Claude Code 세션이 계획을 적으면 무엇이 �
   muwi(['hook'], { session: null, env: { CLAUDE_CODE_SESSION_ID: 'new-1', CLAUDECODE: '1' }, input: JSON.stringify({ session_id: 'new-1', hook_event_name: 'SessionStart', source: 'startup' }) });
   const hooked = muwi(['plan', '--work', 'w2', '--request', '작업해줘', PLAN], { session: null, env: { CLAUDE_CODE_SESSION_ID: 'new-1', CLAUDECODE: '1' } });
   assert.doesNotMatch(hooked.out, /훅이 돌지 않아요/);
-});
-
-test('muwi board: 그래프 칸이 터미널과 작업을 잇도록 세션과 터미널을 알려 준다', () => {
-  const { muwi } = bench();
-  // 계획을 낸 세션은 Herdr 터미널 t5에서 돈다. 다른 세션(t6)은 계획 없이 일한다
-  muwi(['plan', '--work', 'w', '--request', '작업해줘', PLAN], { env: { HC_TERMINAL_ID: 't5' } });
-  muwi(['hook'], { session: 'other', env: { HC_TERMINAL_ID: 't6' }, input: JSON.stringify({ session_id: 'other', hook_event_name: 'UserPromptSubmit', prompt: '질문' }) });
-  // 사람을 기다리는 노드를 다른 세션이 맡고 있으면 그 세션의 터미널로 간다
-  muwi(['node', 'impl', 'wait', '어느 쪽?', '--work', 'w'], { session: 'helper', env: { HC_TERMINAL_ID: 't7' } });
-  const board = JSON.parse(muwi(['board']).out);
-  assert.equal(board.works[0].terminal, 't7');
-  assert.deepEqual(
-    board.sessions.map((s: any) => [s.key, s.terminal, s.work ?? null]).sort(),
-    // 노드를 맡은 세션은 그 작업에 붙는다. 계획 없이 일하는 세션은 작업이 없다
-    [['helper', 't7', 'w'], ['lead', 't5', 'w'], ['other', 't6', null]],
-  );
-  assert.equal(board.suggest, true);
-  muwi(['config', 'layout', 'off']);
-  assert.equal(JSON.parse(muwi(['board']).out).suggest, false);
 });
 
 test('muwi hook: 깨진 입력에도 조용히 끝난다 (세션을 방해하지 않는다)', () => {
@@ -245,9 +220,6 @@ test('이름 없이 낸 계획은 이 세션이 하던 작업만 바꾼다 (같�
 test('muwi config·version·setup', () => {
   const { dir, muwi } = bench();
   assert.match(muwi(['--version']).out, /^\d+\.\d+\.\d+\n$/);
-  assert.match(muwi(['config']).out, /^layout\s+on/);
-  assert.match(muwi(['config', 'layout', 'off']).out, /layout\s+off/);
-  assert.match(muwi(['config', 'layout', 'maybe']).err, /사용법: muwi config/);
   assert.match(muwi(['config', 'nudge', 'off']).err, /계획 알림\(nudge\)은 0\.6\.0에서 뺐어요/);
   // 빈 홈 폴더에 setup: 터미널용 명령만 생긴다
   const setup = muwi(['setup']);
@@ -341,9 +313,9 @@ test('그래프 흐름: 하던 노드 앞에 먼저 할 노드가 끼어들면 �
   assert.match(added.out, /⏸ check/);
   const plan = JSON.parse(fs.readFileSync(path.join(dir, 'w', 'plan.json'), 'utf8'));
   assert.equal(plan.nodes.find((n: any) => n.id === 'check').status, 'todo');
-  const board = JSON.parse(muwi(['board']).out);
-  // 지금 하는 노드가 없다. 세션이 무얼 하는지 모르면(Herdr 밖) 작업 중으로 본다
-  assert.deepEqual([board.works[0].state, board.works[0].between], ['doing', 'unknown']);
+  const status = JSON.parse(muwi(['status', '--json']).out);
+  // 지금 하는 노드가 없다. 세션이 무얼 하는지 모르면(화면이 없다) 작업 중으로 본다
+  assert.deepEqual([status.works[0].state, status.works[0].between], ['doing', 'unknown']);
   const view = JSON.parse(muwi(['show', 'w', '--json']).out);
   const check = view.nodes.find((n: any) => n.id === 'check');
   assert.deepEqual([check.status, check.paused, check.attempts], ['todo', true, 1]);
@@ -429,28 +401,34 @@ test('계획은 선으로 이어진 그래프다: muwi add에 자리를 주지 �
   assert.doesNotMatch(flat.out, /이어지지 않은 노드/);
 });
 
-test('화면 없이: 기록과 보기는 되고, 화면이 더하는 명령은 무엇이 필요한지 알린다. 화면을 불러오지 못해도 훅은 그대로 돈다', () => {
+test('화면 없이: 기록과 보기는 되고, 화면이 더하는 명령은 무엇이 필요한지 알린다. 화면은 setup이 적어 둔 경로에서 불러오고, 불러오지 못해도 훅은 그대로 돈다', () => {
   const { dir, muwi } = bench();
-  const bare = { env: { MUWI_HOST: '' } };
-  assert.equal(muwi(['plan', '--work', 'w', '--request', '작업해줘', PLAN], bare).code, 0);
-  assert.match(muwi(['status'], bare).out, /작업 중 +w/);
-  assert.match(muwi(['show', 'w'], bare).out, /연수원명 클릭 시 상세 이동/);
-  // 화면이 더하는 명령
-  const run = muwi(['run', 'impl', '구현해줘'], bare);
+  assert.equal(muwi(['plan', '--work', 'w', '--request', '작업해줘', PLAN]).code, 0);
+  assert.match(muwi(['status']).out, /작업 중 +w/);
+  assert.match(muwi(['show', 'w']).out, /연수원명 클릭 시 상세 이동/);
+  // Herdr 화면이 더하는 명령
+  const run = muwi(['run', 'impl', '구현해줘']);
   assert.equal(run.code, 1);
   assert.match(run.err, /Herdr 앱 화면과 함께 쓰는 명령이에요\. herdr-muwi로 깔면 생겨요/);
-  assert.doesNotMatch(muwi(['--help'], bare).out, /muwi run/);
+  assert.doesNotMatch(muwi(['--help']).out, /muwi run/);
   // 설정은 화면이 정한다
-  assert.match(muwi(['config'], bare).out, /설정이 없어요/);
-  // muwi setup이 적어 둔 화면을 불러온다
+  assert.match(muwi(['config']).out, /설정이 없어요/);
+  // $MUWI_HOST로 준 화면: 화면의 명령, 사용법, 설정이 붙는다
+  const withHost = { env: { MUWI_HOST: FIXTURE_HOST } };
+  assert.match(muwi(['hello', '여러분'], withHost).out, /^hello 여러분/);
+  assert.match(muwi(['--help'], withHost).out, /시험 화면\n  muwi hello <말>[\s\S]*설치와 설정/);
+  assert.match(muwi(['config'], withHost).out, /demo +on +시험용 설정/);
+  assert.match(muwi(['config', 'demo', 'off'], withHost).out, /demo +off/);
+  assert.match(muwi(['config', 'nope', 'on'], withHost).err, /사용법: muwi config \[demo\] on\|off/);
+  // muwi setup은 화면의 경로를 적어 둔다. 그 뒤로는 $MUWI_HOST 없이도(훅, 그래프 칸이 부르는 명령) 그 화면을 쓴다
+  assert.equal(muwi(['setup'], withHost).code, 0);
   const setupFile = path.join(dir, 'setup.json');
-  fs.writeFileSync(setupFile, JSON.stringify({ root: '/x', version: '0.0.0', at: '2026-11-24T00:00:00.000Z', host: HERDR_HOST }));
-  assert.match(muwi(['--help'], bare).out, /muwi run/);
-  assert.match(muwi(['config'], bare).out, /layout +on/);
+  assert.equal(JSON.parse(fs.readFileSync(setupFile, 'utf8')).host, FIXTURE_HOST);
+  assert.match(muwi(['hello', '다시']).out, /^hello 다시/);
   // 적어 둔 화면이 없어졌으면 화면 없이 돈다. 훅도 그대로 지침을 돌려준다
-  fs.writeFileSync(setupFile, JSON.stringify({ root: '/x', version: '0.0.0', at: '2026-11-24T00:00:00.000Z', host: '/no/such/host.ts' }));
-  assert.doesNotMatch(muwi(['--help'], bare).out, /muwi run/);
-  const hook = muwi(['hook'], { ...bare, session: null, input: JSON.stringify({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' }) });
+  fs.writeFileSync(setupFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(setupFile, 'utf8')), host: '/no/such/host.ts' }));
+  assert.doesNotMatch(muwi(['--help']).out, /muwi hello/);
+  const hook = muwi(['hook'], { session: null, input: JSON.stringify({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' }) });
   assert.equal(hook.code, 0);
   assert.match(JSON.parse(hook.out).hookSpecificOutput.additionalContext, /작업 진행 방식 \(muwi\)/);
 });

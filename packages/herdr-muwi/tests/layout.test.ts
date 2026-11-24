@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { SIZE, fitZoom, layoutFor, layoutGraph, layoutProblems, type Graph, type Layout } from '../src/herdr/layout.ts';
+import { SIZE, fitZoom, layoutFor, layoutGraph, layoutProblems, type Graph, type Layout } from '../src/layout.ts';
 
 const graph = (edges: [string, string][], extra: string[] = []): Graph => {
   const ids = [...new Set([...edges.flat(), ...extra])];
