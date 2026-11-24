@@ -10,7 +10,7 @@ muwi가 무엇을 어디에 설치하는지, 설정으로 무엇을 바꿀 수 �
 | AI 도구 | Claude Code, Codex 등 커넥터가 있는 도구 ([다른 AI 도구에 넣기](#다른-ai-도구에-넣기)) |
 | 멀티플렉서 | 새 세션을 띄울 때 필요합니다. 지금 터미널 연결이 있는 것은 [Herdr](https://herdr.dev)입니다 (`@muwi/herdr`) |
 | [Herdr 앱](https://herdr.dev) | 그래프를 볼 때 필요합니다 (`@muwi/herdr-app`) |
-| Git for Windows | Windows에서만. Claude Code가 훅을 Git Bash로 실행합니다. [Windows에서 쓰기](#windows에서-쓰기)를 보세요 |
+| Git for Windows | Windows에서만. AI 도구가 muwi 훅을 Git Bash의 `sh`로 실행합니다. [Windows에서 쓰기](#windows에서-쓰기)를 보세요 |
 
 PATH에 Node가 없는 곳(멀티플렉서가 띄우는 세션, 그래프 칸)에서는 muwi가 로그인 셸에 물어 Node를 찾고 `~/.cache/muwi/node`에 적어 둡니다. Node 버전을 바꿨다면 `muwi setup`을 다시 실행하세요. 캐시를 버리고 다시 찾습니다. 바꾼 Node에 muwi를 새로 깔았다면 [다른 자리에 새로 깔았을 때](#업데이트하기)를 보세요. 자세한 내용은 [문제 해결하기](../guides/troubleshooting.md#node-24-이상이-필요하다고-나올-때)에 있습니다.
 
@@ -36,7 +36,7 @@ npm i -g @muwi/core        # 기록만 쓸 때
 
 ```sh
 muwi setup                       # 터미널용 명령과, 붙은 터미널 연결·보기(그래프 칸)
-muwi setup --tool claude         # 그 AI 도구에 커넥터도. 여러 개는 쉼표로, 깔린 도구 전부는 --all
+muwi setup --tool <도구>         # 그 AI 도구에 커넥터도 (claude, codex …). 여러 개는 쉼표로, 깔린 도구 전부는 --all
 ```
 
 | 항목 | 위치 | 조건 |
@@ -198,13 +198,13 @@ Windows에서도 같은 방법으로 설치합니다. 다른 점은 이렇습니
 
 | 항목 | Windows에서 |
 | --- | --- |
-| 훅 | Claude Code가 Git Bash로 실행합니다. Git for Windows가 없으면 훅이 돌지 않아 진행이 기록되지 않습니다. 훅이 실패해도 작업은 막지 않습니다 |
+| 훅 | AI 도구가 Git Bash의 `sh`로 실행합니다 (`sh ".../tool.sh" <도구>`). Git for Windows가 없으면 훅이 돌지 않아 진행이 기록되지 않습니다. 훅이 실패해도 작업은 막지 않습니다 |
 | AI 도구 안의 `muwi` 명령 | npm이 PATH에 건 `muwi`를 씁니다. npm이 만든 `muwi.cmd`(PowerShell·cmd)와 `muwi`(Git Bash)가 Node로 패키지의 명령을 실행합니다 |
 | 터미널용 명령 | `muwi setup`이 `%USERPROFILE%\.local\bin`에 `muwi`(Git Bash용)와 `muwi.cmd`(PowerShell·cmd용)를 넣습니다. 이 폴더가 PATH에 없으면 추가하세요 |
 | 그래프 칸 | `muwi.cmd`로 기록을 읽습니다 |
 | 줄바꿈 | 저장소의 `.gitattributes`가 스크립트를 LF로 받게 합니다. `core.autocrlf` 설정과 상관없이 Git Bash에서 깨지지 않습니다 |
 
-GitHub Actions의 Windows에서 시험 전체를 돌리고, 패키지를 하나씩 `npm i -g`로 깔아 npm이 만든 `muwi.cmd`로 실행해 봅니다. Git Bash로 훅을, PowerShell과 cmd로 `muwi setup`이 넣은 `muwi.cmd`를 실제로 실행해 확인합니다. Windows용 Herdr 앱에서 그래프 칸이 도는지와 실제 Claude Code 세션이 훅을 부르는 것은 아직 확인하지 못했습니다. 문제가 있으면 [이슈](https://github.com/Ssoon-m/muwi/issues)로 알려 주세요.
+GitHub Actions의 Windows에서 시험 전체를 돌리고, 패키지를 하나씩 `npm i -g`로 깔아 npm이 만든 `muwi.cmd`로 실행해 봅니다. Git Bash로 훅을, PowerShell과 cmd로 `muwi setup`이 넣은 `muwi.cmd`를 실제로 실행해 확인합니다. Windows용 Herdr 앱에서 그래프 칸이 도는지와 실제 AI 도구 세션이 훅을 부르는 것은 아직 확인하지 못했습니다. 문제가 있으면 [이슈](https://github.com/Ssoon-m/muwi/issues)로 알려 주세요.
 
 ## 업데이트하기
 

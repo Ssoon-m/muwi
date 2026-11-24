@@ -48,7 +48,7 @@ Herdr 앱에서 레이아웃을 다른 것으로 바꿨으면(`ctrl-shift-l`) mu
 
 ## Node 24 이상이 필요하다고 나올 때
 
-muwi는 Node 24 이상에서 실행됩니다. Node가 낮으면 명령이 "Node 24 이상이 필요해요"라고 알리고, 세션이 시작될 때 AI에게도 알립니다.
+muwi는 Node 24 이상에서 실행됩니다. Node가 낮으면 명령이 "Node 24 이상이 필요해요"라고 알립니다. 훅도 같은 이유로 실패하지만 작업은 막지 않습니다 (도구에 따라 훅 오류로 보입니다).
 
 muwi는 다음 순서로 Node 24 이상을 찾습니다.
 
@@ -138,11 +138,11 @@ muwi를 업데이트하면 다음 세션이 시작될 때 터미널용 명령과
 
 ## Windows에서 진행이 기록되지 않을 때
 
-Claude Code는 Windows에서 훅을 Git Bash로 실행합니다. Git for Windows가 없거나 Claude Code가 찾지 못하면 훅이 돌지 않습니다. 작업은 막히지 않지만 노드의 기록에 "읽은 skill을 볼 수 없었어요"가 나옵니다.
+Windows에서는 AI 도구가 muwi 훅을 Git Bash의 `sh`로 실행합니다 (`sh ".../tool.sh" <도구>`). Git for Windows가 없거나 그 도구가 찾지 못하면 훅이 돌지 않습니다. 작업은 막히지 않지만 노드의 기록에 "읽은 skill을 볼 수 없었어요"가 나옵니다.
 
 1. [Git for Windows](https://git-scm.com/download/win)를 설치하세요.
-2. 기본 위치가 아닌 곳에 설치했으면 환경 변수 `CLAUDE_CODE_GIT_BASH_PATH`에 `bash.exe`의 경로를 넣으세요.
-3. Claude Code 세션을 새로 여세요.
+2. 기본 위치가 아닌 곳에 설치했으면 그 도구에 Git Bash의 위치를 알려 주세요. Claude Code는 환경 변수 `CLAUDE_CODE_GIT_BASH_PATH`에 `bash.exe`의 경로를 넣습니다.
+3. 그 도구의 세션을 새로 여세요.
 
 ## Windows의 PowerShell에서 muwi를 찾지 못할 때
 

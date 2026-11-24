@@ -43,7 +43,7 @@ node packages/herdr-app/bin/muwi.js <명령>           # 깔지 않고 이 저�
 | `packages/core/src/setup.ts` | `muwi setup` |
 | `packages/core/src/connectors/` | AI 도구 커넥터 (도구 표 `tools.ts`, 커넥터 규격 `types.ts`) |
 | `packages/core/connectors/` | 도구에 넣는 플러그인 파일 (OpenCode, Kilo, Pi, oh-my-pi, Hermes) |
-| `packages/core/hooks/` | 훅 스크립트(`hook.sh`, `tool.sh`)와 세션 지침(`instructions.md`) |
+| `packages/core/hooks/` | 훅 스크립트(`tool.sh`. 모든 도구의 훅이 `tool.sh <도구>`로 부른다)와 세션 지침(`instructions.md`) |
 | `packages/core/skills/muwi/` | 사용법 skill: 계획 적는 방법, 맡기는 방법, 기록 진단 절차 |
 | `packages/herdr/` | Herdr 터미널 연결 (npm 이름 `@muwi/herdr`). 의존 패키지: `@muwi/core` |
 | `packages/herdr/bin/muwi.js` | Herdr 터미널 연결을 붙인 `muwi` 명령 |
@@ -113,7 +113,7 @@ node packages/herdr-app/bin/muwi.js <명령>           # 깔지 않고 이 저�
 | 작업 | 한 번 맡긴 일의 기록 단위 |
 | 계획, 노드 | AI가 짠 진행 계획과 그 안의 단계 |
 | 회차 | 노드를 한 번 한 것. 다시 하면 다음 회차입니다 |
-| 세션 | Claude Code 세션 하나 |
+| 세션 | AI 도구의 세션(대화) 하나 |
 | 새 세션 | `muwi run`으로 띄운 세션 |
 | 서브에이전트 | 세션 안에서 띄운 보조 에이전트 |
 | 그래프 칸 | Herdr 앱에서 muwi가 그리는 화면 |

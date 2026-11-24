@@ -171,7 +171,7 @@
 | --- | --- | --- |
 | `MUWI_DIR` | `~/.muwi` | 기록 폴더입니다 |
 | `MUWI_WORK` | 없음 | 명령이 다룰 작업 이름입니다. `--work`와 같습니다 |
-| `MUWI_SESSION` | Claude Code의 세션 id | 세션 이름을 직접 정합니다 |
+| `MUWI_SESSION` | 그 도구의 세션 id (없으면 터미널) | 세션 이름을 직접 정합니다 |
 | `MUWI_TERMINALS` | `muwi setup`이 적어 둔 연결 | 터미널 연결 모듈의 경로. `@muwi/herdr`와 `@muwi/herdr-app`의 `muwi` 명령이 Herdr 연결로 정합니다 |
 | `MUWI_VIEWS` | `muwi setup`이 적어 둔 보기 | 보기 모듈의 경로들 (경로 구분자로 잇습니다). `@muwi/herdr-app`의 `muwi` 명령이 Herdr 앱 보기로 정합니다 |
 | `MUWI_WAIT_POLL_MS` | `2000` | `muwi wait`가 기록을 다시 읽는 간격 (ms) |

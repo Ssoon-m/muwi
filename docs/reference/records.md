@@ -80,7 +80,7 @@ muwi가 남기는 파일의 위치와 형식을 정리했습니다. 기록을 �
 
 | 필드 | 설명 |
 | --- | --- |
-| `key` | 세션 이름. Claude Code의 세션 id입니다 |
+| `key` | 세션 이름. 세션 id를 주는 도구(Claude Code, Codex, Kimi Code, Pi, oh-my-pi, Hermes)는 그 id, 그 밖의 도구는 `terminal-<터미널 주소>`입니다 |
 | `tool` | 그 세션의 도구. `claude`, `codex`, `cursor`처럼 `muwi setup --tools`에 나오는 이름이고, 모르면 `unknown` |
 | `model` | 그 세션이 쓰는 모델. 그 도구의 훅이 알려 줄 때만 있습니다 |
 | `native` | 그 도구가 붙인 대화 id. 터미널을 세션으로 본 도구에서 하던 대화를 다시 열 때 씁니다 |
@@ -93,7 +93,7 @@ muwi가 남기는 파일의 위치와 형식을 정리했습니다. 기록을 �
 | `hooked` | 훅이 이 세션을 마지막으로 본 시각 |
 | `seenAt` | 이 세션이 마지막으로 기록한 시각 |
 
-`muwi` 명령은 환경 변수 `CLAUDE_CODE_SESSION_ID`에서, 훅은 Claude Code가 넘겨주는 `session_id`에서 세션 이름을 얻습니다. 두 값은 같습니다.
+`muwi` 명령은 그 도구가 셸 명령에 넘겨주는 환경 변수(Claude Code는 `CLAUDE_CODE_SESSION_ID`, Codex는 `CODEX_THREAD_ID` 등)에서, 훅은 그 도구가 넘겨주는 세션 id에서 세션 이름을 얻습니다. 두 값은 같습니다. 세션 id를 주지 않는 도구는 터미널 연결이 알려 주는 터미널을 세션으로 봅니다.
 
 ## 그 밖의 파일
 

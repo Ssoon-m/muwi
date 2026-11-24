@@ -6,7 +6,7 @@ AI에게 일을 맡기면 AI가 그 일의 진행 계획을 스스로 짜고, �
 
 ![muwi 그래프: 서브에이전트가 조사를 끝내고, 새 세션 둘이 화면 구현(작업 중)과 API 연결(응답 대기)을 맡은 작업. 오른쪽은 고른 노드의 기록](docs/panel.png)
 
-muwi는 AI 도구와 [Herdr 앱](https://herdr.dev)에서 동작합니다. AI 도구(Claude Code, Codex, Gemini CLI, Cursor CLI, Copilot CLI, OpenCode 등)에 커넥터를 넣으면 AI가 자기 계획과 진행을 muwi에 적고, Herdr 앱이 그 기록을 그래프로 보여 줍니다. 어느 도구에서나 같은 방법으로 기록합니다. 리뷰는 Codex가, 구현은 Claude Code가 맡아도 작업 하나의 그래프 하나로 보입니다.
+muwi는 AI 도구와 [Herdr 앱](https://herdr.dev)에서 동작합니다. AI 도구(Claude Code, Codex, Gemini CLI, Cursor CLI, Copilot CLI, OpenCode 등)에 커넥터를 넣으면 AI가 자기 계획과 진행을 muwi에 적고, Herdr 앱이 그 기록을 그래프로 보여 줍니다. 어느 도구에서나 같은 방법으로 기록합니다. 리뷰는 Codex가, 구현은 Claude Code가 맡는 식으로 도구를 섞어도 작업 하나의 그래프 하나로 보입니다.
 
 ## muwi를 쓰면 좋은 점
 
@@ -61,7 +61,7 @@ muwi는 패키지 세 개로 나뉩니다. 모두 `muwi` 명령을 내므로 하
 2. AI 도구에 커넥터를 넣으세요. 터미널용 `muwi` 명령과 Herdr 앱의 그래프 칸도 같이 들어갑니다.
 
    ```sh
-   muwi setup --all            # 이 컴퓨터에 깔린 AI 도구 전부. 하나만이면 --tool claude
+   muwi setup --all            # 이 컴퓨터에 깔린 AI 도구 전부. 하나만이면 --tool <도구> (예: --tool codex)
    ```
 
    커넥터는 그 도구에 AI에게 주는 지침, 사용법 skill, 진행을 지켜보는 훅을 넣습니다. 넣을 수 있는 도구는 `muwi setup --tools`에 나옵니다. 이미 열려 있던 AI 세션은 새로 여세요.
