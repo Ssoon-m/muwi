@@ -80,16 +80,16 @@ function wrapper(root: string, platform: NodeJS.Platform): string {
   return `#!/bin/sh\n${WRAPPER_MARK}. 고치지 말고 muwi setup을 다시 실행해요.\nMUWI_SETUP_NODE="${shPath(process.execPath, platform)}" exec "${shPath(path.join(root, 'bin', 'muwi'), platform)}" "$@"\n`;
 }
 
-/**
- * Windows의 PowerShell·cmd에서 쓸 muwi.cmd. setup을 실행한 Node로 cli.ts를 바로 실행한다.
- * 그 Node가 없어졌으면 PATH의 node를 쓴다 (Windows의 Herdr 앱이 띄운 프로그램도 사용자 PATH를 받는다)
- */
 /** 설치된 곳의 명령 파일: npm으로 받은 사본은 .js로 바꾼 cli.js, 저장소에서는 cli.ts */
 const cliFile = (root: string) => {
   const js = path.join(root, 'src', 'cli.js');
   return fs.existsSync(js) ? js : path.join(root, 'src', 'cli.ts');
 };
 
+/**
+ * Windows의 PowerShell·cmd에서 쓸 muwi.cmd. setup을 실행한 Node로 cli.ts를 바로 실행한다.
+ * 그 Node가 없어졌으면 PATH의 node를 쓴다 (Windows의 Herdr 앱이 띄운 프로그램도 사용자 PATH를 받는다)
+ */
 function cmdWrapper(root: string): string {
   return [
     '@echo off',
@@ -284,7 +284,6 @@ export function refreshSetup(o: SetupOptions): boolean {
   return true;
 }
 
-/** a가 b보다 낮은 버전인가 (1.2.10 > 1.2.9) */
 /**
  * PATH에 있는 다른 muwi 중 이 판보다 새 판. 없으면 null.
  * npm i -g는 Node마다 다른 자리에 깐다 (nvm으로 Node를 바꾸고 새로 깔았을 때). 그러면 훅과 ~/.local/bin/muwi는 옛 자리를 가리키고,
@@ -324,6 +323,7 @@ function packagesAt(dir: string, platform: NodeJS.Platform): { bin: string; root
   }
 }
 
+/** a가 b보다 낮은 버전인가 (1.2.10 > 1.2.9) */
 export function olderThan(a: string, b: string): boolean {
   const pa = a.split('.').map(n => parseInt(n, 10) || 0);
   const pb = b.split('.').map(n => parseInt(n, 10) || 0);
