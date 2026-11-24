@@ -48,13 +48,13 @@ muwi는 패키지 두 개로 나뉩니다. 둘 다 `muwi` 명령을 내므로 �
 
 | 패키지 | 들어 있는 것 |
 | --- | --- |
-| `herdr-muwi` | `muwi`의 모든 것에 더해 Herdr 앱의 작업 목록과 그래프 칸, 새 세션에 맡기기(`muwi run`), 레이아웃 바꾸기 |
-| `muwi` | 기록, 명령(`muwi plan`, `muwi show`…), AI에게 주는 지침, AI 도구 커넥터. 그래프 없이 기록만 쓸 때 |
+| `@muwi/herdr-app` | `@muwi/core`의 모든 것에 더해 Herdr 앱의 작업 목록과 그래프 칸, 새 세션에 맡기기(`muwi run`), 레이아웃 바꾸기 |
+| `@muwi/core` | 기록, 명령(`muwi plan`, `muwi show`…), AI에게 주는 지침, AI 도구 커넥터. 그래프 없이 기록만 쓸 때 |
 
 1. 설치하세요.
 
    ```sh
-   npm i -g herdr-muwi
+   npm i -g @muwi/herdr-app
    ```
 
 2. AI 도구에 커넥터를 넣으세요. 터미널용 `muwi` 명령과 Herdr 앱의 그래프 칸도 같이 들어갑니다.
@@ -147,4 +147,4 @@ AI가 기록에서 원인을 찾습니다. 예를 들어 브랜치를 만든 노
 
 ## 라이선스
 
-[MIT](LICENSE). herdr-muwi가 그래프 배치에 쓰는 [elkjs](https://github.com/kieler/elkjs)는 의존 패키지로 받고, 라이선스는 EPL-2.0입니다.
+[MIT](LICENSE). `@muwi/herdr-app`이 그래프 배치에 쓰는 [elkjs](https://github.com/kieler/elkjs)는 의존 패키지로 받고, 라이선스는 EPL-2.0입니다.

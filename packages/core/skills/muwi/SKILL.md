@@ -73,7 +73,7 @@ muwi plan --why "요구사항이 두 화면으로 늘어남" '<새 계획 JSON �
 | --- | --- | --- |
 | 직접 | `"run": "me"` 또는 비워 둔다 | 계획을 낸 세션이 그대로 한다 |
 | 서브에이전트 | `"run": "subagent"` | 에이전트의 서브에이전트 도구로 띄운다 (Claude Code는 Agent 도구) |
-| 새 세션 | `"run": "session"`, 보여 줄 곳을 정했으면 `"show": "pane"` 또는 `"tab"` | `muwi run <id> "<맡길 일>"`. Herdr 앱 안에서, herdr-muwi로 깔았을 때만 된다 |
+| 새 세션 | `"run": "session"`, 보여 줄 곳을 정했으면 `"show": "pane"` 또는 `"tab"` | `muwi run <id> "<맡길 일>"`. Herdr 앱 안에서, `@muwi/herdr-app`으로 깔았을 때만 된다 |
 
 - `run`과 `show`는 정했을 때만 적는다. 도중에 생각이 바뀌면 계획을 고쳐 적는다 (`muwi plan --why`).
 - 계획에 적은 것과 다르게 끝난 노드는 그래프에 "계획과 다름"으로 보인다. 막지는 않는다.
@@ -99,7 +99,7 @@ muwi node <id> done "<결과 한 줄>" --work <작업>
 
 ### 새 세션에 맡길 때
 
-Herdr 앱 안에서, herdr-muwi로 깔았을 때만 된다. `muwi --help`에 `muwi run`이 없으면 서브에이전트에 맡기거나 직접 한다.
+Herdr 앱 안에서, `@muwi/herdr-app`으로 깔았을 때만 된다. `muwi --help`에 `muwi run`이 없으면 서브에이전트에 맡기거나 직접 한다.
 
 ```sh
 muwi run impl "목록 화면에 상세 링크를 추가해줘. 범위는 src/product/list.tsx" --cwd ~/work/shop-web-PROJ-123 --show pane
@@ -178,5 +178,5 @@ muwi show <작업>     # 노드, 걸린 시간, 누가 했는지(세션·새 세
 - `plan.json`과 `events.jsonl`을 직접 고치지 않는다. `muwi`로만 적는다.
 - `muwi` 명령이 없으면 기록 없이 평소대로 진행하고, 설치가 필요하다고 한 번 알린다.
 - 사용자가 터미널에서 `muwi`를 쓰거나 Herdr 앱에서 그래프를 보고 싶어 하면 `muwi setup`을 실행한다. 터미널용 명령과 그래프 칸을 넣는다. 실행 전에 무엇을 넣는지 알린다.
-- (Herdr 앱, herdr-muwi) `muwi setup`이나 `muwi layout --status`가 "muwi 칸이 없어요"라고 하면, 사용자에게 Herdr 앱 화면을 바꿀지 묻는다. 바꾸면 사이드바의 Agents 자리에 작업 목록이, 터미널 아래에 그래프가 생기고, 지금 레이아웃은 복제본을 바꾸므로 그대로 남는다고 알린다. 동의하면 `muwi layout`, 되돌려 달라고 하면 `muwi layout --remove`. 묻지 말라고 하면 `muwi config layout off`. 화면은 사용자가 꾸민 것이므로 동의 없이 `muwi layout`을 실행하지 않는다.
+- (Herdr 앱, `@muwi/herdr-app`) `muwi setup`이나 `muwi layout --status`가 "muwi 칸이 없어요"라고 하면, 사용자에게 Herdr 앱 화면을 바꿀지 묻는다. 바꾸면 사이드바의 Agents 자리에 작업 목록이, 터미널 아래에 그래프가 생기고, 지금 레이아웃은 복제본을 바꾸므로 그대로 남는다고 알린다. 동의하면 `muwi layout`, 되돌려 달라고 하면 `muwi layout --remove`. 묻지 말라고 하면 `muwi config layout off`. 화면은 사용자가 꾸민 것이므로 동의 없이 `muwi layout`을 실행하지 않는다.
 - 기록은 일을 대신하지 않는다. 노드를 끝냈다고 적기 전에 실제로 끝났는지 확인한다.
