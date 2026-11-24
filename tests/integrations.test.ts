@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -162,4 +163,23 @@ test('남의 훅은 그대로: Cursor의 hooks.json과 Kimi Code의 config.toml�
   removeSetup(records);
   assert.deepEqual(JSON.parse(fs.readFileSync(cursorFile, 'utf8')), { version: 1, hooks: { stop: [{ command: './mine.sh' }] } });
   assert.equal(fs.readFileSync(kimiFile, 'utf8'), 'model = "kimi-x"\n\n[[hooks]]\nevent = "Stop"\ncommand = "mine.sh"\n');
+});
+
+test('muwi hook --from <도구>: 그 도구의 형식으로 읽고 답한다 (종료 코드와 표준 오류로 답하는 도구, 사건 이름을 명령이 알려 주는 도구)', () => {
+  const CLI = path.join(ROOT, 'src', 'cli.ts');
+  const run = (args: string[], payload: object) => {
+    const home = tmp('home');
+    return spawnSync(process.execPath, [CLI, 'hook', ...args], { input: JSON.stringify(payload), encoding: 'utf8', env: { HOME: home, PATH: process.env.PATH, MUWI_DIR: path.join(home, '.muwi') } });
+  };
+  // Mastra Code: 막을 때 종료 코드 2와 표준 오류
+  const mastra = run(['nudge', '--from', 'mastracode'], EDITS.mastracode);
+  assert.equal(mastra.status, 2);
+  assert.match(mastra.stderr, /muwi: 지금 하려는 일의 계획이 아직 없어요/);
+  // Antigravity CLI: 입력에 사건 이름이 없어 명령이 알려 준다. 볼 일이 없어도 빈 JSON을 낸다
+  const { hook_event_name: _name, ...bare } = EDITS['antigravity-cli'];
+  const agy = run(['nudge', '--from', 'antigravity-cli', '--event', 'PreToolUse'], bare);
+  assert.equal(JSON.parse(agy.stdout).decision, 'deny');
+  assert.equal(run(['--from', 'antigravity-cli', '--event', 'PostToolUse'], { conversationId: 'c', toolCall: { name: 'view_file', args: { AbsolutePath: '/x/a.md' } } }).stdout.trim(), '{}');
+  // 모르는 도구면 아무것도 하지 않는다
+  assert.deepEqual([run(['nudge', '--from', 'nope'], EDITS.claude).status, run(['nudge', '--from', 'nope'], EDITS.claude).stdout], [0, '']);
 });

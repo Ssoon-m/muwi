@@ -96,7 +96,7 @@ process.stdout.on('error', (e: NodeJS.ErrnoException) => {
   throw e;
 });
 
-const VALUED = new Set(['work', 'request', 'title', 'why', 'by', 'file', 'after', 'before', 'result', 'run', 'show', 'name', 'agent', 'cwd', 'graph', 'fit']);
+const VALUED = new Set(['work', 'request', 'title', 'why', 'by', 'file', 'after', 'before', 'result', 'run', 'show', 'name', 'agent', 'cwd', 'graph', 'fit', 'from', 'event', 'tool']);
 
 function parseArgs(argv: string[]) {
   const pos: string[] = [];
