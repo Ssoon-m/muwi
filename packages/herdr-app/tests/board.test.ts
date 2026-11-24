@@ -1,4 +1,4 @@
-// Herdr 화면의 명령과 설치: 그래프 칸이 읽는 board, 화면 설정(layout), muwi setup이 넣는 그래프 칸.
+// Herdr 앱 보기: 그래프 칸이 읽는 board(코어의 명령에 보기가 더한 값), 화면 설정(config layout), muwi setup이 넣는 그래프 칸.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -6,13 +6,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { setHost } from '@muwi/core/host';
+import { setTerminals, setViews } from '@muwi/core/plugins';
 import { readInstall, removeSetup, runSetup } from '@muwi/core/setup';
-import herdr from '../src/host.ts';
+import herdr from '@muwi/herdr/terminals';
+import herdrApp from '../src/view.ts';
 
-/** @muwi/herdr-app의 muwi 명령: Herdr 화면을 붙인 muwi */
+/** @muwi/herdr-app의 muwi 명령: Herdr 터미널 연결과 Herdr 앱 보기를 붙인 muwi */
 const CLI = path.resolve(import.meta.dirname, '../bin/muwi.js');
-const HERDR_HOST = path.resolve(import.meta.dirname, '../src/host.ts');
+const VIEW = path.resolve(import.meta.dirname, '../src/view.ts');
+const TERMINALS = fileURLToPath(import.meta.resolve('@muwi/herdr/terminals'));
 /** 코어(@muwi/core)가 깔린 곳 */
 const CORE = path.dirname(fileURLToPath(import.meta.resolve('@muwi/core/package.json')));
 
@@ -71,10 +73,11 @@ test('muwi board: 그래프 칸이 터미널과 작업을 잇도록 세션과 �
   assert.equal(JSON.parse(muwi(['board']).out).suggest, false);
 });
 
-test('muwi setup: Herdr 앱이 있으면 그래프 칸을 넣고 화면의 경로를 적어 둔다. --remove로 뺀다', t => {
-  // 화면을 불러온 경로를 적어 두면 muwi 명령과 훅이 그 화면을 쓴다
-  setHost(herdr, HERDR_HOST);
-  t.after(() => setHost(null));
+test('muwi setup: Herdr 앱이 있으면 그래프 칸을 넣고 연결과 보기의 경로를 적어 둔다. --remove로 뺀다', t => {
+  // 불러온 경로를 적어 두면 muwi 명령과 훅이 같은 연결과 보기를 쓴다
+  setTerminals(herdr, TERMINALS);
+  setViews([herdrApp], [VIEW]);
+  t.after(() => { setTerminals(null); setViews([]); });
   const home = (withApp: boolean) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-home-'));
     if (withApp) fs.mkdirSync(path.join(dir, '.config', 'herdr-app', 'mods'), { recursive: true });
@@ -85,21 +88,15 @@ test('muwi setup: Herdr 앱이 있으면 그래프 칸을 넣고 화면의 경�
   const lines: string[] = [];
   const skipped = runSetup({ root: CORE, version: '0.1.0', dir: none.records, env: none.env, log: l => lines.push(l) });
   assert.match(lines.join('\n'), /Herdr 앱이 없어/);
-  assert.equal(skipped.hosted, undefined);
+  assert.deepEqual(skipped.views, [{ path: VIEW }]);
   // 앱이 있으면 칸을 넣는다. 다시 해도 한 벌이다
   const h = home(true);
   runSetup({ root: CORE, version: '0.1.0', dir: h.records, env: h.env });
   runSetup({ root: CORE, version: '0.1.0', dir: h.records, env: h.env });
   const mod = path.join(h.dir, '.config', 'herdr-app', 'mods', 'muwi');
   assert.deepEqual(fs.readdirSync(mod).sort(), ['arc.svg', 'main.js', 'mod.json']);
-  assert.deepEqual([readInstall(h.records)!.host, readInstall(h.records)!.hosted], [HERDR_HOST, { mod }]);
+  assert.deepEqual([readInstall(h.records)!.terminals, readInstall(h.records)!.views], [TERMINALS, [{ path: VIEW, installed: { mod } }]]);
   removeSetup(h.records);
   assert.equal(fs.existsSync(mod), false);
   assert.equal(readInstall(h.records), null);
-  // 0.6.0까지의 기록(herdr: 칸 폴더)도 뺀다
-  runSetup({ root: CORE, version: '0.1.0', dir: h.records, env: h.env });
-  const old = readInstall(h.records)!;
-  fs.writeFileSync(path.join(h.records, 'setup.json'), JSON.stringify({ ...old, hosted: undefined, host: undefined, herdr: mod }));
-  removeSetup(h.records);
-  assert.equal(fs.existsSync(mod), false);
 });
