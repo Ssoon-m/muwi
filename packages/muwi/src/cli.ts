@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, adoptSpawn, guideUpdate, handleHook, sessionInstructions } from './hook.ts';
-import { host, loadHost } from './host.ts';
+import { host, hostFailure, loadHost } from './host.ts';
 import { Fail, dur, join, needPlan, out, parseArgs, resolveWork, str, type Args } from './kit.ts';
 import { fromSubagent, markNode } from './node.ts';
 import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
@@ -536,18 +536,26 @@ function cmdHook(a: Args, dir: string) {
     // 새 세션이 열릴 때뿐 아니라 열려 있는 세션에 말을 걸 때도 맞춘다 (더 낮은 버전으로는 맞추지 않는다)
     const result = handleHook(payload, dir, mode, process.env, ROOT, str(a, 'from') ?? 'claude', h => {
       if (h.kind === 'session-start' || h.kind === 'prompt') refreshSetup({ root: ROOT, version: version(), dir });
+      // 적어 둔 화면을 불러오지 못했으면 세션이 시작될 때 한 번 남긴다 (그래프 칸과 세션 상태가 안 나오는 까닭)
+      const failed = hostFailure();
+      if (failed && h.kind === 'session-start') hookError(dir, `화면을 불러오지 못했어요: ${failed.from} (${failed.reason})`);
     });
     if (result.stdout) out(result.stdout);
     // 종료 코드와 표준 오류로 답을 받는 도구가 있다 (막을 때 2와 이유)
     if (result.stderr) process.stderr.write(result.stderr);
     if (result.code) process.exitCode = result.code;
   } catch (e: any) {
-    try {
-      fs.mkdirSync(dir, { recursive: true });
-      fs.appendFileSync(`${dir}/.hook-errors.log`, `${nowIso()} ${e?.message ?? e}\n`);
-    } catch {
-      // 남길 곳도 없으면 그냥 넘어간다
-    }
+    hookError(dir, String(e?.message ?? e));
+  }
+}
+
+/** 훅의 문제는 세션을 막지 않고 파일에만 남긴다 */
+function hookError(dir: string, message: string) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(`${dir}/.hook-errors.log`, `${nowIso()} ${message}\n`);
+  } catch {
+    // 남길 곳도 없으면 그냥 넘어간다
   }
 }
 
@@ -706,7 +714,11 @@ async function run(cmd: string | undefined, a: Args, dir: string) {
     case undefined: case 'help': case '--help': case '-h': return out(help());
     default:
       // 화면이 더하는 명령인데 화면이 없다
-      if (cmd && HOSTED.has(cmd)) throw new Fail(`muwi ${cmd}는 Herdr 앱 화면과 함께 쓰는 명령이에요. herdr-muwi로 깔면 생겨요.`);
+      if (cmd && HOSTED.has(cmd)) {
+        const failed = hostFailure();
+        if (failed) throw new Fail(`muwi ${cmd}는 화면이 더하는 명령인데, 화면을 불러오지 못했어요: ${failed.from} (${failed.reason}). 화면 패키지를 옮겼으면 그 패키지의 muwi로 muwi setup을 다시 실행하세요.`);
+        throw new Fail(`muwi ${cmd}는 Herdr 앱 화면과 함께 쓰는 명령이에요. herdr-muwi로 깔면 생겨요.`);
+      }
       throw new Fail(`모르는 명령: ${cmd}\n\n${help()}`);
   }
 }

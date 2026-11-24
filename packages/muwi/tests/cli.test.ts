@@ -397,3 +397,42 @@ test('화면 없이: 기록과 보기는 되고, 화면이 더하는 명령은 �
   assert.equal(hook.code, 0);
   assert.match(JSON.parse(hook.out).hookSpecificOutput.additionalContext, /작업 진행 방식 \(muwi\)/);
 });
+
+test('적어 둔 화면을 불러오지 못할 때: 업데이트 뒤에 다시 맞춰도 화면이 넣은 것을 잃지 않고, 까닭을 남기고, 빼면 화면 칸도 뺀다', () => {
+  const { dir, muwi } = bench();
+  assert.equal(muwi(['setup'], { env: { MUWI_HOST: FIXTURE_HOST } }).code, 0);
+  const setupFile = path.join(dir, 'setup.json');
+  const mod = path.join(dir, 'fixture-mod');
+  assert.ok(fs.existsSync(mod));
+  // muwi를 업데이트했는데(기록된 버전이 다르다) 화면 패키지는 옮겨져서 불러오지 못한다
+  fs.writeFileSync(setupFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(setupFile, 'utf8')), version: '0.0.1', host: '/no/such/host.ts' }));
+  const hook = muwi(['hook'], { session: null, input: JSON.stringify({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' }) });
+  assert.equal(hook.code, 0);
+  const after = JSON.parse(fs.readFileSync(setupFile, 'utf8'));
+  assert.notEqual(after.version, '0.0.1');
+  assert.equal(after.host, '/no/such/host.ts');
+  assert.deepEqual(after.hosted, { mod });
+  assert.match(fs.readFileSync(path.join(dir, '.hook-errors.log'), 'utf8'), /화면을 불러오지 못했어요: .*no.such.host\.ts/);
+  // 화면 명령은 화면이 없다고 하지 않고 불러오지 못한 까닭을 알린다
+  assert.match(muwi(['run', 'impl', '구현해줘']).err, /화면이 더하는 명령인데, 화면을 불러오지 못했어요: .*no.such.host\.ts/);
+  // 화면 없이 빼도 화면이 넣은 칸은 뺀다
+  const removed = muwi(['setup', '--remove']);
+  assert.equal(removed.code, 0, removed.err);
+  assert.match(removed.out, /화면을 불러오지 못해서 화면 칸만 뺐어요/);
+  assert.equal(fs.existsSync(mod), false);
+});
+
+test('setup.json이 깨져도 명령과 훅은 돈다 (훅은 지침을 준다). muwi setup은 새로 적는다', () => {
+  const { dir, muwi } = bench();
+  const setupFile = path.join(dir, 'setup.json');
+  fs.writeFileSync(setupFile, '{"root": "/x", "version"');
+  assert.equal(muwi(['status']).code, 0);
+  const hook = muwi(['hook'], { session: null, input: JSON.stringify({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' }) });
+  assert.equal(hook.code, 0);
+  assert.match(JSON.parse(hook.out).hookSpecificOutput.additionalContext, /작업 진행 방식 \(muwi\)/);
+  assert.match(fs.readFileSync(path.join(dir, '.hook-errors.log'), 'utf8'), /setup\.json \(JSON이 아니에요\)/);
+  const setup = muwi(['setup']);
+  assert.equal(setup.code, 0, setup.err);
+  assert.match(setup.out, /새로 적어요/);
+  assert.equal(JSON.parse(fs.readFileSync(setupFile, 'utf8')).root, path.resolve(import.meta.dirname, '..'));
+});

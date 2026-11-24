@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { host, hostPath, type HostInstall } from './host.ts';
+import { host, hostFailure, hostPath, type HostInstall } from './host.ts';
 import { nowIso, readJson, writeJson } from './store.ts';
 import { copyDir, installBlock, shPath, uninstallBlock, writeText } from './connectors/files.ts';
 import { adapterOf } from './connectors/index.ts';
@@ -133,7 +133,13 @@ export function runSetup(o: SetupOptions): Install {
   const log = o.log ?? (() => {});
   const platform = o.platform ?? process.platform;
   const p = places(env);
-  const before = readInstall(o.dir);
+  let before: Install | null = null;
+  try {
+    before = readInstall(o.dir);
+  } catch (e: any) {
+    // 기록이 깨졌다: 새로 적는다. 무엇을 넣었는지 모르므로 전에 넣은 도구는 다시 골라야 한다
+    log(`${e?.message ?? e}. 새로 적어요. 전에 커넥터를 넣은 도구가 있으면 다시 골라 주세요 (muwi setup --tool <도구>).`);
+  }
   const install: Install = { root: o.root, version: o.version, at: nowIso() };
   const block = fs.readFileSync(path.join(o.root, 'hooks', 'instructions.md'), 'utf8');
   const skill = path.join(o.root, 'skills', 'muwi');
@@ -167,7 +173,15 @@ export function runSetup(o: SetupOptions): Install {
     if (hosted) install.hosted = hosted;
   }
   const from = hostPath();
+  const failed = hostFailure();
   if (from) install.host = from;
+  else if (failed && before?.host) {
+    // 적어 둔 화면을 불러오지 못했다 (화면 패키지를 지웠거나 옮겼다). 화면이 넣은 것을 모르므로 전 기록을 그대로 둔다.
+    // 지우면 그 뒤로 명령과 훅이 화면을 다시 불러오지 않고, setup --remove가 화면이 넣은 것을 빼지 못한다
+    install.host = before.host;
+    if (before.hosted) install.hosted = before.hosted;
+    log(`화면을 불러오지 못해서 화면이 넣은 것은 그대로 뒀어요: ${failed.from} (${failed.reason}). 화면 패키지를 옮겼으면 그 패키지의 muwi로 muwi setup을 다시 실행하세요.`);
+  }
 
   const want = new Set<string>([
     ...(o.tools ?? []), ...(o.claude ? ['claude'] : []), ...(o.codex ? ['codex'] : []),
@@ -233,7 +247,11 @@ export function removeSetup(dir: string, log: (line: string) => void = () => {})
   if (hosted) {
     const h = host();
     if (h.remove) h.remove(hosted, { dir, log });
-    else if (hosted.mod) fs.rmSync(hosted.mod, { recursive: true, force: true });
+    else {
+      if (hosted.mod) fs.rmSync(hosted.mod, { recursive: true, force: true });
+      const failed = hostFailure();
+      if (failed && install.hosted) log(`화면을 불러오지 못해서 화면 칸만 뺐어요: ${failed.from} (${failed.reason}). 화면이 바꾼 것(레이아웃 등)은 되돌리지 못했어요.`);
+    }
   }
   // 0.5.x의 기록(tools 없이 codex, claude만 있다)도 같은 모양으로 읽는다
   const tools: Record<string, ToolInstall> = {
@@ -252,7 +270,13 @@ export function removeSetup(dir: string, log: (line: string) => void = () => {})
  * 세션이 시작될 때마다 부르므로, 달라진 게 없으면 파일 하나만 읽고 끝난다.
  */
 export function refreshSetup(o: SetupOptions): boolean {
-  const install = readInstall(o.dir);
+  let install: Install | null;
+  try {
+    install = readInstall(o.dir);
+  } catch {
+    // 기록이 깨졌다: 맞추지 않는다 (훅은 이것 때문에 지침을 못 주면 안 된다. muwi setup을 다시 하면 새로 적는다)
+    return false;
+  }
   if (!install || (install.root === o.root && install.version === o.version)) return false;
   // 업데이트하기 전부터 열려 있던 세션이 옛 판의 훅을 쓰더라도 새 설치를 옛 판으로 되돌리지 않는다
   if (olderThan(o.version, install.version)) return false;

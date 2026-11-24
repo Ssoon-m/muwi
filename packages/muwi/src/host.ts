@@ -58,31 +58,52 @@ const NONE: Host = {
 
 let current: Host = NONE;
 let currentPath: string | null = null;
+let failed: HostFailure | null = null;
+
+/** 적어 둔 화면을 불러오지 못한 까닭. from: 화면의 경로 (setup.json을 읽지 못했으면 그 파일) */
+export type HostFailure = { from: string; reason: string };
 
 /** 지금 쓰는 화면. 없으면 아무것도 모르는 화면 */
 export const host = (): Host => current;
 /** 지금 쓰는 화면을 불러온 경로 (muwi setup이 setup.json에 적어 둔다). 화면이 없거나 코드로 정했으면 null */
 export const hostPath = (): string | null => currentPath;
+/** 적어 둔 화면을 불러오지 못했으면 그 경로와 까닭. 화면을 적어 두지 않았거나 불러왔으면 null */
+export const hostFailure = (): HostFailure | null => failed;
 /** 화면을 정한다 (시험, 화면 패키지의 입구) */
 export function setHost(h: Host | null, from: string | null = null) {
   current = h ?? NONE;
   currentPath = h ? from : null;
+  failed = null;
 }
 
 /**
  * 화면을 불러온다: $MUWI_HOST, 없으면 muwi setup이 적어 둔 경로 (setup.json의 host).
- * 불러오지 못하면 화면 없이 돈다. 훅이 이것 때문에 실패하면 안 된다
+ * 불러오지 못하면 화면 없이 돌고, 까닭은 hostFailure()로 남긴다. 훅과 muwi setup이 이것 때문에 실패하면 안 된다
  */
 export async function loadHost(dir: string, env: NodeJS.ProcessEnv = process.env): Promise<Host> {
-  const spec = env.MUWI_HOST || readJson<{ host?: string }>(path.join(dir, 'setup.json'))?.host;
+  let spec: string | undefined = env.MUWI_HOST;
+  if (!spec) {
+    const file = path.join(dir, 'setup.json');
+    try {
+      spec = readJson<{ host?: string }>(file)?.host;
+    } catch (e: any) {
+      // setup.json이 깨졌다 (muwi setup을 다시 하면 새로 적는다)
+      failed = { from: file, reason: firstLine(e).replace(`: ${file}`, '') };
+      return current;
+    }
+  }
   if (!spec) return current;
   const file = path.resolve(spec);
   try {
     const m = await import(pathToFileURL(file).href);
     const h = (m.default ?? m.host) as Host | undefined;
     if (h && typeof h.place === 'function') setHost(h, file);
-  } catch {
-    // 화면 패키지를 지웠거나 옮겼다: 화면 없이 돈다 (muwi setup을 다시 하면 새 경로를 적는다)
+    else failed = { from: file, reason: '화면 규격(host)을 내보내지 않아요' };
+  } catch (e: any) {
+    // 화면 패키지를 지웠거나 옮겼다 (muwi setup을 다시 하면 새 경로를 적는다)
+    failed = { from: file, reason: firstLine(e) };
   }
   return current;
 }
+
+const firstLine = (e: any) => String(e?.message ?? e).split('\n')[0];
