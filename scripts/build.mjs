@@ -17,9 +17,13 @@ const PACKAGES = {
   'herdr-muwi': ['bin', 'app'],
 };
 
-/** 타입을 지우고, 상대 경로로 부르는 .ts를 .js로 바꾼다 (import, export … from, import()) */
-export function toJs(code, file) {
-  const js = stripTypeScriptTypes(code, { mode: 'strip', sourceUrl: file });
+/**
+ * 타입을 지우고, 상대 경로로 부르는 .ts를 .js로 바꾼다 (import, export … from, import()).
+ * sourceUrl은 주지 않는다: 주면 파일 끝에 빌드한 컴퓨터의 절대 경로가 박혀 배포되고, Node가 오류 위치를 그 경로로 보여 준다.
+ * 줄 위치는 그대로라 오류의 줄 번호는 원본 .ts와 같다
+ */
+export function toJs(code) {
+  const js = stripTypeScriptTypes(code, { mode: 'strip' });
   return js.replace(/((?:from|import)\s*\(?\s*['"])(\.{1,2}\/[^'"\n]+)\.ts(['"])/g, '$1$2.js$3');
 }
 
@@ -35,7 +39,7 @@ function compile(from, to) {
     if (entry.isDirectory()) compile(a, path.join(to, entry.name));
     else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.d.ts')) {
       fs.mkdirSync(to, { recursive: true });
-      fs.writeFileSync(path.join(to, entry.name.replace(/\.ts$/, '.js')), toJs(fs.readFileSync(a, 'utf8'), a));
+      fs.writeFileSync(path.join(to, entry.name.replace(/\.ts$/, '.js')), toJs(fs.readFileSync(a, 'utf8')));
     }
   }
 }
