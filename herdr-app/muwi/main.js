@@ -1548,10 +1548,10 @@ export default class Muwi extends View {
     const agent = this.agentOf(view, n);
     const terminal = this.terminalOf(view, n);
     const to = this.nodeTerminal(view, n);
-    const sessionName = (key) => {
+    const sessionName = (key, model) => {
       const i = key ? view.sessions?.[key] : null;
       // 어느 도구의 어떤 모델인지 (모델은 그 도구의 훅이 알려 줄 때만)
-      const made = [i?.tool && i.tool !== "unknown" ? (view.toolNames?.[i.tool] ?? i.tool) : null, i?.model].filter(Boolean).join(" · ");
+      const made = [i?.tool && i.tool !== "unknown" ? (view.toolNames?.[i.tool] ?? i.tool) : null, model ?? i?.model].filter(Boolean).join(" · ");
       return `${i?.label ?? ""}${made ? ` (${made})` : ""}`;
     };
     /** 회차를 누가 했는지 한 줄 */
@@ -1563,7 +1563,8 @@ export default class Muwi extends View {
       const own = who.agents.filter((a) => a.own);
       const helped = who.agents.filter((a) => !a.own);
       if (who.kind === "subagent") return own.length ? count(own) : `${count(helped)} · 세션 ${view.sessions?.[who.session]?.label ?? ""}이 시작함`;
-      const base = who.kind === "session" ? `새 세션 ${sessionName(who.session)}` : `세션 ${sessionName(who.session)}`;
+      // 이 회차를 시작할 때의 모델 (노드마다 적힌 것). 없으면 그 세션의 지금 모델
+      const base = who.kind === "session" ? `새 세션 ${sessionName(who.session, who.model)}` : `세션 ${sessionName(who.session, who.model)}`;
       return [base, own.length ? count(own) : null, helped.length ? `${count(helped)}가 도움` : null].filter(Boolean).join(" + ");
     };
     // 실제로 한 쪽. 시작 전이면 뜨는 중인 세션
