@@ -13,8 +13,11 @@ export function handleHook(
   from = 'claude', seen?: (h: Happened) => void,
 ): HookResult {
   const adapter = adapterOf(from);
-  const happened = adapter?.from(payload, mode, env);
-  if (!adapter || !happened) return {};
+  if (!adapter) return {};
+  const nothing: HookResult = adapter.empty ? { stdout: adapter.empty } : {};
+  const happened = adapter.from(payload, mode, env);
+  if (!happened) return nothing;
   seen?.(happened);
-  return adapter.to(happened, handleEvent(happened, dir, env, root));
+  const result = adapter.to(happened, handleEvent(happened, dir, env, root));
+  return result.stdout || result.stderr || result.code ? result : nothing;
 }

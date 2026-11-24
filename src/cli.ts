@@ -13,7 +13,7 @@ import { attach, markSettled, readSession, recentSessions, sessionKey, sessionLa
 import { resumeFacts } from './resume.ts';
 import { checkMod, installedTools, newestPlugin, olderThan, readInstall, refreshSetup, removeSetup, runSetup } from './setup.ts';
 import { adapterOf } from './integrations/index.ts';
-import { TOOLS, toolById } from './integrations/tools.ts';
+import { TOOLS, launchCommand, toolById } from './integrations/tools.ts';
 import { GRAPH_AT, ScreenError, applyLayout, ensurePreview, removeLayout, screenState, type GraphAt, type Screen } from './screen.ts';
 import {
   SCHEMA, SHOW_IN, appendEvent, checkWorkName, clock, listWorks, nowIso, readConfig, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
@@ -629,6 +629,9 @@ function cmdHook(a: Args, dir: string) {
     const text = fs.readFileSync(0, 'utf8');
     const mode = a.pos[0] === 'guard' || a.pos[0] === 'nudge' ? a.pos[0] : 'record';
     const payload = JSON.parse(text);
+    // 입력에 사건 이름을 넣지 않는 도구는 훅 명령이 알려 준다 (--event)
+    const named = str(a, 'event');
+    if (named && payload && typeof payload === 'object' && !payload.hook_event_name) payload.hook_event_name = named;
     // 이 세션이 시작된 뒤에 더 새 muwi가 설치됐으면 그 버전이 이 훅을 처리하게 넘긴다.
     // 세션을 새로 열지 않아도 새 동작(지침, 기록 방식)이 적용된다. 훅이 걸리는 시점(hooks.json)만은 세션을 새로 열어야 바뀐다
     if (!process.env.MUWI_HOOK_PASSED) {
@@ -875,8 +878,9 @@ function cmdRun(a: Args, dir: string) {
   const cwd = str(a, 'cwd') ?? process.cwd();
   // 띄울 명령을 주지 않으면 맡기는 세션과 같은 도구로 띄운다
   const me = sessionKey();
-  const mine = toolById(me ? readSession(dir, me)?.tool : undefined)?.command ?? 'claude';
-  const agent = (str(a, 'agent') ?? mine).trim().split(/\s+/).filter(Boolean);
+  const template = launchCommand(me ? readSession(dir, me)?.tool : undefined);
+  const given = str(a, 'agent');
+  const agent = (given ?? template[0]).trim().split(/\s+/).filter(Boolean);
   if (!agent.length) throw new Fail('--agent에 띄울 명령이 없어요');
   const brief = `${task.trim()}\n\n(muwi) 작업 ${work}의 노드 ${id}(${node.title})를 맡았어요. 시작은 자동으로 적혀요. 끝나면 muwi node ${id} done "<결과 한 줄>"을 적고, hc send ${lead} "<결과나 막힌 점>"으로 알려요.`;
 
@@ -887,7 +891,9 @@ function cmdRun(a: Args, dir: string) {
   for (const candidate of [base, `${base.slice(0, 27)}-${Date.now().toString(36).slice(-4)}`]) {
     name = candidate;
     // 맡길 일은 명령 이름 바로 뒤에 둔다. 뒤에 두면 값을 여러 개 받는 옵션(--allowedTools 등)이 삼킨다
-    started = hc(['run', '--bg', '--json', '--name', candidate, '--cwd', cwd, '--label', `${LABEL_WORK}=${work}`, '--label', `${LABEL_NODE}=${id}`, '--', agent[0], brief, ...agent.slice(1)]);
+    // --agent로 준 명령은 그 모양 그대로. 주지 않았으면 그 도구가 첫 말을 받는 자리에 넣는다 (qwen -i "<첫 말>" 같은 것)
+    const argv = given ? [agent[0], brief, ...agent.slice(1)] : template.map(part => (part === '{prompt}' ? brief : part));
+    started = hc(['run', '--bg', '--json', '--name', candidate, '--cwd', cwd, '--label', `${LABEL_WORK}=${work}`, '--label', `${LABEL_NODE}=${id}`, '--', ...argv]);
     if (started.ok) break;
   }
   if (!started?.ok) throw new Fail(`새 세션을 띄우지 못했어요: ${(started?.err || started?.out || 'hc 명령이 없어요').trim()}`);
@@ -901,6 +907,8 @@ function cmdRun(a: Args, dir: string) {
     // 주소를 읽지 못하면 이름으로 가리킨다
   }
   if (!terminal) terminal = name;
+  // 첫 말을 명령으로 받지 못하는 도구는 뜬 뒤에 말로 보낸다
+  if (!given && !template.includes('{prompt}')) sent = hc(['send', terminal, brief]).ok;
 
   let placed = '';
   if (show) {

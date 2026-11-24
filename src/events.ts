@@ -164,9 +164,9 @@ export function isScratchPath(file: unknown, dir: string, env: NodeJS.ProcessEnv
 /**
  * 도구에서 일어난 일. 도구의 통합이 그 도구의 훅 입력을 이 모양으로 바꿔 준다.
  * tool: 알린 도구, session: 그 대화 (모르면 null), agent: 서브에이전트 안에서 일어났으면 그 id, cwd: 그 세션이 일하는 폴더,
- * model: 그 세션이 쓰는 모델 (도구가 알려 줄 때)
+ * model: 그 세션이 쓰는 모델 (도구가 알려 줄 때), native: 터미널을 세션으로 볼 때 그 도구가 붙인 대화 id
  */
-export type Happened = { tool: Session['tool']; session: string | null; agent?: string; cwd?: string; model?: string } & (
+export type Happened = { tool: Session['tool']; session: string | null; agent?: string; cwd?: string; model?: string; native?: string } & (
   /** 대화가 시작됐다. resumed: 대화가 요약돼 다시 시작했다 */
   | { kind: 'session-start'; resumed?: 'compact' }
   /** 사람이 새로 말을 걸었다 */
@@ -214,7 +214,7 @@ export function handleEvent(h: Happened, dir: string, env: NodeJS.ProcessEnv = p
   if (!key) return {};
   // hooked: 훅이 이 세션을 보고 있다는 표시. 이게 있어야 "읽은 skill이 없다"를 믿을 수 있다
   // 서브에이전트의 모델은 세션의 모델로 적지 않는다
-  const patch = { tool: h.tool, ...(h.cwd ? { cwd: h.cwd } : {}), ...(h.model && !agent ? { model: h.model } : {}), hooked: nowIso() };
+  const patch = { tool: h.tool, ...(h.cwd ? { cwd: h.cwd } : {}), ...(h.model && !agent ? { model: h.model } : {}), ...(h.native && !agent ? { native: h.native } : {}), hooked: nowIso() };
 
   if (h.kind === 'before-edit' || h.kind === 'before-spawn') {
     if (!readConfig(dir).nudge) {

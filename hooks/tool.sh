@@ -8,6 +8,11 @@ tool="${1:-}"
 [ -n "$tool" ] || exit 0
 shift
 payload=$(cat)
+# 볼 일이 없으면 조용히 끝낸다. 답이 늘 JSON이어야 하는 도구에는 빈 JSON을 낸다
+skip() {
+  case "$tool" in antigravity-cli) printf '{}' ;; esac
+  exit 0
+}
 case "${1:-}" in
   guard)
     # push·PR 명령이거나, 서브에이전트가 muwi 명령을 실행할 때만 넘긴다 (서브에이전트가 맡은 노드를 잇는다)
@@ -16,17 +21,22 @@ case "${1:-}" in
       *'"agent_id"'*)
         case "$payload" in
           *muwi*) ;;
-          *) exit 0 ;;
+          *) skip ;;
         esac
         ;;
-      *) exit 0 ;;
+      *) skip ;;
     esac
     ;;
   nudge)
     # 작업에 붙었거나 계획 없이 진행하겠다고 밝힌 세션은 표시 파일이 있다
     sid=$(printf '%s' "$payload" | sed -n 's/.*"session_id" *: *"\([A-Za-z0-9_.-]*\)".*/\1/p' | head -n 1)
     runs="${MUWI_DIR:-$HOME/.muwi}"
-    if [ -n "$sid" ] && [ -f "$runs/.sessions/$sid.ok" ]; then exit 0; fi
+    if [ -n "$sid" ] && [ -f "$runs/.sessions/$sid.ok" ]; then skip; fi
+    # 셸 명령에 세션 id를 넘겨주지 않는 도구는 터미널을 세션으로 본다 (Codex, Kimi Code는 세션 id를 넘겨준다)
+    case "$tool" in
+      codex | kimi) ;;
+      *) if [ -n "${HC_TERMINAL_ID:-}" ] && [ -f "$runs/.sessions/hc-$HC_TERMINAL_ID.ok" ]; then skip; fi ;;
+    esac
     ;;
   *)
     # 도구를 쓴 뒤의 훅은 skill을 읽었을 때만 본다
@@ -34,7 +44,7 @@ case "${1:-}" in
       *'"tool_name"'*)
         case "$payload" in
           *SKILL.md* | *'"skill"'* | *'"Skill"'*) ;;
-          *) exit 0 ;;
+          *) skip ;;
         esac
         ;;
     esac

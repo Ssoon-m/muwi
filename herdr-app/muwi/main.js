@@ -670,7 +670,7 @@ export default class Muwi extends View {
           // 대화가 닫혔으면 새 대화가 muwi 기록을 읽고 이어 가게 연다 (그 작업을 하던 폴더에서)
           .when(Boolean(continuable), (el) => el.child(div().id("head-continue").flex_none().text_color(t.accent).cursor_pointer()
             .hover((s) => s.text_color(t.foreground))
-            .on_click((_e, cx) => { this.openTerminal("head-continue", [view.launcher || "claude", `${view.work} 작업 이어서 해줘`], view.cwd, view.work); cx.notify(); })
+            .on_click((_e, cx) => { this.openTerminal("head-continue", this.launchWith(view.launcher, `${view.work} 작업 이어서 해줘`), view.cwd, view.work); cx.notify(); })
             .child("새 대화로 이어 가기 ›")))))
       .when(Boolean(view) && this.size.width >= 860, (el) => el.child(h_flex().flex_none().gap(12)
         .child(legend("작업 중", c.doing)).child(legend("응답 대기", c.waiting)).child(legend("막힘", c.blocked)).child(legend("끝", c.done))))
@@ -769,7 +769,7 @@ export default class Muwi extends View {
     const folder = [want, view.cwd].find((p) => this.folderOk(view, p)) ?? null;
     const moved = want && !this.folderOk(view, want) ? want : null;
     // 띄우는 명령과 다시 여는 명령은 muwi가 그 세션의 도구에 맞게 알려 준다 (Claude Code, Codex …)
-    const tool = (key && view.launch?.[key]) || view.launcher || "claude";
+    const tool = (key && view.launch?.[key]) || view.launcher || ["claude", "{prompt}"];
     const again = key ? view.resume?.[key] : null;
     const buttons = [];
     // 대화가 남아 있고 그 폴더가 그대로일 때만 다시 열 수 있다 (아니면 "No conversation found" 같은 말로 끝난다)
@@ -778,7 +778,7 @@ export default class Muwi extends View {
     }
     if (n.status !== "done") {
       buttons.push(this.openRow(t, `continue-${n.id}`, "새 대화로 이어 가기", unstarted ? "muwi 기록(계획·맡긴 말)을 읽고 이어 가요" : "muwi 기록(계획·결과)을 읽고 이어 가요",
-        [tool, `${view.work} 작업의 ${n.id} 노드 이어서 해줘`], folder, n.id));
+        this.launchWith(tool, `${view.work} 작업의 ${n.id} 노드 이어서 해줘`), folder, n.id));
     }
     if (!buttons.length) return { rows: [], choices: 0 };
     const note = (text) => div().text_size(10.5).text_color(t.dim).child(text);
@@ -806,6 +806,12 @@ export default class Muwi extends View {
         .on_click((_e, cx) => { this.openTerminal(id, argv, folder, name); cx.notify(); })
         .child(busy ? "여는 중…" : text)))
       .child(div().text_size(10.5).text_color(t.dim).child(about));
+  }
+
+  /** 첫 말과 함께 새 대화를 띄우는 명령. muwi가 그 도구의 모양으로 알려 준 것에 첫 말을 넣는다 (첫 말을 못 받는 도구는 명령만) */
+  launchWith(template, prompt) {
+    const list = Array.isArray(template) && template.length ? template : ["claude", "{prompt}"];
+    return list.map((part) => (part === "{prompt}" ? prompt : part));
   }
 
   /** 새 탭에서 명령을 연다 (그 세션이 일하던 폴더에서). 연달아 눌러도 한 번만 연다 */
@@ -1538,7 +1544,7 @@ export default class Muwi extends View {
           .children(loose.map((f) => line(`⚑ ${f.text}`, t.blocked)))))
         .when(view.state === "stalled", (el) => el.child(v_flex().gap(8).child(label("이어서 하려면"))
           .child(div().text_size(10.5).text_color(t.dim).child(view.between === "gone" ? "이 작업을 맡은 세션이 없어요" : "하던 세션이 모두 닫혔어요"))
-          .child(this.openRow(t, "continue-work", "새 대화로 이어 가기", "muwi 기록(계획·결과)을 읽고 멈춘 노드부터 이어 가요", [view.launcher || "claude", `${view.work} 작업 이어서 해줘`],
+          .child(this.openRow(t, "continue-work", "새 대화로 이어 가기", "muwi 기록(계획·결과)을 읽고 멈춘 노드부터 이어 가요", this.launchWith(view.launcher, `${view.work} 작업 이어서 해줘`),
             this.folderOk(view, view.cwd) ? view.cwd : null, view.work))
           .when(Boolean(view.cwd), (el2) => el2.child(div().text_size(10.5).text_color(t.dim).child(this.folderOk(view, view.cwd)
             ? `누르면 ${this.shortPath(view.cwd)}에서 새 탭으로 열려요` : `작업 폴더(${this.shortPath(view.cwd)})가 없어져서 기본 폴더에서 새 탭으로 열려요`)))));
