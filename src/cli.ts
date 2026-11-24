@@ -12,7 +12,7 @@ import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, typ
 import { attach, markSettled, readSession, recentSessions, sessionKey, sessionLabel, touchSession } from './session.ts';
 import { resumeFacts } from './resume.ts';
 import { checkMod, newestPlugin, olderThan, refreshSetup, removeSetup, runSetup } from './setup.ts';
-import { GRAPH_AT, ScreenError, applyLayout, removeLayout, screenState, type GraphAt, type Screen } from './screen.ts';
+import { GRAPH_AT, ScreenError, applyLayout, ensurePreview, removeLayout, screenState, type GraphAt, type Screen } from './screen.ts';
 import {
   SCHEMA, SHOW_IN, appendEvent, checkWorkName, clock, listWorks, nowIso, readConfig, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
   type Config, type NodeStatus, type Plan, type RunBy, type ShowIn,
@@ -670,6 +670,8 @@ function cmdSetup(a: Args, dir: string) {
   if (!install.claude) out('Claude Code의 훅·지침·사용법 skill은 플러그인이 넣어 줘요. 플러그인 없이 쓰려면 muwi setup --claude');
   else out('이미 열려 있는 Claude Code 세션은 다시 시작해야 훅이 적용돼요.');
   if (install.herdr) {
+    // 그림 없이 만든 muwi 레이아웃이면 Herdr 설정 화면에 보일 그림을 넣는다
+    if (ensurePreview(dir)) out('Herdr 설정 화면(Look > Layout)에 muwi 레이아웃 그림을 넣었어요.');
     const screen = screenState(dir);
     // 안내를 꺼 뒀으면 화면이 이미 muwi일 때만 알린다
     if (readConfig(dir).layout || screen.muwi) out(describeScreen(screen));

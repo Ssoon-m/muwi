@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { PLACE_VERSION, ScreenError, applyLayout, hasMuwi, placeMuwi, readLayoutRecord, removeLayout, screenState, type LayoutNode } from '../src/screen.ts';
+import { layoutPreview } from '../src/preview.ts';
+import { PLACE_VERSION, ScreenError, applyLayout, ensurePreview, hasMuwi, placeMuwi, readLayoutRecord, removeLayout, screenState, treeHash, type LayoutNode } from '../src/screen.ts';
 
 const CLI = path.resolve(import.meta.dirname, '../src/cli.ts');
 
@@ -289,6 +290,57 @@ test('muwi layout --graph: 그래프 자리를 바꾸면 다시 만들고, 고�
   h.set({ layout: 'main' });
   fs.writeFileSync(path.join(h.records, 'layout.json'), JSON.stringify({ name: 'gone', base: 'main', hash: 'x', list: true, graph: true, graphAt: 'right', at: '' }));
   assert.equal(applyLayout(h.records, h.env).graphAt, 'right');
+});
+
+test('레이아웃 그림: 설정 화면에 보일 그림을 그래프 자리마다 다르게 그린다', () => {
+  const pictures = (['bottom', 'top', 'right'] as const).map(w => layoutPreview(w));
+  for (const svg of pictures) assert.match(svg, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 320 200">/);
+  assert.equal(new Set(pictures).size, 3);
+});
+
+test('muwi layout: Herdr 설정 화면에 보일 그림을 그래프 자리대로 같이 쓰고, 자리를 옮기면 다시 그리고, 되돌리면 지운다', () => {
+  const h = fakeApp();
+  const picture = () => {
+    const file = path.join(h.app, 'layouts', 'muwi.svg');
+    return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+  };
+  applyLayout(h.records, h.env);
+  assert.equal(h.layout('muwi')!.preview, 'layouts/muwi.svg');
+  assert.equal(picture(), layoutPreview('bottom'));
+  // 그림을 적어도 우리가 쓴 그대로로 본다 (손으로 고친 것으로 보지 않는다)
+  assert.equal(screenState(h.records, h.env).edited, false);
+  applyLayout(h.records, h.env, { graphAt: 'right' });
+  assert.equal(h.layout('muwi')!.preview, 'layouts/muwi.svg');
+  assert.equal(picture(), layoutPreview('right'));
+  assert.equal(screenState(h.records, h.env).edited, false);
+  removeLayout(h.records, h.env);
+  assert.equal(picture(), null);
+});
+
+test('muwi setup: 그림 없이 만든 muwi 레이아웃(0.5.24까지)에 그림을 넣는다. 손으로 고친 복제본은 그대로 둔다', () => {
+  const h = fakeApp();
+  applyLayout(h.records, h.env, { graphAt: 'top' });
+  // 그림 없이 만든 옛 복제본으로 되돌려 둔다
+  const old = () => {
+    const { preview: _, ...tree } = h.layout('muwi')!;
+    fs.writeFileSync(path.join(h.app, 'layouts', 'muwi.json'), JSON.stringify(tree, null, 2));
+    fs.rmSync(path.join(h.app, 'layouts', 'muwi.svg'), { force: true });
+    return tree;
+  };
+  const tree = old();
+  fs.writeFileSync(path.join(h.records, 'layout.json'), JSON.stringify({ ...readLayoutRecord(h.records), hash: treeHash(tree) }));
+  assert.equal(ensurePreview(h.records, h.env), true);
+  assert.equal(h.layout('muwi')!.preview, 'layouts/muwi.svg');
+  assert.equal(fs.readFileSync(path.join(h.app, 'layouts', 'muwi.svg'), 'utf8'), layoutPreview('top'));
+  assert.equal(screenState(h.records, h.env).edited, false);
+  // 이미 있으면 다시 쓰지 않는다
+  assert.equal(ensurePreview(h.records, h.env), false);
+  // 사람이 손으로 고친 복제본에는 넣지 않는다
+  old();
+  const edited = { ...h.layout('muwi')!, titlebar: 'native' };
+  fs.writeFileSync(path.join(h.app, 'layouts', 'muwi.json'), JSON.stringify(edited, null, 2));
+  assert.equal(ensurePreview(h.records, h.env), false);
+  assert.equal(h.layout('muwi')!.preview, undefined);
 });
 
 test('muwi layout --graph: muwi layout이 만들지 않은 레이아웃은 자리를 바꾸지 않는다', () => {
