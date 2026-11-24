@@ -44,12 +44,13 @@ muwi에는 AI가 순서에서 벗어나는 것을 막는 기능이 없습니다.
 
 Node 24 이상과 npm이 필요하고, 그래프로 보려면 [Herdr 앱](https://herdr.dev)이 필요합니다. Windows에서는 Git for Windows도 필요합니다 ([Windows에서 쓰기](docs/reference/setup.md#windows에서-쓰기)).
 
-muwi는 패키지 두 개로 나뉩니다. 둘 다 `muwi` 명령을 내므로 하나만 까세요.
+muwi는 패키지 세 개로 나뉩니다. 모두 `muwi` 명령을 내므로 하나만 까세요. 위 패키지가 아래 패키지를 함께 데려옵니다.
 
 | 패키지 | 들어 있는 것 |
 | --- | --- |
-| `@muwi/herdr-app` | `@muwi/core`의 모든 것에 더해 Herdr 앱의 작업 목록과 그래프 칸, 새 세션에 맡기기(`muwi run`), 레이아웃 바꾸기 |
-| `@muwi/core` | 기록, 명령(`muwi plan`, `muwi show`…), AI에게 주는 지침, AI 도구 커넥터. 그래프 없이 기록만 쓸 때 |
+| `@muwi/herdr-app` | `@muwi/herdr`의 모든 것에 더해 Herdr 앱의 작업 목록과 그래프 칸, 레이아웃 바꾸기 |
+| `@muwi/herdr` | `@muwi/core`의 모든 것에 더해 Herdr 터미널에 새 세션 띄우기(`muwi run`), 세션이 살아 있는지 보기 |
+| `@muwi/core` | 기록, 명령(`muwi plan`, `muwi show`, `muwi run`…), AI에게 주는 지침, AI 도구 커넥터. 멀티플렉서와 그래프 없이 기록만 쓸 때 |
 
 1. 설치하세요.
 
@@ -128,7 +129,7 @@ AI가 기록에서 원인을 찾습니다. 예를 들어 브랜치를 만든 노
 
 ## 알아 둘 점
 
-- Claude Code에서 씁니다. 그래프 보기와 새 세션 띄우기는 Herdr 앱 안에서만 됩니다.
+- 그래프 보기는 Herdr 앱에서, 새 세션 띄우기는 Herdr 터미널에서 됩니다. 코어는 멀티플렉서를 모르므로, 다른 멀티플렉서도 터미널 연결을 만들어 붙일 수 있습니다 ([동작 원리](docs/how-it-works.md#터미널-연결과-보기)).
 - 새 세션이 처음 보는 폴더에서 뜨면 폴더 신뢰 확인에서 멈춥니다. 그 칸에서 직접 확인을 눌러 주세요.
 - 순서를 정해 둔 skill이 설치돼 있으면 AI가 계획을 스스로 짜지 않고 그 순서를 따릅니다. 함께 쓸 skill에는 판단 기준만 적으세요.
 - 하던 작업을 끝내지 않고 다른 일을 시키면, 그 일의 기록이 하던 노드에 붙을 수 있습니다. "그건 새 작업으로 적어"라고 말해 주세요.
@@ -147,4 +148,4 @@ AI가 기록에서 원인을 찾습니다. 예를 들어 브랜치를 만든 노
 
 ## 라이선스
 
-[MIT](LICENSE). `@muwi/herdr-app`이 그래프 배치에 쓰는 [elkjs](https://github.com/kieler/elkjs)는 의존 패키지로 받고, 라이선스는 EPL-2.0입니다.
+[MIT](LICENSE). `@muwi/core`가 그래프 배치에 쓰는 [elkjs](https://github.com/kieler/elkjs)는 의존 패키지로 받고, 라이선스는 EPL-2.0입니다.

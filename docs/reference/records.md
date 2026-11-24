@@ -57,8 +57,9 @@ muwi가 남기는 파일의 위치와 형식을 정리했습니다. 기록을 �
 | `node` | 노드의 상태가 바뀔 때 | `node`, `status`, `note`, `attempt`, `agent`(서브에이전트가 시작했을 때), `seen`(시작할 때 훅이 그 세션을 지켜보고 있었는지) |
 | `skill` | skill을 읽을 때 | `skill`, `via`(`tool` 또는 `file`), `agent`, `node`, `attempt`, `guess`, `carried` |
 | `agent` | 서브에이전트가 시작하고 끝날 때 | `agent`, `what`(`start` 또는 `stop`), `kind`, `node`, `attempt`, `guess` |
-| `spawn` | `muwi run`으로 세션을 띄울 때 | `node`, `terminal`, `name`, `show`, `task`(맡긴 말) |
-| `join` | 띄운 세션이 맡은 노드에 붙을 때 | `node`, `terminal` |
+| `spawn` | `muwi run`·`muwi resume`으로 세션을 띄울 때 | `id`(띄운 것의 이름표), `node`, `terminal`, `from`(띄운 쪽의 터미널), `name`, `show`, `task`(맡긴 말), `cwd`, `model` |
+| `join` | 띄운 세션이 맡은 노드에 붙을 때 | `node`, `spawn`(붙은 `spawn`의 `id`), `terminal` |
+| `tell` | `muwi tell`로 말을 보낼 때 | `node`, `text`, `to`(보낸 터미널), `sent` |
 | `flag` | `muwi flag`를 실행할 때 | `node`, `text` |
 | `session` | 대화가 요약될 때 | `what`: `compact` |
 | `viewed` | 끝난 작업을 사람이 처음 볼 때 (그래프 칸이 사람이 고른 그 작업을 보여 줄 때, 또는 `muwi viewed`) | 없음 |
@@ -83,7 +84,10 @@ muwi가 남기는 파일의 위치와 형식을 정리했습니다. 기록을 �
 | `tool` | 그 세션의 도구. `claude`, `codex`, `cursor`처럼 `muwi setup --tools`에 나오는 이름이고, 모르면 `unknown` |
 | `model` | 그 세션이 쓰는 모델. 그 도구의 훅이 알려 줄 때만 있습니다 |
 | `native` | 그 도구가 붙인 대화 id. 터미널을 세션으로 본 도구에서 하던 대화를 다시 열 때 씁니다 |
-| `terminal` | Herdr 터미널 주소 |
+| `terminal` | 그 세션이 도는 터미널 주소 (터미널 연결이 알려 줍니다) |
+| `pane` | 그 터미널을 담은 칸 (멀티플렉서가 칸과 터미널을 따로 다룰 때) |
+| `turn` | 훅이 알려 준 지금 차례: `working`(사람이 말을 걸어 일하는 중), `done`(말을 끝내고 다음 말을 기다림) |
+| `endedAt` | 훅이 세션이 끝났다고 알린 시각 |
 | `work` | 붙어 있는 작업 |
 | `loaded` | 이 세션이 읽은 skill과 처음 읽은 시각 |
 | `hooked` | 훅이 이 세션을 마지막으로 본 시각 |
@@ -96,5 +100,6 @@ muwi가 남기는 파일의 위치와 형식을 정리했습니다. 기록을 �
 | 파일 | 내용 |
 | --- | --- |
 | `config.json` | `layout` 설정 |
-| `setup.json` | `muwi setup`이 설치한 항목과 위치, 화면 모듈의 경로(`host`)와 화면이 넣은 것(`hosted`). 0.5.4까지는 `install.json` |
+| `setup.json` | `muwi setup`이 설치한 항목과 위치, 터미널 연결의 경로(`terminals`), 보기의 경로와 그 보기가 넣은 것(`views`) |
+| `.spawns/<터미널>.json` | `muwi run`이 띄운 터미널마다 맡긴 작업과 노드. 환경 변수를 넘기지 못하는 터미널 연결을 위한 것입니다 |
 | `.hook-errors.log` | 훅에서 난 오류. 훅은 실패해도 세션을 멈추지 않고 여기에만 남깁니다 |
