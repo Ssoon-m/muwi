@@ -5,10 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { handleHook } from '../src/hook.ts';
-import { ADAPTERS, adapterOf } from '../src/integrations/index.ts';
-import { gaps } from '../src/integrations/types.ts';
-import { removeTomlRegion } from '../src/integrations/hooked.ts';
-import { TOOLS, detectTool, launchCommand, resumeCommand, toolById, toolHome } from '../src/integrations/tools.ts';
+import { ADAPTERS, adapterOf } from '../src/connectors/index.ts';
+import { gaps } from '../src/connectors/types.ts';
+import { removeTomlRegion } from '../src/connectors/hooked.ts';
+import { TOOLS, detectTool, launchCommand, resumeCommand, toolById, toolHome } from '../src/connectors/tools.ts';
 import { readInstall, removeSetup, runSetup } from '../src/setup.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '..');

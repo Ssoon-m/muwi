@@ -12,9 +12,9 @@ import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, typ
 import { attach, readSession, recentSessions, sessionKey, sessionLabel, touchSession } from './session.ts';
 import { resumeFacts } from './resume.ts';
 import { checkMod, installedTools, newestPlugin, olderThan, readInstall, refreshSetup, removeSetup, runSetup } from './setup.ts';
-import { adapterOf } from './integrations/index.ts';
-import { gaps } from './integrations/types.ts';
-import { TOOLS, launchCommand, modelIn, toolById } from './integrations/tools.ts';
+import { adapterOf } from './connectors/index.ts';
+import { gaps } from './connectors/types.ts';
+import { TOOLS, launchCommand, modelIn, toolById } from './connectors/tools.ts';
 import { GRAPH_AT, ScreenError, applyLayout, ensurePreview, removeLayout, screenState, type GraphAt, type Screen } from './screen.ts';
 import {
   SCHEMA, SHOW_IN, appendEvent, checkWorkName, clock, listWorks, nowIso, readConfig, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,

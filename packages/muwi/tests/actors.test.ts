@@ -11,7 +11,7 @@ import { terminalName } from '../src/herdr.ts';
 import { parsePlan, diffPlan, carryStatus, addNode } from '../src/plan.ts';
 import { closedSessions } from '../src/live.ts';
 import { attach, readSession, touchSession } from '../src/session.ts';
-import { modelIn } from '../src/integrations/tools.ts';
+import { modelIn } from '../src/connectors/tools.ts';
 import { appendEvent, clock, readEvents, readPlan, writePlan, type NodeStatus, type Plan, type RunBy } from '../src/store.ts';
 import { PAST_DAYS, loadBoard, loadView } from '../src/view.ts';
 

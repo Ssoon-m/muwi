@@ -1,21 +1,21 @@
 // muwi setup: 플러그인이 해 주지 못하는 설치를 맡는다.
 //   Claude Code 플러그인으로 받으면 명령·훅·지침·사용법 skill은 Claude Code가 넣어 준다.
 //   여기서 하는 일은 그 밖의 것: 터미널에서도 muwi 명령을 쓰게 하기, Herdr 앱 그래프 칸, 다른 AI 도구에 통합 넣기.
-//   도구마다 무엇을 어디에 넣는지는 그 도구의 통합이 안다 (src/integrations). 여기서는 고른 도구들에 차례로 넣고 기록한다.
+//   도구마다 무엇을 어디에 넣는지는 그 도구의 커넥터가 안다 (src/connectors). 여기서는 고른 도구들에 차례로 넣고 기록한다.
 // 남의 설정은 건드리지 않는다. 우리 것은 명령 앞의 표시와 구간 표시로 알아본다.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { nowIso, readJson, writeJson } from './store.ts';
-import { copyDir, installBlock, shPath, uninstallBlock, writeText } from './integrations/files.ts';
-import { adapterOf } from './integrations/index.ts';
-import { TOOLS, toolHome, toolSkills, type Tool } from './integrations/tools.ts';
-import type { Wired } from './integrations/types.ts';
+import { copyDir, installBlock, shPath, uninstallBlock, writeText } from './connectors/files.ts';
+import { adapterOf } from './connectors/index.ts';
+import { TOOLS, toolHome, toolSkills, type Tool } from './connectors/tools.ts';
+import type { Wired } from './connectors/types.ts';
 
-export { BLOCK_END, BLOCK_START, installBlock, instructionText, removeBlock, uninstallBlock, upsertBlock } from './integrations/files.ts';
-export { HOOK_MARK, removeHooks } from './integrations/settings-hooks.ts';
-export { hookCommandFor, installHooks, mergeHooks, uninstallHooks } from './integrations/claude.ts';
+export { BLOCK_END, BLOCK_START, installBlock, instructionText, removeBlock, uninstallBlock, upsertBlock } from './connectors/files.ts';
+export { HOOK_MARK, removeHooks } from './connectors/settings-hooks.ts';
+export { hookCommandFor, installHooks, mergeHooks, uninstallHooks } from './connectors/claude.ts';
 
 // ── muwi setup ──────────────────────────────────────────────────────────
 

@@ -243,7 +243,7 @@ export const antigravity: Adapter = {
 };
 
 // ── 플러그인(확장) 파일로 붙는 도구들. 훅 설정이 없고, 그 도구가 플러그인 폴더의 파일을 읽어 들인다.
-//    플러그인 파일은 muwi 설치 위치의 integrations/<도구>/에 있다
+//    플러그인 파일은 muwi 설치 위치의 connectors/<도구>/에 있다
 export const opencode = plugged('opencode', { to: 'plugins', files: ['muwi.js'] });
 export const kilo = plugged('kilo', { to: 'plugin', files: ['muwi.js'] });
 // Pi에는 서브에이전트가 없다

@@ -194,9 +194,9 @@ export const PLUGIN_SHAPE = {
 const HOOK_SLOT = '__MUWI_HOOK__';
 
 /**
- * 플러그인(확장) 파일로 붙는 도구의 통합. 그 도구의 플러그인 폴더에 우리 파일을 넣는다 (muwi 설치 위치의 integrations/<도구>/).
+ * 플러그인(확장) 파일로 붙는 도구의 통합. 그 도구의 플러그인 폴더에 우리 파일을 넣는다 (muwi 설치 위치의 connectors/<도구>/).
  * 플러그인은 그 도구의 사건을 Claude Code와 같은 모양의 JSON으로 바꿔 hooks/tool.sh <도구> [갈래]에 넘기고, 답을 그 도구에 적용한다.
- * to: 설정 폴더 기준으로 넣을 폴더. files: 넣을 파일들 (integrations/<도구>/ 기준)
+ * to: 설정 폴더 기준으로 넣을 폴더. files: 넣을 파일들 (connectors/<도구>/ 기준)
  */
 export function plugged(id: string, o: { to: string; files: string[]; can?: Partial<Can> }): Adapter {
   const shape: Shape = { id, ...PLUGIN_SHAPE };
@@ -212,7 +212,7 @@ export function plugged(id: string, o: { to: string; files: string[]; can?: Part
       }
       const files = o.files.map(name => {
         const file = path.join(ctx.home, o.to, name);
-        const source = fs.readFileSync(path.join(ctx.root, 'integrations', id, name), 'utf8');
+        const source = fs.readFileSync(path.join(ctx.root, 'connectors', id, name), 'utf8');
         writeText(file, source.split(HOOK_SLOT).join(shPath(script, ctx.platform)));
         return file;
       });

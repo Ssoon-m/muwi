@@ -1,4 +1,4 @@
-// 도구(Claude Code, Codex …)를 모르는 코어. 도구마다 다른 훅 입력은 그 도구의 통합(src/integrations)이
+// 도구(Claude Code, Codex …)를 모르는 코어. 도구마다 다른 훅 입력은 그 도구의 커넥터(src/connectors)이
 // 여기서 쓰는 공통 사건(Happened)으로 바꿔서 넘기고, 여기서는 그 사건을 기록하고 할 말(Reply)을 돌려준다.
 //   세션이 시작되면 세션 파일을 만들고, skill을 읽으면 사건 기록에 한 줄 남긴다.
 //   읽은 skill은 AI가 스스로 적지 않는다. 여기서 관찰한 것만 기록이 된다.
@@ -17,8 +17,8 @@ import type { PlanNode } from './store.ts';
 import { attach, readSession, recordSkill, touchSession, whereNow, type Session } from './session.ts';
 import { LABEL_SESSION, hc, spawnedFor } from './herdr.ts';
 import { markNode } from './node.ts';
-import { BLOCK_END, BLOCK_START, instructionText } from './integrations/files.ts';
-import { toolById, toolHome } from './integrations/tools.ts';
+import { BLOCK_END, BLOCK_START, instructionText } from './connectors/files.ts';
+import { toolById, toolHome } from './connectors/tools.ts';
 
 /** muwi가 설치된 곳 (이 파일의 위 폴더) */
 export const ROOT = path.resolve(import.meta.dirname, '..');
