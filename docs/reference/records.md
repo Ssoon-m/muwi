@@ -96,5 +96,5 @@ muwi가 남기는 파일의 위치와 형식을 정리했습니다. 기록을 �
 | 파일 | 내용 |
 | --- | --- |
 | `config.json` | `layout` 설정 |
-| `setup.json` | `muwi setup`이 설치한 항목과 위치. 0.5.4까지는 `install.json` |
+| `setup.json` | `muwi setup`이 설치한 항목과 위치, 화면 모듈의 경로(`host`)와 화면이 넣은 것(`hosted`). 0.5.4까지는 `install.json` |
 | `.hook-errors.log` | 훅에서 난 오류. 훅은 실패해도 세션을 멈추지 않고 여기에만 남깁니다 |

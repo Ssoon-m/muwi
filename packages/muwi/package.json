@@ -1,6 +1,6 @@
 {
   "name": "muwi",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "AI가 스스로 짠 작업 플로우를 기록한다. 어느 AI 도구든 커넥터로 붙는다",
   "license": "MIT",
   "type": "module",

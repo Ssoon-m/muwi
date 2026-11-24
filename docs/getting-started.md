@@ -14,43 +14,43 @@ muwi를 설치하고, AI에게 일을 하나 맡겨서 그 진행을 그래프�
 
 | 필요한 것 | 확인하는 방법 |
 | --- | --- |
-| Claude Code | 터미널에서 `claude --version` |
+| AI 도구 (이 문서는 Claude Code로 설명합니다) | 터미널에서 `claude --version` |
 | [Herdr 앱](https://herdr.dev) | 앱을 열고, 그 안의 터미널에서 진행합니다 |
-| Node 24 이상 | `node -v` |
+| Node 24 이상과 npm | `node -v`, `npm -v` |
 
 Windows에서는 Git for Windows도 필요합니다. Claude Code가 훅을 Git Bash로 실행합니다. 다른 점은 [Windows에서 쓰기](reference/setup.md#windows에서-쓰기)에 있습니다.
 
 nvm이나 mise로 Node를 골라도 됩니다. Herdr가 띄우는 세션은 셸 설정을 읽지 않지만, muwi가 로그인 셸에 물어 터미널과 같은 Node를 찾습니다. 찾는 방법은 [문제 해결하기](guides/troubleshooting.md#node-24-이상이-필요하다고-나올-때)에 있습니다.
 
-## 1. 플러그인 설치하기
+## 1. muwi 설치하기
 
-Herdr 앱의 터미널에서 실행하세요.
+Herdr 앱의 터미널에서 실행하세요. Herdr 앱에서 그래프로 보려면 `herdr-muwi`를 깝니다 (기록만 쓰는 코어 `muwi`가 같이 깔립니다).
 
 ```sh
-claude plugin install muwi --marketplace Ssoon-m/muwi
+npm i -g herdr-muwi
 ```
 
-플러그인은 `muwi` 명령, 진행을 기록하는 훅, AI에게 주는 지침을 Claude Code에 넣습니다. 사용자의 `settings.json`과 `CLAUDE.md`는 고치지 않습니다.
+## 2. AI 도구에 커넥터 넣기
 
-## 2. 그래프 칸 설치하기
+```sh
+muwi setup --tool claude     # 깔린 AI 도구 전부에 넣으려면 muwi setup --all
+```
 
-Claude Code 세션을 새로 여세요. 플러그인은 새로 연 세션부터 적용됩니다.
+`muwi setup`이 넣는 것은 이렇습니다.
+
+- 터미널과 그래프 칸이 쓰는 `muwi` 명령 (`~/.local/bin/muwi`, Windows는 `muwi.cmd`도)
+- Herdr 앱의 그래프 칸
+- 고른 AI 도구의 커넥터: AI에게 주는 지침, 사용법 skill, 진행을 지켜보는 훅. Claude Code는 훅을 `~/.claude/settings.json`에, 사용법을 `~/.claude/skills/muwi`에 넣습니다. 고치기 전의 설정은 `settings.json.muwi.bak`으로 남기고, 다른 훅은 건드리지 않습니다.
+
+그다음 Claude Code 세션을 새로 여세요. 훅은 새로 연 세션부터 돕니다.
 
 ```sh
 claude
 ```
 
-세션 안에서 이렇게 시키세요.
-
-```
-muwi setup 실행해줘
-```
-
-플러그인의 `muwi` 명령은 Claude Code 안에서만 보입니다. `muwi setup`은 터미널에서도 쓸 수 있는 `muwi` 명령(`~/.local/bin/muwi`, Windows는 `muwi.cmd`도)과 Herdr 앱의 그래프 칸을 설치합니다.
-
 ## 3. 화면에 muwi 넣기
 
-`muwi setup`이 끝나면 AI가 Herdr 앱 화면을 바꿀지 묻습니다. 바꾸라고 하세요. 직접 하려면 터미널에서 실행하세요.
+`muwi setup`이 화면에 muwi 칸이 있는지 알려 줍니다. 없으면 터미널에서 실행하세요. AI에게 "muwi 화면으로 바꿔줘"라고 해도 됩니다.
 
 ```sh
 muwi layout
@@ -103,7 +103,7 @@ muwi show <작업>      # 작업 하나의 기록
 | 증상 | 해결 방법 |
 | --- | --- |
 | 그래프 칸에 "기록을 읽지 못했어요"가 나옵니다 | 2단계의 `muwi setup`을 실행하세요 |
-| 일을 시켰는데 카드가 생기지 않습니다 | 플러그인을 설치한 뒤에 연 세션인지 확인하세요. 오타 수정처럼 작은 일은 AI가 계획 없이 진행합니다 |
+| 일을 시켰는데 카드가 생기지 않습니다 | 커넥터를 넣은 뒤에 연 세션인지 확인하세요. 오타 수정처럼 작은 일은 AI가 계획 없이 진행합니다 |
 | "Node 24 이상이 필요해요"가 나옵니다 | [문제 해결하기](guides/troubleshooting.md#node-24-이상이-필요하다고-나올-때)를 보세요 |
 
 다른 증상은 [문제 해결하기](guides/troubleshooting.md)에 있습니다.
