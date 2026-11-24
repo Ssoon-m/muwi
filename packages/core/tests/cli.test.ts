@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 
-/** sh 스크립트(hook.sh, find-node.sh, bin/muwi)를 직접 시험하는 테스트. Windows에서는 CI가 Git Bash로 따로 확인한다 */
+/** sh 스크립트(tool.sh, find-node.sh, bin/muwi)를 직접 시험하는 테스트. Windows에서는 CI가 Git Bash로 따로 확인한다 */
 const SH = process.platform === 'win32' ? { skip: 'sh 스크립트를 시험한다 (Windows는 CI의 Git Bash 단계에서 본다)' } : {};
 
 
@@ -156,7 +156,7 @@ test('muwi show·status: 사람이 읽는 글과 JSON', () => {
   const { muwi } = bench();
   muwi(['plan', '--work', 'w', '--request', '작업해줘', PLAN]);
   muwi(['node', 'read', 'start']);
-  muwi(['hook'], { input: JSON.stringify({ session_id: 'lead', hook_event_name: 'PostToolUse', tool_name: 'Skill', tool_input: { skill: 'spec-reader' }, tool_response: { success: true } }) });
+  muwi(['hook', '--from', 'claude'], { input: JSON.stringify({ session_id: 'lead', hook_event_name: 'PostToolUse', tool_name: 'Skill', tool_input: { skill: 'spec-reader' }, tool_response: { success: true } }) });
   muwi(['node', 'read', 'done', '요구사항 2건']);
   muwi(['node', 'impl', 'wait', 'A안과 B안 중 어느 쪽?']);
   muwi(['flag', 'read', '미정 항목을 놓침']);
@@ -179,23 +179,29 @@ test('훅이 돌지 않는 Claude Code 세션이 계획을 적으면 무엇이 �
   assert.equal(plain.code, 0, plain.err);
   assert.match(plain.out, /이 세션에서는 muwi 훅이 돌지 않아요[\s\S]*읽은 skill과 서브에이전트가 한 일은 기록되지 않아요/);
   // 훅이 보고 있는 세션은 알리지 않는다
-  muwi(['hook'], { session: null, env: { CLAUDE_CODE_SESSION_ID: 'new-1', CLAUDECODE: '1' }, input: JSON.stringify({ session_id: 'new-1', hook_event_name: 'SessionStart', source: 'startup' }) });
+  muwi(['hook', '--from', 'claude'], { session: null, env: { CLAUDE_CODE_SESSION_ID: 'new-1', CLAUDECODE: '1' }, input: JSON.stringify({ session_id: 'new-1', hook_event_name: 'SessionStart', source: 'startup' }) });
   const hooked = muwi(['plan', '--work', 'w2', '--request', '작업해줘', PLAN], { session: null, env: { CLAUDE_CODE_SESSION_ID: 'new-1', CLAUDECODE: '1' } });
   assert.doesNotMatch(hooked.out, /훅이 돌지 않아요/);
 });
 
 test('muwi hook: 깨진 입력에도 조용히 끝난다 (세션을 방해하지 않는다)', () => {
   const { dir, muwi } = bench();
-  const r = muwi(['hook'], { input: '{not json' });
+  const r = muwi(['hook', '--from', 'claude'], { input: '{not json' });
   assert.equal(r.code, 0);
   assert.equal(r.out, '');
   assert.match(fs.readFileSync(path.join(dir, '.hook-errors.log'), 'utf8'), /JSON/);
   // 셸 명령은 막지 않는다. 무엇을 승인받고 할지는 muwi가 정하지 않는다
   const push = JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git push origin HEAD' } });
-  assert.equal(muwi(['hook', 'command'], { input: push }).out, '');
+  assert.equal(muwi(['hook', 'command', '--from', 'claude'], { input: push }).out, '');
   // 계획 없는 세션의 파일 수정도 막지 않는다
   const editing = JSON.stringify({ session_id: 'new-session', hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: '/repo/src/a.ts' } });
-  assert.equal(muwi(['hook'], { input: editing }).out, '');
+  assert.equal(muwi(['hook', '--from', 'claude'], { input: editing }).out, '');
+  // 어느 도구의 훅인지 모르면 읽지 않는다 (기본 도구는 없다). 세션은 막지 않고 까닭만 남긴다
+  const start = JSON.stringify({ session_id: 's9', hook_event_name: 'SessionStart', source: 'startup' });
+  const unnamed = muwi(['hook'], { input: start });
+  assert.equal(unnamed.code, 0);
+  assert.equal(unnamed.out, '');
+  assert.match(fs.readFileSync(path.join(dir, '.hook-errors.log'), 'utf8'), /--from <도구>가 없어요/);
 });
 
 test('이름 없이 낸 계획은 이 세션이 하던 작업만 바꾼다 (같은 폴더의 남의 작업을 덮어쓰지 않는다)', () => {
@@ -226,11 +232,11 @@ test('muwi config·version·setup', () => {
   assert.equal(fs.existsSync(wrapper), false);
 });
 
-test('hook.sh: 볼 것만 넘기고, 세션 시작에는 지침을 돌려준다. 세션이 일하는지·말을 끝냈는지·끝났는지도 넘긴다', SH, () => {
+test('tool.sh claude: 볼 것만 넘기고, 세션 시작에는 지침을 돌려준다. 세션이 일하는지·말을 끝냈는지·끝났는지도 넘긴다', SH, () => {
   const { dir } = bench();
-  const script = path.resolve(import.meta.dirname, '../hooks/hook.sh');
+  const script = path.resolve(import.meta.dirname, '../hooks/tool.sh');
   const hook = (payload: object, ...args: string[]) =>
-    spawnSync('sh', [script, ...args], { input: JSON.stringify(payload), encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir } }).stdout;
+    spawnSync('sh', [script, 'claude', ...args], { input: JSON.stringify(payload), encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: dir, MUWI_DIR: dir } }).stdout;
   const started = hook({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup', cwd: '/repo' });
   assert.match(JSON.parse(started).hookSpecificOutput.additionalContext, /muwi plan --work/);
   // skill과 상관없는 파일 읽기는 기록하지 않는다
@@ -240,7 +246,7 @@ test('hook.sh: 볼 것만 넘기고, 세션 시작에는 지침을 돌려준다.
   // 계획 없는 세션의 파일 수정에도 답하지 않는다 (0.5.x의 훅 설정이 부르는 nudge 갈래는 조용히 지나간다)
   const edit = { session_id: 's1', hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: '/repo/src/app.ts' } };
   assert.equal(hook(edit, 'nudge'), '');
-  // 사람이 말하면 일하는 중, 말을 끝내면 멈춤, 세션이 끝나면 닫힘으로 적는다 (Claude Code는 이 스크립트로 부른다. 문맥은 넣지 않는다)
+  // 사람이 말하면 일하는 중, 말을 끝내면 멈춤, 세션이 끝나면 닫힘으로 적는다 (문맥은 넣지 않는다)
   const session = () => JSON.parse(fs.readFileSync(path.join(dir, '.sessions', 's1.json'), 'utf8'));
   assert.equal(hook({ session_id: 's1', hook_event_name: 'UserPromptSubmit', prompt: '다음 일' }), '');
   assert.equal(session().turn, 'working');
@@ -396,7 +402,7 @@ test('터미널 연결과 보기 없이: 기록과 보기는 되고, 새 세션 
   fs.writeFileSync(setupFile, JSON.stringify({ ...saved, views: [{ path: '/no/such/view.ts' }] }));
   assert.doesNotMatch(muwi(['--help']).out, /muwi hello/);
   assert.match(muwi(['hello']).err, /모르는 명령: hello\. 적어 둔 모듈을 불러오지 못했어요: .*no.such.view\.ts/);
-  const hook = muwi(['hook'], { session: null, input: JSON.stringify({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' }) });
+  const hook = muwi(['hook', '--from', 'claude'], { session: null, input: JSON.stringify({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' }) });
   assert.equal(hook.code, 0);
   assert.match(JSON.parse(hook.out).hookSpecificOutput.additionalContext, /작업 진행 방식 \(muwi\)/);
 });
@@ -410,7 +416,7 @@ test('적어 둔 보기를 불러오지 못할 때: 업데이트 뒤에 다시 �
   // muwi를 업데이트했는데(기록된 버전이 다르다) 보기 패키지는 옮겨져서 불러오지 못한다
   const lost = { path: '/no/such/view.ts', installed: { mod } };
   fs.writeFileSync(setupFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(setupFile, 'utf8')), version: '0.0.1', views: [lost] }));
-  const hook = muwi(['hook'], { session: null, input: JSON.stringify({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' }) });
+  const hook = muwi(['hook', '--from', 'claude'], { session: null, input: JSON.stringify({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' }) });
   assert.equal(hook.code, 0);
   const after = JSON.parse(fs.readFileSync(setupFile, 'utf8'));
   assert.notEqual(after.version, '0.0.1');
@@ -427,7 +433,7 @@ test('setup.json이 깨져도 명령과 훅은 돈다 (훅은 지침을 준다).
   const setupFile = path.join(dir, 'setup.json');
   fs.writeFileSync(setupFile, '{"root": "/x", "version"');
   assert.equal(muwi(['status']).code, 0);
-  const hook = muwi(['hook'], { session: null, input: JSON.stringify({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' }) });
+  const hook = muwi(['hook', '--from', 'claude'], { session: null, input: JSON.stringify({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' }) });
   assert.equal(hook.code, 0);
   assert.match(JSON.parse(hook.out).hookSpecificOutput.additionalContext, /작업 진행 방식 \(muwi\)/);
   assert.match(fs.readFileSync(path.join(dir, '.hook-errors.log'), 'utf8'), /setup\.json \(JSON이 아니에요\)/);

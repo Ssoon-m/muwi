@@ -15,7 +15,6 @@ import type { Wired } from './connectors/types.ts';
 
 export { BLOCK_END, BLOCK_START, installBlock, instructionText, removeBlock, uninstallBlock, upsertBlock } from './connectors/files.ts';
 export { HOOK_MARK, removeHooks } from './connectors/settings-hooks.ts';
-export { hookCommandFor, installHooks, mergeHooks, uninstallHooks } from './connectors/claude.ts';
 
 // ── muwi setup ──────────────────────────────────────────────────────────
 

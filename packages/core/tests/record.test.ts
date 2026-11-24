@@ -204,24 +204,24 @@ test('훅: Skill 도구와 SKILL.md 읽기를 세션의 작업에 기록한다',
   const t = setup([{ id: 'impl' }]);
   at(1); t.node('impl', 'doing', 'sess-1');
   at(2);
-  handleHook({ session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Skill', tool_input: { skill: 'team-rules' }, tool_response: { success: true } }, t.dir, 'record', ENV);
-  handleHook({ session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: { file_path: '/Users/me/.claude/skills/branch-rule/SKILL.md' } }, t.dir, 'record', ENV);
+  handleHook('claude', { session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Skill', tool_input: { skill: 'team-rules' }, tool_response: { success: true } }, t.dir, 'record', ENV);
+  handleHook('claude', { session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: { file_path: '/Users/me/.claude/skills/branch-rule/SKILL.md' } }, t.dir, 'record', ENV);
   // skill이 아닌 파일, 실패한 호출, 다른 도구는 남기지 않는다
-  handleHook({ session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: { file_path: '/repo/src/app.ts' } }, t.dir, 'record', ENV);
-  handleHook({ session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Skill', tool_input: { skill: 'nope' }, tool_response: { success: false } }, t.dir, 'record', ENV);
-  handleHook({ session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'ls' } }, t.dir, 'record', ENV);
+  handleHook('claude', { session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: { file_path: '/repo/src/app.ts' } }, t.dir, 'record', ENV);
+  handleHook('claude', { session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Skill', tool_input: { skill: 'nope' }, tool_response: { success: false } }, t.dir, 'record', ENV);
+  handleHook('claude', { session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'ls' } }, t.dir, 'record', ENV);
   const skills = t.view().nodes[0].skills.map(s => `${s.skill}:${s.via}`).sort();
   assert.deepEqual(skills, ['branch-rule:file', 'team-rules:tool']);
 });
 
 test('훅: 세션 시작을 기억하고, 작업이 없는 세션의 skill은 세션 파일에만 남긴다', () => {
   const t = setup([{ id: 'impl' }]);
-  const started = handleHook({ session_id: 'new-1', hook_event_name: 'SessionStart', source: 'startup', cwd: '/repo' }, t.dir, 'record', { TEST_PLACE: 't7' } as NodeJS.ProcessEnv);
+  const started = handleHook('claude', { session_id: 'new-1', hook_event_name: 'SessionStart', source: 'startup', cwd: '/repo' }, t.dir, 'record', { TEST_PLACE: 't7' } as NodeJS.ProcessEnv);
   // 세션이 시작될 때 지침을 넣어 준다 (설정 파일에 적어 두지 않는다). 구간 표시 주석은 빼고 본문만
   const context = JSON.parse(started.stdout!).hookSpecificOutput.additionalContext as string;
   assert.match(context, /muwi plan --work/);
   assert.doesNotMatch(context, /muwi:start|muwi:end/);
-  handleHook({ session_id: 'new-1', hook_event_name: 'PostToolUse', tool_name: 'Skill', tool_input: { skill: 'team-rules' }, tool_response: { success: true } }, t.dir, 'record', ENV);
+  handleHook('claude', { session_id: 'new-1', hook_event_name: 'PostToolUse', tool_name: 'Skill', tool_input: { skill: 'team-rules' }, tool_response: { success: true } }, t.dir, 'record', ENV);
   const s = readSession(t.dir, 'new-1')!;
   assert.equal(s.cwd, '/repo');
   assert.equal(s.terminal, 't7');
@@ -242,18 +242,18 @@ test('muwi는 AI가 하려는 일을 막지 않는다: 셸 명령, 파일 수정
   const t = setup([{ id: 'impl' }]);
   // push·PR 같은 명령: 승인은 muwi의 일이 아니다
   for (const command of ['git push', 'gh pr create --title x --body y', 'ls']) {
-    assert.deepEqual(handleHook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command } }, t.dir, 'command', ENV), {});
+    assert.deepEqual(handleHook('claude', { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command } }, t.dir, 'command', ENV), {});
   }
   // 계획이 없는 세션의 파일 수정과 서브에이전트 띄우기: 계획을 적을지는 AI가 정한다
   const edit = { session_id: 'fresh', hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: '/repo/src/app.ts' } };
   const spawn = { session_id: 'fresh', hook_event_name: 'PreToolUse', tool_name: 'Agent', tool_input: { subagent_type: 'reviewer' } };
-  for (const payload of [edit, spawn]) assert.deepEqual(handleHook(payload, t.dir, 'record', ENV), {});
+  for (const payload of [edit, spawn]) assert.deepEqual(handleHook('claude', payload, t.dir, 'record', ENV), {});
   // 사람이 말할 때의 입력(0.5.x의 훅 설정이 보낸다)에도 답하지 않는다
-  assert.deepEqual(handleHook({ session_id: 'fresh', hook_event_name: 'UserPromptSubmit', prompt: '…' }, t.dir, 'record', ENV), {});
+  assert.deepEqual(handleHook('claude', { session_id: 'fresh', hook_event_name: 'UserPromptSubmit', prompt: '…' }, t.dir, 'record', ENV), {});
   // 0.5.x의 설정에 guard와 nudge가 켜져 있어도 읽지 않는다
   fs.writeFileSync(path.join(t.dir, 'config.json'), JSON.stringify({ nudge: true, guard: true, layout: false }));
   assert.deepEqual(readConfig(t.dir, { layout: true }), { layout: false });
-  assert.deepEqual(handleHook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git push' } }, t.dir, 'command', ENV), {});
+  assert.deepEqual(handleHook('claude', { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git push' } }, t.dir, 'command', ENV), {});
 });
 
 function newerRoot(version = '9.9.9') {
@@ -270,14 +270,14 @@ test('업데이트: 세션이 시작된 뒤에 지침이 바뀌면, 그 세션�
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-guide-'));
   const here = path.resolve(import.meta.dirname, '..');
   // 세션이 시작될 때 넣은 지침을 기억한다
-  handleHook({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', ENV, here);
+  handleHook('claude', { session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', ENV, here);
   assert.ok(readSession(dir, 's1')!.instructions);
   // 지침이 그대로면 붙일 말이 없다
   assert.equal(guideUpdate(dir, 's1', ENV, here), null);
   // muwi가 업데이트돼 지침이 바뀌었다
   const root = newerRoot();
   // 사람이 말할 때의 훅으로는 넣지 않는다 (말할 때 문맥을 넣을 수 없는 도구가 있다)
-  assert.deepEqual(handleHook({ session_id: 's1', hook_event_name: 'UserPromptSubmit', prompt: '다음 일' }, dir, 'record', ENV, root), {});
+  assert.deepEqual(handleHook('claude', { session_id: 's1', hook_event_name: 'UserPromptSubmit', prompt: '다음 일' }, dir, 'record', ENV, root), {});
   const text = guideUpdate(dir, 's1', ENV, root)!;
   assert.match(text, /muwi가 업데이트됐다 \(9\.9\.9\)\. 작업 진행 방식이 바뀌었으니/);
   assert.match(text, /새로 생긴 규칙/);
@@ -299,12 +299,12 @@ test('업데이트: 지침 파일로 지침을 받는 도구는 그 파일에 �
   assert.ok(fileGuideHash('codex', env));
   assert.equal(fileGuideHash('claude', env), undefined); // 지침 파일이 없는 도구
   // 파일의 지침이 지금 판과 같으면 붙일 말이 없다
-  handleHook({ session_id: 'c1', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', env, here, 'codex');
+  handleHook('codex', { session_id: 'c1', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', env, here);
   assert.equal(readSession(dir, 'c1')!.instructions, fileGuideHash('codex', env));
   assert.equal(guideUpdate(dir, 'c1', env, here), null);
   // muwi는 새 판인데 AGENTS.md에는 옛 지침이 남아 있다: 세션이 시작될 때 읽은 것은 옛 지침이므로 새 지침을 전한다
   const root = newerRoot();
-  handleHook({ session_id: 'c2', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', env, root, 'codex');
+  handleHook('codex', { session_id: 'c2', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', env, root);
   assert.match(guideUpdate(dir, 'c2', env, root)!, /새로 생긴 규칙/);
   assert.equal(guideUpdate(dir, 'c2', env, root), null);
   // 세션 시작 훅이 없는 도구도 같다: 첫 muwi 명령에서 파일의 판과 견준다

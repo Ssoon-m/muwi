@@ -23,11 +23,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
       # 배포할 패키지(.js로 바꾼 사본)를 하나씩 npm i -g로 깔아서, npm이 PATH에 건 muwi로 돌려 본다 (Windows는 npm이 만든 muwi.cmd)
-      # node_modules 안에서는 .ts가 실행되지 않는다. Windows의 훅은 Claude Code처럼 Git Bash의 sh로 실행한다
+      # node_modules 안에서는 .ts가 실행되지 않는다. Windows의 훅은 AI 도구처럼 Git Bash의 sh로 실행한다
       - name: 패키지 확인
         run: pnpm check:package
 
-      # Windows의 Claude Code는 훅 명령을 Git Bash로 실행한다. 경로는 C:/... 모양으로 적는다. 같은 방식으로 불러 본다 (저장소의 코드)
+      # Windows의 AI 도구는 훅 명령(sh ".../tool.sh" <도구>)을 Git Bash로 실행한다. 경로는 C:/... 모양으로 적는다. 같은 방식으로 불러 본다 (저장소의 코드)
       - name: 훅 (Git Bash)
         if: runner.os == 'Windows'
         shell: bash
@@ -36,12 +36,12 @@ jobs:
           export MUWI_DIR="$RUNNER_TEMP/muwi-records"
           start='{"session_id":"ci-windows","hook_event_name":"SessionStart","source":"startup","cwd":"'"$root"'"}'
           core="$root/packages/core"
-          out=$(printf '%s' "$start" | sh "$core/hooks/hook.sh")
+          out=$(printf '%s' "$start" | sh "$core/hooks/tool.sh" claude)
           echo "$out"
           case "$out" in *hookSpecificOutput*muwi*) ;; *) echo "SessionStart 훅이 지침을 돌려주지 않았어요"; exit 1 ;; esac
           # Git Bash의 muwi 명령
           sh "$core/bin/muwi" --version
-          # Claude Code 커넥터(setup --tool claude)가 settings.json에 넣는 훅 명령도, 적힌 그대로 Git Bash로 실행해 본다
+          # 커넥터(여기서는 setup --tool claude)가 설정 파일에 넣는 훅 명령도, 적힌 그대로 Git Bash로 실행해 본다
           export CLAUDE_CONFIG_DIR="$RUNNER_TEMP/claude-config"
           node "$core/src/cli.ts" setup --tool claude
           cmd=$(node -e 'const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); console.log(s.hooks.SessionStart[0].hooks[0].command)' "$CLAUDE_CONFIG_DIR/settings.json")

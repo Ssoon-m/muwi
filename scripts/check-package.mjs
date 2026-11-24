@@ -143,16 +143,16 @@ function onlyAllowedTs(pkg) {
   assert.ok(fs.existsSync(path.join(home, '.config', 'herdr-app', 'mods', 'muwi', 'main.js')));
   const wrapper = path.join(home, '.local', 'bin', WIN ? 'muwi.cmd' : 'muwi');
   assert.equal(JSON.parse(run(wrapper, ['board'])).selected.work, 'w');
-  // 훅: 코어의 훅 스크립트가 지침을 돌려준다 (Windows는 Claude Code처럼 Git Bash의 sh로)
-  const start = run(SH, [path.join(core, 'hooks', 'hook.sh')], JSON.stringify({ session_id: 'c1', hook_event_name: 'SessionStart', source: 'startup' }));
+  // 훅: 모든 도구가 들어오는 입구(tool.sh <도구>)가 지침을 돌려준다 (Windows는 Git Bash의 sh로)
+  const start = run(SH, [path.join(core, 'hooks', 'tool.sh'), 'claude'], JSON.stringify({ session_id: 'c1', hook_event_name: 'SessionStart', source: 'startup' }));
   assert.match(JSON.parse(start).hookSpecificOutput.additionalContext, /작업 진행 방식 \(muwi\)/);
 
-  // Claude Code도 다른 도구처럼 커넥터로 넣는다: settings.json에 훅, ~/.claude/skills에 사용법. 넣은 훅 명령을 그대로 실행해 본다
+  // 커넥터 하나를 넣어 본다 (Claude Code: settings.json에 훅, ~/.claude/skills에 사용법). 넣은 훅 명령을 그대로 실행해 본다
   fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
   run(bin, ['setup', '--tool', 'claude']);
   const settings = JSON.parse(fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8'));
   const command = settings.hooks.SessionStart[0].hooks[0].command;
-  assert.match(command, /node_modules[\\/]@muwi[\\/]core[\\/]hooks[\\/]hook\.sh/);
+  assert.match(command, /node_modules[\\/]@muwi[\\/]core[\\/]hooks[\\/]tool\.sh" claude$/);
   const viaClaude = run(SH, ['-c', command], JSON.stringify({ session_id: 'c2', hook_event_name: 'SessionStart', source: 'startup' }));
   assert.match(JSON.parse(viaClaude).hookSpecificOutput.additionalContext, /작업 진행 방식 \(muwi\)/);
   assert.ok(fs.existsSync(path.join(home, '.claude', 'skills', 'muwi', 'SKILL.md')));

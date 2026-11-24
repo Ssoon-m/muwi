@@ -34,3 +34,19 @@ test('이어 하기 버튼에 쓸 사실: 폴더가 아직 있는가, Claude 대
   assert.equal(facts.exists[repo], true);
   assert.equal(facts.exists[gone], false);
 });
+
+test('새 대화로 이어 갈 때 띄울 도구: 계획을 낸 세션의 도구, 모르면 가장 최근에 일한 세션의 도구. 아무도 모르면 띄우지 않는다 (기본 도구는 없다)', () => {
+  const env = { HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-launch-')) } as NodeJS.ProcessEnv;
+  const facts = (lead: string | null, sessions: Record<string, { label: string; tool: string; seenAt?: string }>) =>
+    resumeFacts({ cwd: undefined, lead, sessions, nodes: [] } as never, env);
+  const sessions = {
+    lead: { label: 't1', tool: 'codex', seenAt: '2026-11-25T01:00:00Z' },
+    later: { label: 't2', tool: 'gemini', seenAt: '2026-11-25T03:00:00Z' },
+    older: { label: 't3', tool: 'claude', seenAt: '2026-11-25T02:00:00Z' },
+  };
+  assert.equal(facts('lead', sessions).launcher?.[0], 'codex');
+  // 계획을 낸 세션의 도구를 모른다: 그 작업에서 가장 최근에 일한 세션의 도구
+  assert.equal(facts('lead', { ...sessions, lead: { label: 't1', tool: 'unknown' } }).launcher?.[0], 'gemini');
+  // 아무 세션의 도구도 모른다
+  assert.equal(facts('lead', { lead: { label: 't1', tool: 'unknown' } }).launcher, null);
+});

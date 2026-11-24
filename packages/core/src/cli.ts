@@ -545,7 +545,10 @@ function cmdHook(a: Args, dir: string) {
     if (named && payload && typeof payload === 'object' && !payload.hook_event_name) payload.hook_event_name = named;
     // muwi가 업데이트돼 버전이나 설치 위치가 바뀌었으면, 전에 setup으로 넣어 둔 명령·보기·커넥터를 새 판으로 맞춘다.
     // 새 세션이 열릴 때뿐 아니라 열려 있는 세션에 말을 걸 때도 맞춘다 (더 낮은 버전으로는 맞추지 않는다)
-    const result = handleHook(payload, dir, mode, process.env, ROOT, str(a, 'from') ?? 'claude', h => {
+    // 어느 도구의 훅인지는 훅 명령(hooks/tool.sh <도구>)이 알려 준다. 기본 도구는 없다
+    const from = str(a, 'from');
+    if (!from) throw new Error('muwi hook에 --from <도구>가 없어요. muwi setup을 다시 실행하면 훅 명령을 새로 넣어요');
+    const result = handleHook(from, payload, dir, mode, process.env, ROOT, h => {
       if (h.kind === 'session-start' || h.kind === 'prompt') refreshSetup({ root: ROOT, version: version(), dir });
       // 적어 둔 터미널 연결이나 보기를 불러오지 못했으면 세션이 시작될 때 한 번 남긴다 (그래프와 세션 상태가 안 나오는 까닭)
       if (h.kind === 'session-start') for (const f of pluginFailures()) hookError(dir, `불러오지 못했어요: ${f.from} (${f.reason})`);
@@ -629,7 +632,7 @@ function cmdConfig(a: Args, dir: string) {
 
 function cmdSession(dir: string) {
   const key = sessionKey();
-  if (!key) return out('세션을 알 수 없어요 (세션 없이도 기록은 돼요. skill 기록은 Claude Code 훅이 있을 때만 붙어요)');
+  if (!key) return out('세션을 알 수 없어요 (세션 없이도 기록은 돼요. skill 기록은 그 AI 도구의 훅이 알려 줄 때만 붙어요)');
   const s = readSession(dir, key);
   out(`세션 ${key}${s?.work ? ` · 작업 ${s.work}` : ' · 붙어 있는 작업 없음'}${s?.terminal ? ` · 터미널 ${s.terminal}${hasTerminals() ? ` (${terminals().name})` : ''}` : ''}`);
   const loaded = Object.keys(s?.loaded ?? {});

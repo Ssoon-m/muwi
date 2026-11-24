@@ -67,7 +67,7 @@ test('어느 도구에서도 파일을 고치려는 입력에는 아무 답도 �
   for (const [id, payload] of Object.entries(EDITS)) {
     // 고치기 전의 입력은 코어가 볼 일이 아니다
     assert.equal(ADAPTERS[id].from(payload, 'record', ENV(tmp('home'))), null, id);
-    const r = handleHook(payload, dir, 'record', ENV(tmp('home')), ROOT, id);
+    const r = handleHook(id, payload, dir, 'record', ENV(tmp('home')), ROOT);
     assert.ok(!r.code, `${id}: 종료 코드로 막았다 (${r.code})`);
     assert.ok(!r.stderr, `${id}: 표준 오류로 답했다`);
     // 답이 늘 JSON이어야 하는 도구는 빈 JSON을, 나머지는 아무것도 내지 않는다
@@ -85,7 +85,7 @@ test('세션: 셸 명령에 세션 id를 넘겨주지 않는 도구는 훅도 �
 });
 
 test('세션이 시작될 때: 지침 파일이 없는 도구에는 훅이 지침을 넣고, 있는 도구에는 두 번 넣지 않는다', () => {
-  const start = (id: string, payload: any) => handleHook(payload, tmp('rec'), 'record', ENV(tmp('home')), ROOT, id);
+  const start = (id: string, payload: any) => handleHook(id, payload, tmp('rec'), 'record', ENV(tmp('home')), ROOT);
   // Claude Code, Cursor, Letta Code: 지침 파일이 없다
   assert.match(JSON.parse(start('claude', { hook_event_name: 'SessionStart', session_id: 's1' }).stdout!).hookSpecificOutput.additionalContext, /작업 진행 방식 \(muwi\)/);
   assert.match(JSON.parse(start('cursor', { hook_event_name: 'sessionStart', conversation_id: 's1' }).stdout!).additional_context, /작업 진행 방식 \(muwi\)/);

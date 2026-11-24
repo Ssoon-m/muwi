@@ -1,18 +1,13 @@
 // Claude Code 커넥터: Claude Code의 훅 입력을 코어의 공통 사건으로 바꾸고, 코어의 답을 Claude Code가 알아듣는 형식으로 바꾼다.
 // 코어(events.ts)는 Claude Code의 훅 이름·도구 이름을 모른다.
-//   훅은 ~/.claude/settings.json에 두 갈래로 건다:
+//   훅은 ~/.claude/settings.json에 다른 도구와 같은 입구(hooks/tool.sh claude)로 두 갈래로 건다:
 //     record: SessionStart·SessionEnd, UserPromptSubmit·Stop(세션이 일하는지 기다리는지), SubagentStart/Stop, PostToolUse(Skill|Read)
 //     command: PreToolUse(Bash)
 import path from 'node:path';
 import { skillFromPath, type Happened, type Reply } from '../events.ts';
 import { sessionKey } from '../session.ts';
-import { shPath } from './files.ts';
-import { HOOK_MARK, addHooks, installEntries, uninstallEntries, type HookEntry, type Settings } from './settings-hooks.ts';
+import { addHooks, installEntries, toolCommand, uninstallEntries, type HookEntry, type Settings } from './settings-hooks.ts';
 import type { Adapter, HookMode, HookResult } from './types.ts';
-
-/** muwi setup --tool claude가 settings.json에 넣는 훅 명령. Windows의 Claude Code는 이 명령을 Git Bash로 실행한다 */
-export const hookCommandFor = (root: string, platform: NodeJS.Platform = process.platform) =>
-  `${HOOK_MARK} sh "${shPath(path.join(root, 'hooks', 'hook.sh'), platform)}"`;
 
 /** 거는 훅들 */
 function entries(hookCommand: string): HookEntry[] {
@@ -82,7 +77,7 @@ export const claude: Adapter = {
   can: { subagents: true, start: true, skills: true },
   install(ctx) {
     const settings = path.join(ctx.home, 'settings.json');
-    installHooks(settings, hookCommandFor(ctx.root, ctx.platform));
+    installHooks(settings, toolCommand(ctx.root, 'claude', ctx.platform));
     return { settings: [settings] };
   },
   remove(wired) {

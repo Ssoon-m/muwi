@@ -10,7 +10,7 @@ import { skillFromPath, type Happened, type Reply } from '../events.ts';
 import { sessionKey, terminalKey } from '../session.ts';
 import { shPath, writeText } from './files.ts';
 import { installFlat, uninstallFlat } from './flat.ts';
-import { HOOK_MARK, installEntries, uninstallEntries, type HookEntry } from './settings-hooks.ts';
+import { installEntries, toolCommand, uninstallEntries, type HookEntry } from './settings-hooks.ts';
 import { toolById } from './tools.ts';
 import type { Adapter, Can, HookMode, HookResult, SetupCtx } from './types.ts';
 
@@ -118,9 +118,7 @@ export function toShaped(shape: Shape, h: Happened, r: Reply): HookResult {
   return {};
 }
 
-/** 그 도구의 훅이 부를 명령: hooks/tool.sh <도구> [갈래] */
-export const toolCommand = (root: string, id: string, platform: NodeJS.Platform = process.platform) =>
-  `${HOOK_MARK} sh "${shPath(path.join(root, 'hooks', 'tool.sh'), platform)}" ${id}`;
+export { toolCommand };
 
 /** 걸 훅들. Claude Code 커넥터와 같은 두 갈래다 (기록, 셸 명령 앞). 사람이 말할 때와 파일을 고치기 전에는 걸지 않는다 */
 export function shapedEntries(shape: Shape, wiring: Wiring, command: string): HookEntry[] {

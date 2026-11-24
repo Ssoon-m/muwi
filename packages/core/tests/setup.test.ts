@@ -5,14 +5,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import {
-  hookCommandFor, installBlock, installHooks, instructionText, mergeHooks, newerElsewhere, readInstall, refreshSetup, removeBlock, removeHooks,
-  olderThan, removeSetup, runSetup, uninstallBlock, uninstallHooks, upsertBlock,
+  installBlock, instructionText, newerElsewhere, readInstall, refreshSetup, removeBlock, removeHooks,
+  olderThan, removeSetup, runSetup, uninstallBlock, upsertBlock,
 } from '../src/setup.ts';
+import { installHooks, mergeHooks, uninstallHooks } from '../src/connectors/claude.ts';
+import { toolCommand } from '../src/connectors/settings-hooks.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 /** sh 래퍼는 Windows에서도 슬래시 경로로 적는다 (Git Bash가 읽기 쉽게) */
 const posix = (p: string) => (process.platform === 'win32' ? p.replace(/\\/g, '/') : p);
-const HOOK = hookCommandFor('/Users/me/tools/muwi');
+const HOOK = toolCommand('/Users/me/tools/muwi', 'claude');
 const theirs = { matcher: 'Bash', hooks: [{ type: 'command', command: '/opt/other/guard.sh' }] };
 const ours = (extra = '') => ({ type: 'command', command: `${HOOK}${extra}`, onFailure: 'continue' });
 
@@ -29,7 +31,7 @@ test('훅 넣기: 남의 훅은 그대로 두고 우리 것만 한 벌 넣는다
   ]);
   assert.deepEqual(removeHooks(once), start);
   // 설치 위치가 바뀌어도 옛 위치의 우리 훅을 알아보고 바꾼다
-  const moved = mergeHooks(once, hookCommandFor('/somewhere/else'));
+  const moved = mergeHooks(once, toolCommand('/somewhere/else', 'claude'));
   assert.equal(JSON.stringify(moved).includes('/Users/me/tools/muwi'), false);
   assert.equal(moved.hooks!.PreToolUse.length, 2); // 남의 훅 하나와 우리 것 하나 (셸 명령 앞)
   assert.deepEqual(removeHooks(mergeHooks({ theme: 'dark' }, HOOK)), { theme: 'dark' });
@@ -136,9 +138,9 @@ test('muwi setup --tool claude: Claude Code에 훅과 사용법 skill을 넣는�
   runSetup({ root: ROOT, version: '0.1.0', dir: h.records, env: h.env, tools: ['claude'] });
   const settings = JSON.parse(fs.readFileSync(path.join(h.dir, '.claude', 'settings.json'), 'utf8'));
   assert.equal(settings.model, 'opus');
-  assert.equal(settings.hooks.SessionStart[0].hooks[0].command, hookCommandFor(ROOT));
+  assert.equal(settings.hooks.SessionStart[0].hooks[0].command, toolCommand(ROOT, 'claude'));
   // 세션이 일하는지 기다리는지, 끝났는지를 알려 주는 훅도 건다 (화면 없이 세션 상태를 아는 길)
-  for (const event of ['UserPromptSubmit', 'Stop', 'SessionEnd']) assert.equal(settings.hooks[event][0].hooks[0].command, hookCommandFor(ROOT));
+  for (const event of ['UserPromptSubmit', 'Stop', 'SessionEnd']) assert.equal(settings.hooks[event][0].hooks[0].command, toolCommand(ROOT, 'claude'));
   assert.ok(fs.existsSync(path.join(h.dir, '.claude', 'skills', 'muwi', 'SKILL.md')));
   // 지침은 훅이 세션마다 넣어 주므로 CLAUDE.md는 건드리지 않는다
   assert.equal(fs.existsSync(path.join(h.dir, '.claude', 'CLAUDE.md')), false);
@@ -246,7 +248,7 @@ test('다른 자리의 더 새 muwi를 PATH에서 찾는다 (nvm으로 Node를 �
 });
 
 test('Windows의 훅 명령(setup --tool claude)은 경로를 슬래시로 적는다: Git Bash가 읽는다', () => {
-  assert.equal(hookCommandFor('C:\\Users\\me\\muwi', 'win32'), 'MUWI_HOOK=1 sh "C:/Users/me/muwi/hooks/hook.sh"');
+  assert.equal(toolCommand('C:\\Users\\me\\muwi', 'claude', 'win32'), 'MUWI_HOOK=1 sh "C:/Users/me/muwi/hooks/tool.sh" claude');
   // macOS·Linux는 경로를 그대로 둔다 (Windows 호스트에서는 path.join이 백슬래시를 만들어 이 조합이 나오지 않는다)
-  if (process.platform !== 'win32') assert.equal(hookCommandFor('/Users/me/muwi', 'darwin'), 'MUWI_HOOK=1 sh "/Users/me/muwi/hooks/hook.sh"');
+  if (process.platform !== 'win32') assert.equal(toolCommand('/Users/me/muwi', 'claude', 'darwin'), 'MUWI_HOOK=1 sh "/Users/me/muwi/hooks/tool.sh" claude');
 });

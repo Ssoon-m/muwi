@@ -1,4 +1,4 @@
-# bin/muwi와 hooks/hook.sh가 읽는다. muwi_find_node는 muwi를 실행할 Node(24 이상)의 경로를 출력한다.
+# bin/muwi가 읽는다 (훅도 hooks/tool.sh → bin/muwi로 부른다). muwi_find_node는 muwi를 실행할 Node(24 이상)의 경로를 출력한다.
 #
 # 멀티플렉서가 띄우는 세션이나 보기(그래프 칸)는 셸 설정(~/.zshrc 같은)을 읽지 않아서, nvm·mise처럼 셸 설정으로 고르는
 # Node가 PATH에 없다. 그래서 VS Code처럼 사용자의 로그인 셸을 한 번 띄워 그 셸의 PATH에서 Node를 찾는다.

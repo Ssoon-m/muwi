@@ -1,10 +1,15 @@
 // JSON 설정 파일의 hooks에 명령을 거는 방식. Claude Code가 이 모양이고, 여러 도구가 같은 모양을 따른다.
 //   { "hooks": { "<사건>": [ { "matcher": "<도구 이름>", "hooks": [ { "type": "command", "command": "…" } ] } ] } }
 import fs from 'node:fs';
-import { backup, writeText } from './files.ts';
+import path from 'node:path';
+import { backup, shPath, writeText } from './files.ts';
 
 /** 우리 훅은 명령 앞에 이 표시가 붙어 있다. 설치 위치가 어디든 이걸로 알아본다 */
 export const HOOK_MARK = 'MUWI_HOOK=1';
+
+/** 도구의 훅이 부를 명령: hooks/tool.sh <도구> [갈래]. 모든 도구(Claude Code도)가 같은 입구로 들어온다 */
+export const toolCommand = (root: string, id: string, platform: NodeJS.Platform = process.platform) =>
+  `${HOOK_MARK} sh "${shPath(path.join(root, 'hooks', 'tool.sh'), platform)}" ${id}`;
 const OURS = /(^|\s)MUWI_HOOK=1(\s|$)/;
 
 export type HookGroup = { matcher?: string; hooks?: { type?: string; command?: string; onFailure?: string }[] };

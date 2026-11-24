@@ -1,5 +1,5 @@
 // 세션 이름표. "어느 세션이 한 일인가"를 muwi 명령과 훅이 같은 이름으로 적게 한다.
-//   muwi 명령은 환경 변수에서 세션을 읽고, 훅은 Claude Code가 넘겨주는 session_id를 쓴다. 둘은 같은 값이다.
+//   muwi 명령은 환경 변수에서 세션을 읽고, 훅은 그 도구가 넘겨주는 세션 id를 쓴다. 둘은 같은 값이다.
 // 세션마다 파일 하나(<기록 폴더>/.sessions/<세션>.json)에 지금 붙어 있는 작업과 읽은 skill을 적어 둔다.
 import { detectTool, sessionFromEnv } from './connectors/tools.ts';
 import { terminals } from './plugins.ts';

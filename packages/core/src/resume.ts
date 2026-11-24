@@ -21,8 +21,8 @@ export type ResumeFacts = {
   resume: Record<string, string[]>;
   /** 세션 → 그 세션의 도구로 새 대화를 띄우는 명령. {prompt} 자리에 첫 말을 넣는다 (없으면 첫 말을 받지 못하는 도구) */
   launch: Record<string, string[]>;
-  /** 이 작업을 새 대화로 이어 갈 때 띄울 명령: 계획을 낸 세션의 도구 */
-  launcher: string[];
+  /** 이 작업을 새 대화로 이어 갈 때 띄울 명령: 계획을 낸 세션의 도구, 모르면 이 작업에서 가장 최근에 일한 세션의 도구. 아무도 모르면 null (기본 도구는 없다) */
+  launcher: string[] | null;
   /** 이 작업에 나오는 도구의 이름 (도구 id → 사람이 읽는 이름) */
   toolNames: Record<string, string>;
 };
@@ -61,7 +61,8 @@ export function resumeFacts(v: Pick<WorkView, 'cwd' | 'sessions' | 'nodes' | 'le
     const command = can && id ? resumeCommand(s.tool, id) : null;
     if (command) resume[key] = command;
   }
-  const launcher = (v.lead && launch[v.lead]) || launchCommand('claude');
+  const recent = Object.entries(v.sessions).filter(([key]) => launch[key]).sort(([, a], [, b]) => ((b.seenAt ?? '') > (a.seenAt ?? '') ? 1 : -1));
+  const launcher = (v.lead && launch[v.lead]) || (recent.length ? launch[recent[0][0]] : null);
   const toolNames = Object.fromEntries(Object.values(v.sessions).map(s => toolById(s.tool)).filter(t => t !== null).map(t => [t!.id, t!.name]));
   return { exists, resumable: Object.keys(resume), resume, launch, launcher, toolNames };
 }

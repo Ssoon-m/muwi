@@ -731,7 +731,7 @@ export default class Muwi extends View {
                 view.helpers?.subagents ? `서브에이전트 ${view.helpers.subagents}` : null,
                 talk ? `대화: ${talk.name} · 열려 있음` : "대화: 닫힘"].filter(Boolean).join(" · ") : `${works.length}개 작업`))
           // 대화가 닫혔으면 새 대화가 muwi 기록을 읽고 이어 가게 연다 (그 작업을 하던 폴더에서)
-          .when(Boolean(continuable), (el) => el.child(div().id("head-continue").flex_none().text_color(t.accent).cursor_pointer()
+          .when(Boolean(continuable) && Boolean(view.launcher), (el) => el.child(div().id("head-continue").flex_none().text_color(t.accent).cursor_pointer()
             .hover((s) => s.text_color(t.foreground))
             .on_click((_e, cx) => { this.openTerminal("head-continue", this.launchWith(view.launcher, `${view.work} 작업 이어서 해줘`), view.cwd, view.work); cx.notify(); })
             .child("새 대화로 이어 가기 ›")))))
@@ -832,14 +832,15 @@ export default class Muwi extends View {
     const folder = [want, view.cwd].find((p) => this.folderOk(view, p)) ?? null;
     const moved = want && !this.folderOk(view, want) ? want : null;
     // 띄우는 명령과 다시 여는 명령은 muwi가 그 세션의 도구에 맞게 알려 준다 (Claude Code, Codex …)
-    const tool = (key && view.launch?.[key]) || view.launcher || ["claude", "{prompt}"];
+    // 어느 도구로 띄울지 모르면(기록에 도구가 없다) 새 대화 버튼을 내지 않는다. 기본 도구는 없다
+    const tool = (key && view.launch?.[key]) || view.launcher || null;
     const again = key ? view.resume?.[key] : null;
     const buttons = [];
     // 대화가 남아 있고 그 폴더가 그대로일 때만 다시 열 수 있다 (아니면 "No conversation found" 같은 말로 끝난다)
     if (again && !moved) {
       buttons.push(this.openRow(t, `resume-${n.id}`, "하던 대화 다시 열기", "전에 하던 대화 내용이 그대로 남아 있어요", again, folder, n.id));
     }
-    if (n.status !== "done") {
+    if (n.status !== "done" && tool) {
       buttons.push(this.openRow(t, `continue-${n.id}`, "새 대화로 이어 가기", unstarted ? "muwi 기록(계획·맡긴 말)을 읽고 이어 가요" : "muwi 기록(계획·결과)을 읽고 이어 가요",
         this.launchWith(tool, `${view.work} 작업의 ${n.id} 노드 이어서 해줘`), folder, n.id));
     }
@@ -873,8 +874,7 @@ export default class Muwi extends View {
 
   /** 첫 말과 함께 새 대화를 띄우는 명령. muwi가 그 도구의 모양으로 알려 준 것에 첫 말을 넣는다 (첫 말을 못 받는 도구는 명령만) */
   launchWith(template, prompt) {
-    const list = Array.isArray(template) && template.length ? template : ["claude", "{prompt}"];
-    return list.map((part) => (part === "{prompt}" ? prompt : part));
+    return template.map((part) => (part === "{prompt}" ? prompt : part));
   }
 
   /** 새 탭에서 명령을 연다 (그 세션이 일하던 폴더에서). 연달아 눌러도 한 번만 연다 */
@@ -1631,8 +1631,8 @@ export default class Muwi extends View {
           .children(loose.map((f) => line(`⚑ ${f.text}`, t.blocked)))))
         .when(view.state === "stalled", (el) => el.child(v_flex().gap(8).child(label("이어서 하려면"))
           .child(div().text_size(10.5).text_color(t.dim).child(view.between === "gone" ? "이 작업을 맡은 세션이 없어요" : "하던 세션이 모두 닫혔어요"))
-          .child(this.openRow(t, "continue-work", "새 대화로 이어 가기", "muwi 기록(계획·결과)을 읽고 멈춘 노드부터 이어 가요", this.launchWith(view.launcher, `${view.work} 작업 이어서 해줘`),
-            this.folderOk(view, view.cwd) ? view.cwd : null, view.work))
+          .when(Boolean(view.launcher), (el2) => el2.child(this.openRow(t, "continue-work", "새 대화로 이어 가기", "muwi 기록(계획·결과)을 읽고 멈춘 노드부터 이어 가요", this.launchWith(view.launcher, `${view.work} 작업 이어서 해줘`),
+            this.folderOk(view, view.cwd) ? view.cwd : null, view.work)))
           .when(Boolean(view.cwd), (el2) => el2.child(div().text_size(10.5).text_color(t.dim).child(this.folderOk(view, view.cwd)
             ? `누르면 ${this.shortPath(view.cwd)}에서 새 탭으로 열려요` : `작업 폴더(${this.shortPath(view.cwd)})가 없어져서 기본 폴더에서 새 탭으로 열려요`)))));
     }

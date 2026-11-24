@@ -323,6 +323,7 @@ export function cmdResume(a: Args, dir: string) {
   }
   const brief = `${work} 작업의 ${id} 노드 이어서 해줘. muwi show ${work}로 계획과 지금까지의 기록을 먼저 본다.`;
   const template = (key && facts.launch[key]) || facts.launcher;
+  if (!template) throw new Fail(`어느 AI 도구로 새 대화를 띄울지 몰라요 (이 작업을 한 세션의 도구를 알 수 없어요). muwi run ${id} "<맡길 일>" --agent <도구>로 맡기세요.`);
   const argv = template.map(part => (part === '{prompt}' ? brief : part));
   const r = launchFor(dir, { work, node: id, name: str(a, 'name') ?? id, cwd: folder, argv, inArgs: template.includes('{prompt}'), brief, task: brief, show, down: Boolean(a.flags.down) });
   out(`새 대화로 이어 가요: ${r.name} (${r.terminal}) → 노드 ${id}${r.placed ? ` · ${r.placed}` : ''}`);

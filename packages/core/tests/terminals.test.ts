@@ -41,7 +41,7 @@ function setup(nodes: { id: string; after?: string[] }[], work = 'w1') {
     attach(dir, session, work, ENV);
   };
   const hook = (payload: Record<string, unknown>, session: string, env: NodeJS.ProcessEnv = ENV) =>
-    handleHook({ session_id: session, ...payload }, dir, 'record', env, ROOT);
+    handleHook('claude', { session_id: session, ...payload }, dir, 'record', env, ROOT);
   const view = (env: NodeJS.ProcessEnv = ENV) => loadView(dir, work, env)!;
   return { dir, work, node, hook, view };
 }
@@ -221,7 +221,7 @@ test('muwi run으로 뜬 세션은 시작할 때 환경 변수로 맡은 노드�
   assert.equal(muwi(['run', 'impl', '구현해줘']).code, 0);
   const env = { ...did()[0].env, TEST_PLACE: 't7' } as NodeJS.ProcessEnv;
   at(1);
-  const start = handleHook({ session_id: 'child', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', env, ROOT);
+  const start = handleHook('claude', { session_id: 'child', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', env, ROOT);
   const text = JSON.parse(start.stdout!).hookSpecificOutput.additionalContext as string;
   assert.match(text, /이 세션은 작업 `shop-1`의 노드 `impl`\(화면 구현\)를 맡아서 떴다/);
   assert.match(text, /muwi tell "<결과나 막힌 점>"/);
@@ -230,7 +230,7 @@ test('muwi run으로 뜬 세션은 시작할 때 환경 변수로 맡은 노드�
   assert.deepEqual([shown.status, shown.who.kind, shown.who.session], ['doing', 'session', 'child']);
   // /clear 하고 다른 일을 시작한 대화: 환경 변수는 남아 있지만 이미 붙은 세션이 있다
   at(2);
-  const later = handleHook({ session_id: 'unrelated', hook_event_name: 'SessionStart', source: 'clear' }, dir, 'record', env, ROOT);
+  const later = handleHook('claude', { session_id: 'unrelated', hook_event_name: 'SessionStart', source: 'clear' }, dir, 'record', env, ROOT);
   assert.doesNotMatch(JSON.parse(later.stdout!).hookSpecificOutput.additionalContext, /이 세션이 맡은 노드/);
   assert.equal(readEvents(dir, 'shop-1').filter(e => e.type === 'join').length, 1);
   // 그 대화가 시작돼서 앞 세션은 닫힌 것으로 보인다 (같은 터미널에 더 늦게 시작한 세션)
@@ -309,20 +309,23 @@ test('muwi tidy: 끝난 노드를 맡았던 세션만, 그 터미널을 지금�
   assert.equal(fs.existsSync(path.join(dir, '.spawns', 't7.json')), false);
 });
 
-test('muwi resume: 닫힌 세션이 하던 노드를 새 대화로 이어 한다 (muwi run처럼 노드에 붙는다)', () => {
+test('muwi resume: 닫힌 세션이 하던 노드를 그 세션의 도구로 이어 한다. 하던 대화를 다시 열 수 있으면 열고, --new면 새 대화로 (muwi run처럼 노드에 붙는다)', () => {
   const { muwi, did } = bench();
-  assert.equal(muwi(['node', 'impl', 'start', '--work', 'shop-1'], { MUWI_SESSION: 'gone-1' }).code, 0);
-  const r = muwi(['resume', 'impl', '--work', 'shop-1']);
+  // 앞 세션은 Codex였다 (Codex는 대화 id로 하던 대화를 다시 연다)
+  assert.equal(muwi(['node', 'impl', 'start', '--work', 'shop-1'], { MUWI_SESSION: 'gone-1', CODEX_THREAD_ID: 'gone-1' }).code, 0);
+  assert.match(muwi(['resume', 'impl', '--work', 'shop-1']).out, /하던 대화를 다시 열었어요: impl \(t7\) → codex resume gone-1/);
+  const r = muwi(['resume', 'impl', '--work', 'shop-1', '--new']);
   assert.equal(r.code, 0, r.err);
   assert.match(r.out, /새 대화로 이어 가요: impl \(t7\) → 노드 impl · pane/);
-  const launch = did().find(c => c.do === 'launch')!;
+  const launch = did().filter(c => c.do === 'launch').at(-1)!;
+  assert.equal(launch.argv[0], 'codex');
   assert.match(launch.argv[1], /shop-1 작업의 impl 노드 이어서 해줘/);
   assert.equal(launch.env.MUWI_RUN_NODE, 'impl');
 });
 
 test('다시 연 세션(--resume)은 닫힌 것으로 남지 않는다. 셸에서 잠깐 돌린 다른 세션이 끝나도 바깥 세션은 닫히지 않는다', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-live-'));
-  const hook = (session: string, payload: Record<string, unknown>, env: NodeJS.ProcessEnv) => handleHook({ session_id: session, ...payload }, dir, 'record', env, ROOT);
+  const hook = (session: string, payload: Record<string, unknown>, env: NodeJS.ProcessEnv) => handleHook('claude', { session_id: session, ...payload }, dir, 'record', env, ROOT);
   at(0); hook('S', { hook_event_name: 'SessionStart', source: 'startup' }, inTerminal('t2'));
   at(1); hook('S', { hook_event_name: 'SessionEnd', reason: 'exit' }, inTerminal('t2'));
   assert.ok(sessionStates(dir, ['S'], ENV).closed.has('S'));
@@ -341,7 +344,7 @@ test('뜬 세션은 muwi run이 띄운 기록을 적기 전에 시작해도 맡�
   const env = { MUWI_RUN: 'impl-early', MUWI_RUN_WORK: 'shop-1', MUWI_RUN_NODE: 'impl', MUWI_RUN_MODEL: 'gpt-x', TEST_PLACE: 't9' } as NodeJS.ProcessEnv;
   fs.mkdirSync(path.join(dir, '.spawns'), { recursive: true });
   fs.writeFileSync(path.join(dir, '.spawns', 't9.json'), JSON.stringify({ id: 'impl-early', work: 'shop-1', node: 'impl' }));
-  const start = handleHook({ session_id: 'early', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', env, ROOT);
+  const start = handleHook('claude', { session_id: 'early', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', env, ROOT);
   assert.match(JSON.parse(start.stdout!).hookSpecificOutput.additionalContext, /노드 `impl`\(화면 구현\)를 맡아서 떴다/);
   const node = JSON.parse(muwi(['show', 'shop-1', '--json']).out).nodes.find((n: any) => n.id === 'impl');
   assert.deepEqual([node.status, node.who.session, node.who.model], ['doing', 'early', 'gpt-x']);
@@ -351,7 +354,7 @@ test('뜬 세션은 muwi run이 띄운 기록을 적기 전에 시작해도 맡�
 test('muwi resume·run 직후의 wait는 새 세션이 붙기 전에 앞 세션이 닫혀 있다는 것으로 돌아오지 않는다. 살아 있는 세션은 resume하지 않는다', () => {
   const { dir, muwi, did } = bench();
   // 앞 세션이 노드를 하다가 닫혔다
-  assert.equal(muwi(['node', 'impl', 'start', '--work', 'shop-1'], { MUWI_SESSION: 'gone-1', TEST_PLACE: 't5' }).code, 0);
+  assert.equal(muwi(['node', 'impl', 'start', '--work', 'shop-1'], { MUWI_SESSION: 'gone-1', CODEX_THREAD_ID: 'gone-1', TEST_PLACE: 't5' }).code, 0);
   touchSession(dir, 'gone-1', { terminal: 't5' }, ENV);
   const alive = { FAKE_TERMINALS_LIVE: JSON.stringify([{ terminal: 't5', agent: 'working' }]) };
   assert.match(muwi(['resume', 'impl', '--work', 'shop-1'], alive).err, /impl를 하던 세션이 아직 살아 있어요 \(t5\)/);
@@ -360,7 +363,7 @@ test('muwi resume·run 직후의 wait는 새 세션이 붙기 전에 앞 세션�
   assert.match(muwi(['wait', 'impl', '--work', 'shop-1', '--timeout', '0.2'], dead).out, /아직 하는 중이에요/);
   // 새 세션이 붙은 뒤 그 세션이 닫히면 알린다 (두 번 잇달아 보였을 때)
   const launched = did().filter(c => c.do === 'launch').at(-1)!;
-  handleHook({ session_id: 'again', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', { ...launched.env, TEST_PLACE: 't7' }, ROOT);
+  handleHook('claude', { session_id: 'again', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', { ...launched.env, TEST_PLACE: 't7' }, ROOT);
   assert.match(muwi(['wait', 'impl', '--work', 'shop-1', '--timeout', '2'], dead).out, /^impl: 세션이 닫힘\n$/);
 });
 
@@ -368,15 +371,15 @@ test('peek·tell은 그 노드를 지금 하는 세션의 터미널로 간다. �
   const { dir, muwi, did } = bench();
   assert.equal(muwi(['run', 'impl', '구현해줘']).code, 0);
   const env = { ...did()[0].env, TEST_PLACE: 't7' } as NodeJS.ProcessEnv;
-  at(1); handleHook({ session_id: 'child', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', env, ROOT);
+  at(1); handleHook('claude', { session_id: 'child', hook_event_name: 'SessionStart', source: 'startup' }, dir, 'record', env, ROOT);
   // 그 대화를 다른 터미널(t9)에서 다시 열었다
-  at(2); handleHook({ session_id: 'child', hook_event_name: 'SessionStart', source: 'resume' }, dir, 'record', inTerminal('t9'), ROOT);
+  at(2); handleHook('claude', { session_id: 'child', hook_event_name: 'SessionStart', source: 'resume' }, dir, 'record', inTerminal('t9'), ROOT);
   assert.match(muwi(['tell', 'impl', '테스트도']).out, /보냈어요 → t9/);
   assert.equal(muwi(['peek', 'impl']).out, 't9의 화면\n둘째 줄\n');
   assert.match(muwi(['tell', 'impl', '…'], { TEST_PLACE: 't9' }).err, /impl를 맡은 세션은 이 터미널이에요/);
   // 맡은 세션이 끝내고 나갔는데 그 터미널에 셸이 남았다
   assert.equal(muwi(['node', 'impl', 'done', '끝', '--work', 'shop-1'], { MUWI_SESSION: 'child', TEST_PLACE: 't9' }).code, 0);
-  at(3); handleHook({ session_id: 'child', hook_event_name: 'SessionEnd', reason: 'exit' }, dir, 'record', inTerminal('t9'), ROOT);
+  at(3); handleHook('claude', { session_id: 'child', hook_event_name: 'SessionEnd', reason: 'exit' }, dir, 'record', inTerminal('t9'), ROOT);
   assert.match(muwi(['tidy', 'shop-1'], { FAKE_TERMINALS_LIVE: JSON.stringify([{ terminal: 't7', agent: 'none' }]) }).out, /에이전트가 돌지 않는 터미널이라 닫지 않았어요 \(t7\)/);
 });
 

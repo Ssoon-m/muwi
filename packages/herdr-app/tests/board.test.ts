@@ -41,7 +41,7 @@ test('muwi board: 그래프 칸이 읽는 기록. 고른 작업의 그래프 배
   const { muwi } = bench();
   muwi(['plan', '--work', 'w', '--request', '작업해줘', PLAN]);
   muwi(['node', 'read', 'start']);
-  muwi(['hook'], { input: JSON.stringify({ session_id: 'lead', hook_event_name: 'PostToolUse', tool_name: 'Skill', tool_input: { skill: 'spec-reader' }, tool_response: { success: true } }) });
+  muwi(['hook', '--from', 'claude'], { input: JSON.stringify({ session_id: 'lead', hook_event_name: 'PostToolUse', tool_name: 'Skill', tool_input: { skill: 'spec-reader' }, tool_response: { success: true } }) });
   muwi(['node', 'read', 'done', '요구사항 2건']);
   const board = JSON.parse(muwi(['board']).out);
   assert.equal(board.works[0].work, 'w');
@@ -56,7 +56,7 @@ test('muwi board: 그래프 칸이 터미널과 작업을 잇도록 세션과 �
   const { muwi } = bench();
   // 계획을 낸 세션은 Herdr 터미널 t5에서 돈다. 다른 세션(t6)은 계획 없이 일한다
   muwi(['plan', '--work', 'w', '--request', '작업해줘', PLAN], { env: { HC_TERMINAL_ID: 't5' } });
-  muwi(['hook'], { session: 'other', env: { HC_TERMINAL_ID: 't6' }, input: JSON.stringify({ session_id: 'other', hook_event_name: 'SessionStart', source: 'startup' }) });
+  muwi(['hook', '--from', 'claude'], { session: 'other', env: { HC_TERMINAL_ID: 't6' }, input: JSON.stringify({ session_id: 'other', hook_event_name: 'SessionStart', source: 'startup' }) });
   // 사람을 기다리는 노드를 다른 세션이 맡고 있으면 그 세션의 터미널로 간다
   muwi(['node', 'impl', 'wait', '어느 쪽?', '--work', 'w'], { session: 'helper', env: { HC_TERMINAL_ID: 't7' } });
   const board = JSON.parse(muwi(['board']).out);
