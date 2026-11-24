@@ -1,6 +1,5 @@
-// muwi setup: 플러그인이 해 주지 못하는 설치를 맡는다.
-//   Claude Code 플러그인으로 받으면 명령·훅·지침·사용법 skill은 Claude Code가 넣어 준다.
-//   여기서 하는 일은 그 밖의 것: 터미널에서도 muwi 명령을 쓰게 하기, 화면(Herdr 앱의 그래프 칸), 다른 AI 도구에 커넥터 넣기.
+// muwi setup: npm으로 받은 muwi를 쓸 수 있게 넣는다.
+//   터미널과 그래프 칸이 부를 muwi 명령(~/.local/bin), 화면(Herdr 앱의 그래프 칸), 고른 AI 도구에 커넥터(지침·사용법 skill·훅).
 //   화면에 무엇을 넣는지는 화면이 안다 (화면 규격의 setup). 여기서는 부르고 기록한다.
 //   도구마다 무엇을 어디에 넣는지는 그 도구의 커넥터가 안다 (src/connectors). 여기서는 고른 도구들에 차례로 넣고 기록한다.
 // 남의 설정은 건드리지 않는다. 우리 것은 명령 앞의 표시와 구간 표시로 알아본다.
@@ -115,7 +114,7 @@ function isOurWrapper(file: string): boolean {
 
 export type SetupOptions = {
   root: string; version: string; dir: string; env?: NodeJS.ProcessEnv; log?: (line: string) => void;
-  /** 통합을 넣을 도구들 (도구 id). claude, codex는 --claude, --codex의 옛 이름 */
+  /** 커넥터를 넣을 도구들 (도구 id). claude, codex는 --claude, --codex의 옛 이름 */
   tools?: string[];
   claude?: boolean;
   codex?: boolean;
@@ -126,9 +125,8 @@ export type SetupOptions = {
 };
 
 /**
- * 플러그인 밖의 것을 넣는다: 터미널용 명령, Herdr 앱 칸(앱이 있을 때), 고른 도구들의 통합.
- * 도구의 통합은 그 도구에 지침, 사용법 skill, 훅(또는 플러그인)을 넣는다. Claude Code는 플러그인이 넣어 주므로,
- * 플러그인 없이 쓸 때만 고른다 (--claude). 전에 넣었던 도구는 다시 실행할 때 고르지 않아도 새 위치로 맞춘다.
+ * 넣는다: 터미널용 명령, 화면(Herdr 앱 칸), 고른 도구들의 커넥터.
+ * 커넥터는 그 도구에 지침, 사용법 skill, 훅(또는 플러그인 파일)을 넣는다. 전에 넣었던 도구는 다시 실행할 때 고르지 않아도 새 판으로 맞춘다.
  */
 export function runSetup(o: SetupOptions): Install {
   const env = o.env ?? process.env;
@@ -250,37 +248,16 @@ export function removeSetup(dir: string, log: (line: string) => void = () => {})
 }
 
 /**
- * 플러그인이 업데이트되면 설치 위치가 바뀐다. 전에 setup을 한 적이 있고 위치나 버전이 달라졌으면 다시 맞춘다.
+ * muwi를 업데이트하면 버전이(설치 방법에 따라 위치도) 바뀐다. 전에 setup을 한 적이 있고 위치나 버전이 달라졌으면 다시 맞춘다.
  * 세션이 시작될 때마다 부르므로, 달라진 게 없으면 파일 하나만 읽고 끝난다.
  */
 export function refreshSetup(o: SetupOptions): boolean {
   const install = readInstall(o.dir);
   if (!install || (install.root === o.root && install.version === o.version)) return false;
-  // 플러그인을 업데이트하기 전부터 열려 있던 세션은 옛 버전의 훅을 쓴다. 그 세션이 새로 시작해도(/clear) 새 설치를 되돌리지 않는다
+  // 업데이트하기 전부터 열려 있던 세션이 옛 판의 훅을 쓰더라도 새 설치를 옛 판으로 되돌리지 않는다
   if (olderThan(o.version, install.version)) return false;
   runSetup(o);
   return true;
-}
-
-/**
- * Claude Code 플러그인으로 설치된 muwi 중 가장 새 것. 없으면 null.
- * 플러그인을 업데이트해도 이미 열려 있는 세션은 시작할 때의 버전을 쓴다. 그 세션의 훅이 새 버전을 찾아 넘기는 데 쓴다
- */
-export function newestPlugin(env: NodeJS.ProcessEnv = process.env): { root: string; version: string } | null {
-  const claude = env.CLAUDE_CONFIG_DIR || path.join(env.HOME || os.homedir(), '.claude');
-  const data = readJson<{ plugins?: Record<string, unknown> }>(path.join(claude, 'plugins', 'installed_plugins.json'));
-  let best: { root: string; version: string } | null = null;
-  for (const [name, entries] of Object.entries(data?.plugins ?? {})) {
-    if (name.split('@')[0] !== 'muwi' || !Array.isArray(entries)) continue;
-    for (const e of entries as { installPath?: unknown }[]) {
-      const root = typeof e?.installPath === 'string' ? e.installPath : null;
-      // 넘길 때 그 버전의 cli.ts를 Node로 바로 실행한다
-      if (!root || !fs.existsSync(path.join(root, 'src', 'cli.ts'))) continue;
-      const v = readJson<{ version?: string }>(path.join(root, 'package.json'))?.version;
-      if (v && (!best || olderThan(best.version, v))) best = { root, version: v };
-    }
-  }
-  return best;
 }
 
 /** a가 b보다 낮은 버전인가 (1.2.10 > 1.2.9) */

@@ -69,5 +69,17 @@ assert.equal(JSON.parse(run(wrapper, ['board'])).selected.work, 'w');
 const start = run('sh', [path.join(core, 'hooks', 'hook.sh')], JSON.stringify({ session_id: 'c1', hook_event_name: 'SessionStart', source: 'startup' }));
 assert.match(JSON.parse(start).hookSpecificOutput.additionalContext, /작업 진행 방식 \(muwi\)/);
 
+// Claude Code도 다른 도구처럼 커넥터로 넣는다: settings.json에 훅, ~/.claude/skills에 사용법. 넣은 훅 명령을 그대로 실행해 본다
+fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+muwi('setup', '--tool', 'claude');
+const settings = JSON.parse(fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8'));
+const command = settings.hooks.SessionStart[0].hooks[0].command;
+assert.match(command, /node_modules[\\/]muwi[\\/]hooks[\\/]hook\.sh/);
+const viaClaude = run('sh', ['-c', command], JSON.stringify({ session_id: 'c2', hook_event_name: 'SessionStart', source: 'startup' }));
+assert.match(JSON.parse(viaClaude).hookSpecificOutput.additionalContext, /작업 진행 방식 \(muwi\)/);
+assert.ok(fs.existsSync(path.join(home, '.claude', 'skills', 'muwi', 'SKILL.md')));
+muwi('setup', '--remove');
+assert.equal(JSON.parse(fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8')).hooks, undefined);
+
 fs.rmSync(tmp, { recursive: true, force: true });
-console.log(`패키지 확인: muwi·herdr-muwi ${version}을 npm으로 깔아서 명령, 그래프 배치, setup, 훅이 돈다`);
+console.log(`패키지 확인: muwi·herdr-muwi ${version}을 npm으로 깔아서 명령, 그래프 배치, setup, 훅, Claude Code 커넥터가 돈다`);

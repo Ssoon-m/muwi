@@ -1,6 +1,6 @@
-// Claude Code 통합: Claude Code의 훅 입력을 코어의 공통 사건으로 바꾸고, 코어의 답을 Claude Code가 알아듣는 형식으로 바꾼다.
+// Claude Code 커넥터: Claude Code의 훅 입력을 코어의 공통 사건으로 바꾸고, 코어의 답을 Claude Code가 알아듣는 형식으로 바꾼다.
 // 코어(events.ts)는 Claude Code의 훅 이름·도구 이름을 모른다.
-//   훅 연결은 세 갈래다 (플러그인의 hooks/hooks.json, 플러그인 없이 쓸 때는 settings.json):
+//   훅은 ~/.claude/settings.json에 두 갈래로 건다:
 //     record: SessionStart, UserPromptSubmit, SubagentStart/Stop, PostToolUse(Skill|Read)
 //     command: PreToolUse(Bash)
 import path from 'node:path';
@@ -10,11 +10,11 @@ import { shPath } from './files.ts';
 import { HOOK_MARK, addHooks, installEntries, uninstallEntries, type HookEntry, type Settings } from './settings-hooks.ts';
 import type { Adapter, HookMode, HookResult } from './types.ts';
 
-/** muwi setup --claude가 settings.json에 넣는 훅 명령. Windows의 Claude Code는 이 명령을 Git Bash로 실행한다 */
+/** muwi setup --tool claude가 settings.json에 넣는 훅 명령. Windows의 Claude Code는 이 명령을 Git Bash로 실행한다 */
 export const hookCommandFor = (root: string, platform: NodeJS.Platform = process.platform) =>
   `${HOOK_MARK} sh "${shPath(path.join(root, 'hooks', 'hook.sh'), platform)}"`;
 
-/** 플러그인의 hooks/hooks.json과 같은 구성 */
+/** 거는 훅들 */
 function entries(hookCommand: string): HookEntry[] {
   // 훅이 실패해도(Windows에서 Git Bash가 없어 sh를 못 찾는 등) 하려던 일을 막지 않는다
   const on = (event: string, matcher?: string, mode = ''): HookEntry => ({ event, ...(matcher ? { matcher } : {}), command: `${hookCommand}${mode}`, extra: { onFailure: 'continue' } });

@@ -1,7 +1,6 @@
 // muwi: 작업 계획과 진행을 기록하는 명령.
 // AI가 이번 작업의 계획을 스스로 짜서 여기에 적고, 사람은 그 기록을 그래프로 본다.
 // 이 명령은 적어 두기만 한다. 순서를 막거나 다음에 할 일을 정하지 않는다.
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, adoptSpawn, guideUpdate, handleHook, sessionInstructions } from './hook.ts';
@@ -10,7 +9,7 @@ import { Fail, dur, join, needPlan, out, parseArgs, resolveWork, str, type Args 
 import { fromSubagent, markNode } from './node.ts';
 import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
 import { readSession, sessionKey, sessionLabel } from './session.ts';
-import { installedTools, newestPlugin, olderThan, readInstall, refreshSetup, removeSetup, runSetup } from './setup.ts';
+import { installedTools, readInstall, refreshSetup, removeSetup, runSetup } from './setup.ts';
 import { adapterOf } from './connectors/index.ts';
 import { gaps } from './connectors/types.ts';
 import { TOOLS, toolById } from './connectors/tools.ts';
@@ -53,8 +52,7 @@ const HELP = `사용법: muwi <명령>
   muwi setup                         터미널용 muwi 명령과 화면(Herdr 앱의 그래프 칸)을 넣는다
   muwi setup --tools                 아는 AI 도구와, 깔렸는지, muwi 통합을 넣었는지 본다
   muwi setup --tool <도구>[,<도구>]   그 AI 도구에 muwi 통합(지침·사용법 skill·훅)을 넣는다
-  muwi setup --all                   이 컴퓨터에 깔린 도구 전부에 넣는다 (Claude Code는 플러그인이 넣어 주므로 뺀다)
-  muwi setup --claude                플러그인 없이 쓸 때: Claude Code 훅과 사용법 skill도 넣는다
+  muwi setup --all                   이 컴퓨터에 깔린 도구 전부에 넣는다
   muwi setup --remove                setup으로 넣은 것을 뺀다 (muwi layout으로 바꾼 화면도 되돌린다)
   muwi config [<이름> on|off]         설정을 보고 켜고 끈다 (화면이 정하는 설정)
   muwi --version
@@ -255,7 +253,7 @@ function cmdPlan(a: Args, dir: string) {
 }
 
 /**
- * 훅이 돌지 않는 Claude Code 세션이면 알린다 (muwi 플러그인을 설치하기 전에 연 세션 등).
+ * 훅이 있는 도구인데 이 세션에서 훅이 돌지 않았으면 알린다 (muwi를 넣기 전에 연 세션 등).
  * 계획과 진행은 적히지만, 읽은 skill과 서브에이전트는 훅이 봐야 적히므로 빠진다
  */
 function warnUnhooked(dir: string) {
@@ -534,24 +532,7 @@ function cmdHook(a: Args, dir: string) {
     // 입력에 사건 이름을 넣지 않는 도구는 훅 명령이 알려 준다 (--event)
     const named = str(a, 'event');
     if (named && payload && typeof payload === 'object' && !payload.hook_event_name) payload.hook_event_name = named;
-    // 이 세션이 시작된 뒤에 더 새 muwi가 설치됐으면 그 버전이 이 훅을 처리하게 넘긴다.
-    // 세션을 새로 열지 않아도 새 동작(지침, 기록 방식)이 적용된다. 훅이 걸리는 시점(hooks.json)만은 세션을 새로 열어야 바뀐다
-    if (!process.env.MUWI_HOOK_PASSED) {
-      const newest = newestPlugin();
-      if (newest && olderThan(version(), newest.version) && path.resolve(newest.root) !== path.resolve(ROOT)) {
-        // 새 버전의 cli.ts를 지금 Node로 바로 실행한다 (bin/muwi는 sh 스크립트라 Windows에서 바로 실행되지 않는다)
-        const from = str(a, 'from');
-        const r = spawnSync(process.execPath, [path.join(newest.root, 'src', 'cli.ts'), 'hook', ...a.pos, ...(from ? ['--from', from] : [])], {
-          input: text, encoding: 'utf8', env: { ...process.env, MUWI_HOOK_PASSED: '1' }, timeout: 30_000,
-        });
-        if (r.status === 0) {
-          if (r.stdout) process.stdout.write(r.stdout);
-          return;
-        }
-        // 새 버전이 처리하지 못하면 이 버전이 처리한다
-      }
-    }
-    // 플러그인이 업데이트돼 설치 위치가 바뀌었으면, 전에 setup으로 넣어 둔 명령과 그래프 칸을 새 위치로 맞춘다.
+    // muwi가 업데이트돼 버전이나 설치 위치가 바뀌었으면, 전에 setup으로 넣어 둔 명령·화면·커넥터를 새 판으로 맞춘다.
     // 새 세션이 열릴 때뿐 아니라 열려 있는 세션에 말을 걸 때도 맞춘다 (더 낮은 버전으로는 맞추지 않는다)
     const result = handleHook(payload, dir, mode, process.env, ROOT, str(a, 'from') ?? 'claude', h => {
       if (h.kind === 'session-start' || h.kind === 'prompt') refreshSetup({ root: ROOT, version: version(), dir });
@@ -587,19 +568,21 @@ function cmdSetup(a: Args, dir: string) {
       const lacks = gaps(adapterOf(t.id)?.can ?? { subagents: false, start: false, skills: false }).join(' · ');
       out(`${t.id.padEnd(16)} ${t.name.padEnd(18)} ${state.padEnd(6)}${lacks ? `  ${lacks}` : ''}`);
     }
-    out('넣기: muwi setup --tool <도구>[,<도구>] 또는 muwi setup --all. Claude Code는 플러그인이 넣어 줘요.');
+    out('넣기: muwi setup --tool <도구>[,<도구>] 또는 muwi setup --all');
     return;
   }
   // --tool codex,cursor처럼 고르거나, --all로 이 컴퓨터에 깔린 도구 전부에 넣는다. --claude, --codex는 옛 이름
   const picked = (str(a, 'tool') ?? '').split(',').map(x => x.trim()).filter(Boolean);
   const unknown = picked.filter(id => !toolById(id));
   if (unknown.length) throw new Fail(`모르는 도구예요: ${unknown.join(', ')}. 아는 도구: ${TOOLS.map(t => t.id).join(', ')}`);
-  // Claude Code는 플러그인이 넣어 주므로 --all에는 넣지 않는다 (둘 다 넣으면 훅이 두 번 돈다)
-  const all = a.flags.all ? installedTools().map(t => t.id).filter(id => id !== 'claude') : [];
+  const all = a.flags.all ? installedTools().map(t => t.id) : [];
   // 화면이 있으면 화면도 넣는다 (Herdr 앱의 칸). 화면은 점검하고 지금 화면이 어떤지도 알린다
   const install = runSetup({ root: ROOT, version: version(), dir, tools: [...picked, ...all], claude: Boolean(a.flags.claude), codex: Boolean(a.flags.codex), log: out, report: true });
-  if (!install.claude) out('Claude Code의 훅·지침·사용법 skill은 플러그인이 넣어 줘요. 플러그인 없이 쓰려면 muwi setup --claude');
-  else out('이미 열려 있는 Claude Code 세션은 다시 시작해야 훅이 적용돼요.');
+  const done = Object.keys(install.tools ?? {});
+  if (!done.length) {
+    const have = installedTools().map(t => t.id);
+    out(`AI 도구에는 아직 넣지 않았어요. 넣으려면 muwi setup --tool <도구> 또는 muwi setup --all${have.length ? ` (이 컴퓨터에 깔린 도구: ${have.join(', ')})` : ''}`);
+  } else out('이미 열려 있는 세션은 다시 시작해야 새로 넣은 훅이 돌아요.');
 }
 
 /** 설정의 이름, 기본값, 설명은 화면이 정한다 (화면 규격의 config). 코어에는 설정이 없다 */

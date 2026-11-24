@@ -263,41 +263,6 @@ test('출력을 받는 쪽이 먼저 닫아도 (muwi show | head) 오류를 쏟�
   assert.doesNotMatch(r.stderr, /EPIPE|Unhandled/);
 });
 
-test('업데이트: 열려 있는 세션의 훅은 설치된 더 새 muwi에 넘긴다', () => {
-  const { dir, muwi } = bench();
-  const claude = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-claude-'));
-  const plugin = (version: string, answer: string) => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-plugin-'));
-    fs.mkdirSync(path.join(root, 'src'));
-    // 넘겨받은 버전은 그 cli.ts를 Node로 실행한다. 입력을 다 읽고 정해 둔 답을 한다
-    fs.writeFileSync(path.join(root, 'src', 'cli.ts'), `process.stdin.resume();\nprocess.stdin.on('end', () => console.log(${JSON.stringify(answer)}));\n`);
-    fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version }));
-    return root;
-  };
-  const install = (roots: string[]) => {
-    fs.mkdirSync(path.join(claude, 'plugins'), { recursive: true });
-    fs.writeFileSync(path.join(claude, 'plugins', 'installed_plugins.json'), JSON.stringify({
-      version: 2, plugins: { 'muwi@muwi': roots.map(installPath => ({ scope: 'user', installPath })), 'other@x': [{ installPath: '/nowhere' }] },
-    }));
-  };
-  const start = JSON.stringify({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' });
-  const hook = (env: Record<string, string> = {}) => muwi(['hook'], { session: null, input: start, env: { CLAUDE_CONFIG_DIR: claude, ...env } }).out;
-  // 더 새 버전이 설치돼 있으면 그 버전이 처리한다 (가장 새 것을 고른다)
-  install([plugin('9.0.0', '{"from":"9.0.0"}'), plugin('9.1.0', '{"from":"9.1.0"}')]);
-  assert.equal(hook().trim(), '{"from":"9.1.0"}');
-  // 넘겨받은 쪽은 다시 넘기지 않는다
-  assert.match(hook({ MUWI_HOOK_PASSED: '1' }), /작업 진행 방식 \(muwi\)/);
-  // 설치된 것이 더 낮은 버전이면 넘기지 않는다
-  install([plugin('0.0.1', '{"from":"old"}')]);
-  assert.match(hook(), /작업 진행 방식 \(muwi\)/);
-  // 새 버전이 실패하면 이 버전이 처리한다
-  const broken = plugin('9.9.9', '');
-  fs.writeFileSync(path.join(broken, 'src', 'cli.ts'), 'process.exit(3);\n');
-  install([broken]);
-  assert.match(hook(), /작업 진행 방식 \(muwi\)/);
-  assert.ok(fs.existsSync(path.join(dir, '.sessions')));
-});
-
 test('그래프 흐름: 하던 노드 앞에 먼저 할 노드가 끼어들면 그 노드는 잠시 멈추고, 다시 하면 같은 회차로 이어진다', () => {
   const { dir, muwi } = bench();
   muwi(['plan', '--work', 'w', '--request', '작업해줘', PLAN]);
