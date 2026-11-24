@@ -7,7 +7,7 @@
 //   node scripts/release.mjs verify 0.7.1   (release.yml) 모든 패키지 버전과 CHANGELOG 섹션이 맞는지
 //   node scripts/release.mjs notes 0.7.1    (release.yml) 그 버전의 CHANGELOG 내용. GitHub 릴리스 노트로 쓴다
 //   node scripts/release.mjs registered     (release.yml) 모든 패키지가 npm에 있는지. 처음 올리는 패키지가 있으면 멈춘다
-//   pnpm release stage                      npm에 아직 없는 패키지를 자리만 잡아 올린다 (0.0.0-stage). npm 로그인이 필요하다
+//   pnpm release stage                      npm에 아직 없는 패키지의 자리를 잡는다 (npm stage publish. npm이 0.0.0-stage를 만든다). npm 로그인이 필요하다
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -111,11 +111,13 @@ function missingNotes(version) {
 }
 
 // ---- 처음 올리는 패키지
-// Actions는 Trusted Publishing(토큰 없이)으로 올린다. Trusted Publisher는 npm에 이미 있는 패키지에만 등록할 수 있어서,
-// 새 패키지는 사람이 자리만 잡아 한 번 올리고(0.0.0-stage) 등록한 뒤에 릴리스한다.
+// Actions는 Trusted Publishing(토큰 없이)으로 올린다. Trusted Publisher는 npm에 이미 있는 패키지에만 등록할 수 있다.
+// 새 패키지는 사람이 한 번 npm의 staged publishing으로 자리를 잡는다: 없는 패키지를 stage하면 npm이 0.0.0-stage를 공개로 올려
+// 패키지가 생긴다 (0.0.0-stage는 npm이 쓰는 번호라 직접 올릴 수 없다). stage한 판은 승인하기 전에는 공개되지 않는다.
 // 그 전에 태그를 달면 앞 패키지만 올라가고 새 패키지에서 멈춰 패키지마다 버전이 어긋난다. 그래서 릴리스 앞뒤에서 확인한다
 
-const STAGE = '0.0.0-stage';
+/** 자리를 잡으려고 stage하는 판. 승인하지 않고 거절한다 */
+const INIT = '0.0.0-init';
 const npmCmd = (args, o = {}) => execFileSync('npm', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], shell: process.platform === 'win32', ...o });
 
 /** npm에 아직 없는 패키지들. npm에 물어보지 못하면(네트워크 등) 멈춘다 */
@@ -134,11 +136,10 @@ export function missingOnNpm(view = name => npmCmd(['view', name, 'name'])) {
 }
 
 function firstPublishHelp(missing) {
-  const names = missing.map(p => p.name).join(', ');
   return [
-    `npm에 아직 없는 패키지가 있어요: ${names}`,
+    `npm에 아직 없는 패키지가 있어요: ${missing.map(p => p.name).join(', ')}`,
     'Actions는 Trusted Publishing으로 올리는데, Trusted Publisher는 npm에 있는 패키지에만 등록할 수 있어요. 릴리스 전에 한 번만 하세요.',
-    '  1. npm login 뒤 pnpm release stage   (자리만 잡는 0.0.0-stage를 올려요)',
+    '  1. npm login 뒤 pnpm release stage   (npm stage publish로 자리를 잡아요. npm이 0.0.0-stage를 만들어요)',
     ...missing.map(p => `  2. https://www.npmjs.com/package/${p.name}/access 의 Trusted Publisher에 GitHub Actions, Ssoon-m/muwi, release.yml 등록`),
     '  3. 다시 실행하세요',
   ].join('\n');
@@ -151,7 +152,10 @@ function registered() {
   console.log(`npm에 모든 패키지가 있어요: ${PACKAGES.map(p => p.name).join(', ')}`);
 }
 
-/** npm에 없는 패키지를 자리만 잡아 올린다: package.json과 README만 든 0.0.0-stage. 이미 있는 패키지는 건드리지 않는다 */
+/**
+ * npm에 없는 패키지의 자리를 잡는다: package.json과 README만 든 0.0.0-init을 stage한다 (npm 11.15 이상).
+ * npm이 0.0.0-stage를 공개로 올려 패키지가 생기고, stage한 0.0.0-init은 승인하지 않으면 공개되지 않는다. 이미 있는 패키지는 건드리지 않는다
+ */
 function stage(dryRun) {
   const missing = missingOnNpm();
   if (!missing.length) {
@@ -166,21 +170,30 @@ function stage(dryRun) {
     }
   }
   for (const p of missing) {
-    const manifest = JSON.parse(fs.readFileSync(manifestFile(p.folder), 'utf8'));
     if (dryRun) {
-      console.log(`--dry-run: ${p.name}@${STAGE}를 올릴 거예요`);
+      console.log(`--dry-run: ${p.name}@${INIT}를 stage할 거예요 (npm이 ${p.name}@0.0.0-stage를 만들어요)`);
       continue;
     }
+    const manifest = JSON.parse(fs.readFileSync(manifestFile(p.folder), 'utf8'));
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-stage-'));
     fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
-      name: p.name, version: STAGE, description: 'Temporary package placeholder for staged publishing',
+      name: p.name, version: INIT, description: 'muwi 릴리스 전에 패키지 자리를 잡으려고 stage한 판 (승인하지 않는다)',
       license: manifest.license, repository: manifest.repository,
     }, null, 2));
-    fs.writeFileSync(path.join(dir, 'README.md'), `# ${p.name}\n\nmuwi 릴리스 전에 자리만 잡아 둔 판입니다. https://github.com/Ssoon-m/muwi\n`);
-    // 2단계 인증을 묻는 프롬프트가 보이도록 입출력을 이 터미널에 잇는다
-    npmCmd(['publish', '--access', 'public'], { cwd: dir, stdio: 'inherit' });
-    fs.rmSync(dir, { recursive: true, force: true });
-    console.log(`올렸어요: ${p.name}@${STAGE}. Trusted Publisher 등록: https://www.npmjs.com/package/${p.name}/access (GitHub Actions, Ssoon-m/muwi, release.yml)`);
+    fs.writeFileSync(path.join(dir, 'README.md'), `# ${p.name}\n\nmuwi 릴리스 전에 패키지 자리를 잡으려고 stage한 판입니다. https://github.com/Ssoon-m/muwi\n`);
+    // 로그인을 묻는 프롬프트가 보이도록 입출력을 이 터미널에 잇는다. 시험판이라 태그를 꼭 단다 (latest가 아닌 init)
+    try {
+      npmCmd(['stage', 'publish', '--access', 'public', '--tag', 'init'], { cwd: dir, stdio: 'inherit' });
+    } catch {
+      throw new Stop(`npm에 stage하지 못했어요: ${p.name}@${INIT} (위의 npm 메시지를 보세요. npm 11.15 이상이 필요해요)`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+    console.log([
+      `자리를 잡았어요: ${p.name} (npm이 0.0.0-stage를 만들어요)`,
+      `  stage한 ${INIT}은 쓰지 않아요. 거절하세요: npm stage list ${p.name} → npm stage reject <stage-id> (2단계 인증)`,
+      `  Trusted Publisher 등록: https://www.npmjs.com/package/${p.name}/access (GitHub Actions, Ssoon-m/muwi, release.yml)`,
+    ].join('\n'));
   }
 }
 
