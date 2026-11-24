@@ -3,7 +3,7 @@
 //   훅 연결은 세 갈래다 (플러그인의 hooks/hooks.json, 플러그인 없이 쓸 때는 settings.json):
 //     record: SessionStart, UserPromptSubmit, SubagentStart/Stop, PostToolUse(Skill|Read)
 //     nudge:  PreToolUse(Edit|Write|MultiEdit|NotebookEdit|Agent|Task)
-//     guard:  PreToolUse(Bash)
+//     command: PreToolUse(Bash)
 import path from 'node:path';
 import { skillFromPath, type Happened, type Reply } from '../events.ts';
 import { sessionKey } from '../session.ts';
@@ -15,7 +15,7 @@ import type { Adapter, HookMode, HookResult } from './types.ts';
 export const hookCommandFor = (root: string, platform: NodeJS.Platform = process.platform) =>
   `${HOOK_MARK} sh "${shPath(path.join(root, 'hooks', 'hook.sh'), platform)}"`;
 
-/** 플러그인의 hooks/hooks.json과 같은 구성. 계획 알림(nudge)과 push 앞에서 묻기(guard)를 켜고 끄는 것은 muwi config가 한다 */
+/** 플러그인의 hooks/hooks.json과 같은 구성. 계획 알림(nudge)을 켜고 끄는 것은 muwi config가 한다 */
 function entries(hookCommand: string): HookEntry[] {
   // 훅이 실패해도(Windows에서 Git Bash가 없어 sh를 못 찾는 등) 하려던 일을 막지 않는다
   const on = (event: string, matcher?: string, mode = ''): HookEntry => ({ event, ...(matcher ? { matcher } : {}), command: `${hookCommand}${mode}`, extra: { onFailure: 'continue' } });
@@ -23,7 +23,7 @@ function entries(hookCommand: string): HookEntry[] {
     on('SessionStart'), on('UserPromptSubmit'), on('SubagentStart'), on('SubagentStop'),
     on('PostToolUse', 'Skill|Read'),
     on('PreToolUse', 'Edit|Write|MultiEdit|NotebookEdit|Agent|Task', ' nudge'),
-    on('PreToolUse', 'Bash', ' guard'),
+    on('PreToolUse', 'Bash', ' command'),
   ];
 }
 
@@ -46,7 +46,7 @@ export function fromClaude(payload: any, mode: HookMode, env: NodeJS.ProcessEnv 
   const model = typeof payload.model === 'string' && payload.model ? payload.model : undefined;
   const who = { tool: 'claude' as const, session, ...(agent ? { agent } : {}), ...(cwd ? { cwd } : {}), ...(model ? { model } : {}) };
 
-  if (mode === 'guard') {
+  if (mode === 'command') {
     return event === 'PreToolUse' && tool === 'Bash' ? { ...who, kind: 'before-command', command: payload.tool_input?.command } : null;
   }
   if (mode === 'nudge') {
@@ -78,7 +78,6 @@ export function fromClaude(payload: any, mode: HookMode, env: NodeJS.ProcessEnv 
 /** 코어의 답 → Claude Code 훅의 출력 */
 export function toClaude(h: Happened, r: Reply): HookResult {
   const out = (o: object): HookResult => ({ stdout: JSON.stringify({ hookSpecificOutput: o }) });
-  if (r.ask) return out({ hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: r.ask });
   if (r.stop) return out({ hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: r.stop });
   if (r.say && h.kind === 'session-start') return out({ hookEventName: 'SessionStart', additionalContext: r.say });
   if (r.say && h.kind === 'prompt') return out({ hookEventName: 'UserPromptSubmit', additionalContext: r.say });

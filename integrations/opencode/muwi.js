@@ -131,7 +131,7 @@ function normalizeTool(tool, args) {
 }
 
 function modeFor(name) {
-  if (name === "Bash") return "guard";
+  if (name === "Bash") return "command"; // links a node a subagent starts; never blocks
   if (name === "Edit" || name === "Write" || name === "Agent") return "nudge";
   return undefined;
 }
@@ -279,7 +279,6 @@ function createState(defaultCwd) {
     );
     const result = decisionOf(reply);
     if (result.decision === "deny") return result.reason || "Blocked by muwi";
-    // "ask" is ignored: a server plugin has no way to open a confirmation prompt.
     addTurnContext(id, result.context);
     if (normalized.name === "Agent") {
       // Remember the type so the child session created next can be labelled with it.

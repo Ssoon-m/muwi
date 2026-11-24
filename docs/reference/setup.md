@@ -101,23 +101,17 @@ muwi layout --remove
 ```sh
 muwi config                # 현재 설정 보기
 muwi config nudge off      # 계획 알림 끄기
-muwi config guard on       # push 전에 묻기 켜기
 muwi config layout off     # 화면 바꾸기 안내 끄기
 ```
 
 | 설정 | 기본값 | 켜면 |
 | --- | --- | --- |
 | `nudge` | `on` | 계획이 없는 상태에서 AI가 파일을 고치거나 서브에이전트를 띄우려 하면 돌려보내고 방법을 알려 줍니다 |
-| `guard` | `off` | 아래 명령 앞에서 사용자에게 실행해도 되는지 묻습니다 |
 | `layout` | `on` | 화면에 muwi 칸이 없을 때 `muwi setup`과 그래프 칸이 `muwi layout`을 권합니다 |
 
 `nudge`는 Edit, Write 도구로 고칠 때 동작합니다. 기록 폴더, `~/.claude`, `~/.codex`, 임시 폴더에 쓰는 파일은 확인하지 않습니다.
 
-`guard`가 묻는 명령은 다음과 같습니다.
-
-- `git push`
-- `gh pr create`, `merge`, `comment`, `review`, `close`, `edit`, `ready`
-- Bitbucket API로 PR을 만들거나 댓글을 쓰는 요청
+muwi는 명령을 막거나 사람에게 묻게 하지 않습니다. push나 PR처럼 승인받고 할 일은 그 AI 도구의 권한 설정이나 직접 둔 훅으로 정합니다 (0.5.x의 `guard`는 0.6.0에서 뺐습니다).
 
 설정은 `~/.muwi/config.json`에 저장됩니다.
 
@@ -153,27 +147,26 @@ muwi setup --all                   # 깔려 있는 도구 전부에 넣습니다
 | 도구 | 이름 (`--tool`) | 훅·플러그인을 넣는 곳 | 이 도구에서 안 되는 기능 | 넣은 뒤 한 번 할 일 |
 | --- | --- | --- | --- | --- |
 | Claude Code | `claude` | 플러그인. 플러그인 없이 쓰면 `~/.claude/settings.json` |  |  |
-| Codex | `codex` | `~/.codex/hooks.json` | push 앞에서 묻기 | Codex에서 `/hooks`를 열어 muwi 훅을 승인 |
+| Codex | `codex` | `~/.codex/hooks.json` |  | Codex에서 `/hooks`를 열어 muwi 훅을 승인 |
 | GitHub Copilot CLI | `copilot` | `~/.copilot/hooks/muwi.json` | 말할 때 지침 다시 넣기, 서브에이전트 표시 | 열려 있는 Copilot 세션을 다시 켜기 |
-| Cursor CLI | `cursor` | `~/.cursor/hooks.json` | 말할 때 지침 다시 넣기, push 앞에서 묻기 |  |
+| Cursor CLI | `cursor` | `~/.cursor/hooks.json` | 말할 때 지침 다시 넣기 |  |
 | Qwen Code | `qwen` | `~/.qwen/settings.json` |  |  |
 | Qoder CLI | `qodercli` | `~/.qoder/settings.json` |  |  |
-| Kimi Code | `kimi` | `~/.kimi-code/config.toml` | push 앞에서 묻기, 서브에이전트 표시 |  |
+| Kimi Code | `kimi` | `~/.kimi-code/config.toml` | 서브에이전트 표시 |  |
 | Antigravity CLI | `antigravity-cli` | `~/.gemini/config/hooks.json` | 말할 때 지침 다시 넣기, 서브에이전트 표시 |  |
-| Droid | `droid` | `~/.factory/hooks.json` (없으면 `settings.json`) | push 앞에서 묻기, 서브에이전트 표시 |  |
-| Devin CLI | `devin` | `~/.config/devin/config.json` | push 앞에서 묻기, 서브에이전트 표시 |  |
+| Droid | `droid` | `~/.factory/hooks.json` (없으면 `settings.json`) | 서브에이전트 표시 |  |
+| Devin CLI | `devin` | `~/.config/devin/config.json` | 서브에이전트 표시 |  |
 | Grok CLI | `grok` | `~/.grok/hooks/muwi.json` | 말할 때 지침 다시 넣기 |  |
-| Mastra Code | `mastracode` | `~/.mastracode/hooks.json` | 말할 때 지침 다시 넣기, push 앞에서 묻기, 서브에이전트 표시 |  |
-| Letta Code | `letta` | `~/.letta/settings.json` | push 앞에서 묻기, 서브에이전트 표시 |  |
-| OpenCode | `opencode` | `~/.config/opencode/plugins/muwi.js` | push 앞에서 묻기 |  |
-| Kilo CLI | `kilo` | `~/.config/kilo/plugin/muwi.js` | push 앞에서 묻기 |  |
+| Mastra Code | `mastracode` | `~/.mastracode/hooks.json` | 말할 때 지침 다시 넣기, 서브에이전트 표시 |  |
+| Letta Code | `letta` | `~/.letta/settings.json` | 서브에이전트 표시 |  |
+| OpenCode | `opencode` | `~/.config/opencode/plugins/muwi.js` |  |  |
+| Kilo CLI | `kilo` | `~/.config/kilo/plugin/muwi.js` |  |  |
 | oh-my-pi | `omp` | `~/.omp/agent/extensions/muwi.ts` |  |  |
 | Pi | `pi` | `~/.pi/agent/extensions/muwi.ts` | 서브에이전트 표시 (Pi에는 서브에이전트가 없습니다) |  |
 | Hermes Agent | `hermes` | `~/.hermes/plugins/muwi/` |  | `hermes plugins enable muwi`로 플러그인 켜기 |
 
 표의 말뜻은 이렇습니다.
 
-- **push 앞에서 묻기**: `muwi config guard on`으로 켜는 기능입니다. AI가 `git push`나 PR 만들기처럼 되돌릴 수 없는 명령을 실행하려 할 때, 그 도구가 사람에게 "실행할까요?"를 묻게 합니다. 훅이 "사람에게 물어봐"라고 답할 수 없는 도구에서는 이 기능을 켜도 묻지 않습니다. 기본값은 꺼짐이라, 켜지 않았다면 차이가 없습니다.
 - **말할 때 지침 다시 넣기**: muwi를 업데이트해서 지침이 바뀌면, 열려 있는 세션에 사람이 다음 말을 걸 때 새 지침을 넣어 주는 기능입니다. 안 되는 도구는 세션을 새로 열어야 새 지침을 받습니다.
 - **서브에이전트 표시**: 노드를 서브에이전트가 했을 때 그래프에 "서브"로 나오고, 그 서브에이전트가 읽은 skill이 그 노드에 붙는 것입니다. 안 되는 도구에서는 그 세션이 한 것으로 적힙니다.
 - **넣은 뒤 한 번 할 일**: 그 도구가 새로 들어온 훅이나 플러그인을 바로 돌리지 않는 경우입니다. Codex는 보안 때문에 새 훅을 사람이 승인하기 전에는 돌리지 않습니다. Codex 화면에서 `/hooks`를 입력해 muwi 훅을 승인하면 그 뒤로 돕니다. 승인하기 전에도 계획과 진행 기록은 되고, 읽은 skill 기록과 계획 알림만 빠집니다.

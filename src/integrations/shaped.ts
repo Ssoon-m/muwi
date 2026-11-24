@@ -22,8 +22,6 @@ export type Shape = {
   tools: { edit: string[]; spawn: string[]; shell: string[]; read: string[]; skill?: string[] };
   /** 파일을 셸 명령으로 읽는 도구인가 (cat …/SKILL.md). 그러면 셸 명령에서도 읽은 skill을 찾는다 */
   shellReads?: boolean;
-  /** 사람에게 확인받게 할 수 있나 (permissionDecision ask) */
-  ask?: boolean;
   /** 막을 때 답하는 법: JSON(permissionDecision deny) 또는 종료 코드 2와 표준 오류 */
   deny?: 'json' | 'exit2';
   /** AI에게 보여 줄 말을 넣는 법: JSON(additionalContext) 또는 표준 출력 그대로 */
@@ -83,7 +81,7 @@ export function fromShaped(shape: Shape, raw: any, mode: HookMode, env: NodeJS.P
   const is = (names?: string[]) => Boolean(names && typeof tool === 'string' && names.includes(tool));
   const { on, tools } = shape;
 
-  if (mode === 'guard') return event === on.before && is(tools.shell) ? { ...who, kind: 'before-command', command: input.command ?? input.cmd } : null;
+  if (mode === 'command') return event === on.before && is(tools.shell) ? { ...who, kind: 'before-command', command: input.command ?? input.cmd } : null;
   if (mode === 'nudge') {
     if (event !== on.before) return null;
     if (is(tools.spawn)) return { ...who, kind: 'before-spawn' };
@@ -120,7 +118,6 @@ export function toShaped(shape: Shape, h: Happened, r: Reply): HookResult {
     const { hookEventName: _event, ...rest } = o;
     return { stdout: JSON.stringify(rest) };
   };
-  if (r.ask) return shape.ask ? out({ hookEventName: shape.on.before, permissionDecision: 'ask', permissionDecisionReason: r.ask }) : {};
   if (r.stop) {
     return shape.deny === 'exit2'
       ? { stderr: r.stop + '\n', code: 2 }
@@ -150,8 +147,8 @@ export function shapedEntries(shape: Shape, wiring: Wiring, command: string): Ho
     ...entry(on.start, null), ...entry(on.prompt, null), ...entry(on.subStart, null), ...entry(on.subStop, null),
     ...entry(on.after, [...tools.read, ...(tools.skill ?? []), ...(shape.shellReads ? tools.shell : [])]),
     ...entry(on.before, [...tools.edit, ...tools.spawn], ' nudge'),
-    // 셸 명령 앞: 사람에게 묻게 할 수 있거나, 서브에이전트가 맡은 노드를 이을 수 있을 때만 건다
-    ...(shape.ask || on.subStart ? entry(on.before, tools.shell, ' guard') : []),
+    // 셸 명령 앞: 서브에이전트가 맡은 노드를 이을 수 있을 때만 건다 (서브에이전트를 알려 주는 도구)
+    ...(on.subStart ? entry(on.before, tools.shell, ' command') : []),
   ];
 }
 
@@ -193,7 +190,6 @@ export function flatShaped(shape: Shape, o: { file: string; matcher: Wiring['mat
 export const PLUGIN_SHAPE = {
   on: { start: 'SessionStart', prompt: 'UserPromptSubmit', before: 'PreToolUse', after: 'PostToolUse', subStart: 'SubagentStart', subStop: 'SubagentStop' },
   tools: { edit: ['Edit', 'Write'], spawn: ['Agent'], shell: ['Bash'], read: ['Read'], skill: ['Skill'] },
-  ask: true,
 } satisfies Omit<Shape, 'id'>;
 
 /** 플러그인 파일 안에서 muwi 훅 스크립트의 자리를 가리키는 표시. 넣을 때 실제 경로로 바꾼다 */

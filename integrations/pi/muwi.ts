@@ -122,7 +122,6 @@ function normalizeTool(toolName: unknown, input: any) {
 }
 
 function modeFor(name: string): string | undefined {
-  if (name === "Bash") return "guard";
   if (name === "Edit" || name === "Write" || name === "Agent") return "nudge";
   return undefined;
 }
@@ -218,11 +217,6 @@ export default function (pi: any) {
       );
       const result = decisionOf(reply);
       if (result.decision === "deny") return { block: true, reason: result.reason || "Blocked by muwi" };
-      if (result.decision === "ask" && ctx?.hasUI) {
-        // Pi can ask: a confirm dialog in the TUI (or over RPC). No UI means the call proceeds.
-        const allowed = await ctx.ui.confirm("muwi", result.reason || `Allow this ${tool.name} call?`);
-        if (!allowed) return { block: true, reason: `Rejected by the user. ${result.reason ?? ""}`.trim() };
-      }
       if (result.context) steer(result.context);
     } catch {}
   });

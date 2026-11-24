@@ -15,7 +15,7 @@ const EVENTS = { start: 'SessionStart', prompt: 'UserPromptSubmit', before: 'Pre
 const WITH_SUBAGENTS = { ...EVENTS, subStart: 'SubagentStart', subStop: 'SubagentStop' };
 
 // ── Codex: ~/.codex/hooks.json. 파일을 고치는 도구는 apply_patch 하나이고(패치 글에 경로가 있다), 파일은 셸로 읽는다.
-//    사람에게 확인받게 하는 답(ask)은 받지 않는다. 훅은 /hooks에서 한 번 믿어 줘야 돈다
+//    훅은 /hooks에서 한 번 믿어 줘야 돈다
 export const codex = shaped(
   { id: 'codex', on: WITH_SUBAGENTS, tools: { edit: ['apply_patch'], spawn: ['spawn_agent'], shell: ['Bash'], read: [] }, shellReads: true },
   { file: 'hooks.json', wrap: 'hooks', matcher: 'list', extra: { timeout: 10 } },
@@ -24,7 +24,7 @@ export const codex = shaped(
 // ── Qwen Code: ~/.qwen/settings.json. matcher는 앞뒤를 묶지 않는 정규식이라 정확히 묶어 준다
 export const qwen = shaped(
   {
-    id: 'qwen', on: WITH_SUBAGENTS, ask: true,
+    id: 'qwen', on: WITH_SUBAGENTS,
     tools: { edit: ['edit', 'write_file', 'notebook_edit', 'replace'], spawn: ['agent', 'task'], shell: ['run_shell_command'], read: ['read_file'], skill: ['skill'] },
   },
   { file: 'settings.json', wrap: 'hooks', matcher: 'regex', extra: { timeout: 10 } },
@@ -33,7 +33,7 @@ export const qwen = shaped(
 // ── Qoder CLI: ~/.qoder/settings.json. Claude Code와 도구 이름까지 같다
 export const qodercli = shaped(
   {
-    id: 'qodercli', on: WITH_SUBAGENTS, ask: true,
+    id: 'qodercli', on: WITH_SUBAGENTS,
     tools: { edit: ['Edit', 'Write', 'NotebookEdit'], spawn: ['Agent'], shell: ['Bash'], read: ['Read'], skill: ['Skill'] },
   },
   { file: 'settings.json', wrap: 'hooks', matcher: 'regex', extra: { timeout: 10 } },
@@ -63,7 +63,7 @@ export const letta = shaped(
 // ── Grok CLI: ~/.grok/hooks/ 아래의 파일마다 읽으므로 우리 파일을 따로 둔다. 서브에이전트 id의 이름이 다르다
 export const grok = shaped(
   {
-    id: 'grok', on: WITH_SUBAGENTS, ask: true,
+    id: 'grok', on: WITH_SUBAGENTS,
     tools: { edit: ['search_replace', 'write'], spawn: ['spawn_subagent'], shell: ['run_terminal_command'], read: ['read_file'] },
     normalize: p => ({ ...p, session_id: p.session_id ?? p.sessionId, agent_id: p.agent_id ?? p.subagentId, agent_type: p.agent_type ?? p.subagentType }),
   },
@@ -96,7 +96,7 @@ export const droid: Adapter = {
 //    사건 이름을 대문자로 시작하게 적으면 입력이 Claude Code와 같은 모양으로 온다
 export const copilot = flatShaped(
   {
-    id: 'copilot', on: EVENTS, ask: true, flat: true,
+    id: 'copilot', on: EVENTS, flat: true,
     tools: { edit: ['Edit', 'Write'], spawn: ['Agent'], shell: ['Bash'], read: ['Read'], skill: ['skill', 'Skill'] },
   },
   { file: path.join('hooks', 'muwi.json'), matcher: 'regex', version: true, each: { type: 'command', timeoutSec: 10 } },
@@ -175,7 +175,7 @@ export const kimi: Adapter = {
 //    입력은 이름이 다르고(conversationId, toolCall) 사건 이름이 없어서 훅 명령이 알려 준다 (--event). 답은 늘 JSON이어야 한다.
 //    사람이 말할 때의 사건이 없다
 const AGY: Shape = {
-  id: 'antigravity-cli', on: { start: 'SessionStart', before: 'PreToolUse', after: 'PostToolUse' }, ask: true,
+  id: 'antigravity-cli', on: { start: 'SessionStart', before: 'PreToolUse', after: 'PostToolUse' },
   tools: { edit: ['write_to_file', 'replace_file_content', 'multi_replace_file_content'], spawn: ['invoke_subagent'], shell: ['run_command'], read: ['view_file'] },
   normalize: p => ({
     hook_event_name: p.hook_event_name,
@@ -186,7 +186,6 @@ const AGY: Shape = {
     tool_input: { file_path: p.toolCall?.args?.TargetFile ?? p.toolCall?.args?.AbsolutePath, command: p.toolCall?.args?.CommandLine },
   }),
   reply(h: Happened, r: Reply): HookResult {
-    if (r.ask) return { stdout: JSON.stringify({ decision: 'ask', reason: r.ask }) };
     if (r.stop) return { stdout: JSON.stringify({ decision: 'deny', reason: r.stop }) };
     if (r.say && h.kind === 'session-start') return { stdout: JSON.stringify({ injectSteps: [{ systemMessage: { systemMessage: r.say } }] }) };
     return { stdout: '{}' };
@@ -208,10 +207,7 @@ export const antigravity: Adapter = {
     const only = (names: string[]) => `^(${names.join('|')})$`;
     const muwi = {
       SessionStart: [run('', 'SessionStart')],
-      PreToolUse: [
-        { matcher: only([...AGY.tools.edit, ...AGY.tools.spawn]), hooks: [run(' nudge', 'PreToolUse')] },
-        { matcher: only(AGY.tools.shell), hooks: [run(' guard', 'PreToolUse')] },
-      ],
+      PreToolUse: [{ matcher: only([...AGY.tools.edit, ...AGY.tools.spawn]), hooks: [run(' nudge', 'PreToolUse')] }],
       PostToolUse: [{ matcher: only(AGY.tools.read), hooks: [run('', 'PostToolUse')] }],
     };
     backup(file);

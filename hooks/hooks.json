@@ -18,7 +18,7 @@
     ],
     "PreToolUse": [
       {"matcher": "Edit|Write|MultiEdit|NotebookEdit|Agent|Task", "hooks": [{"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/hook.sh\" nudge", "onFailure": "continue"}]},
-      {"matcher": "Bash", "hooks": [{"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/hook.sh\" guard", "onFailure": "continue"}]}
+      {"matcher": "Bash", "hooks": [{"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/hook.sh\" command", "onFailure": "continue"}]}
     ]
   }
 }

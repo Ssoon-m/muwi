@@ -236,17 +236,17 @@ export function listWorks(dir: string): string[] {
 export type Config = {
   /** 계획을 적지 않은 세션이 파일을 고치거나 서브에이전트를 띄우려 할 때 알린다 */
   nudge: boolean;
-  /** push·PR·댓글 앞에서 사람에게 묻는다 */
-  guard: boolean;
   /** Herdr 앱 화면에 muwi 칸이 없을 때 넣자고 안내한다 (muwi setup, 그래프 칸) */
   layout: boolean;
 };
-export const DEFAULT_CONFIG: Config = { nudge: true, guard: false, layout: true };
+export const DEFAULT_CONFIG: Config = { nudge: true, layout: true };
 const configFile = (dir: string) => path.join(dir, 'config.json');
 
 export function readConfig(dir: string): Config {
   try {
-    return { ...DEFAULT_CONFIG, ...(readJson<Partial<Config>>(configFile(dir)) ?? {}) };
+    // 0.6.0에서 뺀 guard 같은 옛 값은 읽지 않는다
+    const saved = readJson<Partial<Config>>(configFile(dir)) ?? {};
+    return { nudge: saved.nudge ?? DEFAULT_CONFIG.nudge, layout: saved.layout ?? DEFAULT_CONFIG.layout };
   } catch {
     return { ...DEFAULT_CONFIG };
   }

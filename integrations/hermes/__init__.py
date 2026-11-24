@@ -295,13 +295,13 @@ def _pre_llm_call(session_id=None, user_message=None, is_first_turn=False, model
 
 
 def _pre_tool_call(tool_name=None, args=None, session_id=None, tool_call_id=None, **kwargs):
-    """PreToolUse. Deny -> block with the reason; ask -> Hermes' human-approval gate."""
+    """PreToolUse. Deny -> block with the reason."""
     try:
         if not session_id or not _known(session_id):
             return None
         name, tool_input, _agent_type = _normalize_tool(tool_name, args)
         if name == "Bash":
-            mode = "guard"
+            mode = "command"  # links a node a subagent starts; never blocks
         elif name in ("Edit", "Write", "Agent"):
             mode = "nudge"
         else:
@@ -311,8 +311,6 @@ def _pre_tool_call(tool_name=None, args=None, session_id=None, tool_call_id=None
         decision, reason = _decision_of(reply)
         if decision == "deny":
             return {"action": "block", "message": reason or "Blocked by muwi"}
-        if decision == "ask":
-            return {"action": "approve", "message": reason or "muwi asks for confirmation"}
         # Context for the model cannot be returned from pre_tool_call; keep it for the next turn.
         with _lock:
             child = _children.get(session_id)
