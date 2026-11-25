@@ -1,12 +1,16 @@
 // muwi board: 보기(그래프 칸 등)가 읽는 기록 한 벌 (JSON).
 //   작업 목록, 고른 작업의 노드와 기록, 그래프 좌표, 이어 하기에 쓸 사실, 최근 세션과 그 터미널, 보기가 더한 값.
+//   새 판이 나왔으면 그것도 (update. 보기가 배너로 알린다. 업데이트는 muwi update가 한다).
 // 보기는 이것만 읽고 그린다. 기록을 바꾸지 않는다.
+import path from 'node:path';
+import { ROOT } from './events.ts';
 import { str, type Args, out } from './kit.ts';
 import { terminalOwners } from './live.ts';
-import { views } from './plugins.ts';
+import { terminals, views } from './plugins.ts';
 import { resumeFacts } from './resume.ts';
 import { recentSessions } from './session.ts';
-import { clock } from './store.ts';
+import { clock, readJson } from './store.ts';
+import { newerKnown, releaseUrl } from './update.ts';
 import { PAST_DAYS, loadBoard, loadView, type WorkView } from './view.ts';
 // 그래프 배치(ELK)는 무거워서 board를 그릴 때만 불러온다 (훅은 이 파일을 자주 불러온다)
 import type { Fit, Flow } from './layout.ts';
@@ -42,5 +46,9 @@ export async function cmdBoard(a: Args, dir: string) {
   const owners = terminalOwners(dir);
   // 보기가 더한 값 (그 보기만 읽는다)
   const extra = Object.assign({}, ...views().map(v => v.board?.(dir) ?? {}));
-  out(JSON.stringify({ version: BOARD_VERSION, dir, now, ...board, sessions, owners, ...extra, selected }));
+  // 새 판: 캐시만 본다 (보기가 자주 부르므로 npm에는 하루 한 번 따로 묻는다)
+  const current = readJson<{ version?: string }>(path.join(ROOT, 'package.json'))?.version ?? '';
+  const newer = newerKnown({ current, root: ROOT, plugins: [...views().map(v => v.package), terminals().package] });
+  const update = newer ? { current: newer.current, latest: newer.latest, url: releaseUrl(newer.latest) } : undefined;
+  out(JSON.stringify({ version: BOARD_VERSION, dir, now, ...board, sessions, owners, ...extra, ...(update ? { update } : {}), selected }));
 }
