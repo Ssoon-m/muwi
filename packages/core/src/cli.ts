@@ -116,7 +116,11 @@ function printPlan(plan: Plan) {
     out(`  ${mark} ${n.id.padEnd(width)}  ${n.title}${n.after.length ? `  ← ${n.after.join(', ')}` : ''}${n.run ? `  [${runTag(n)}]` : ''}`);
   }
   const alone = loneNodes(plan);
-  if (alone.length) {
+  const flat = flatNodes(plan);
+  if (flat.length) {
+    out(`⚠ 노드 사이에 선이 없어요: ${flat.join(', ')}. 그래프에 따로 떨어진 카드로 보여요.`);
+    out('  하는 순서가 있으면 계획을 다시 내서 뒤 노드의 after에 앞 노드를 적어요 (muwi plan --why "…"). 나란히 해도 되는 일이면 그대로 둬요.');
+  } else if (alone.length) {
     out(`⚠ 다른 노드와 이어지지 않은 노드가 있어요: ${alone.join(', ')}. 그래프에 선 없이 따로 떨어져 보여요.`);
     out('  순서가 있으면 계획을 다시 내서 그 노드의 after에 앞 노드를 적어요 (muwi plan --why "…"). 일부러 따로 둔 것이면 그대로 둬요.');
   }
@@ -124,11 +128,20 @@ function printPlan(plan: Plan) {
 
 /**
  * 계획은 방향 있는 선으로 이어진 그래프다. 선이 있는 계획에서 어느 노드와도 이어지지 않은 노드는 대개 after를 빼먹은 것이다.
- * 선이 하나도 없는 계획(순서 없이 할 일을 늘어놓은 것)은 그대로 둔다
+ * 선이 하나도 없는 계획은 flatNodes가 따로 알린다
  */
 export function loneNodes(plan: Pick<Plan, 'nodes'>): string[] {
   if (!plan.nodes.some(n => n.after.length)) return [];
   return plan.nodes.filter(n => !n.after.length && !plan.nodes.some(m => m.after.includes(n.id))).map(n => n.id);
+}
+
+/**
+ * 노드가 둘 이상인데 선이 하나도 없는 계획의 노드들. 대개 처음 계획을 적을 때 after를 빼먹은 것이다
+ * (나란히 해도 되는 일만 늘어놓은 계획일 수도 있어서 막지는 않고 알린다)
+ */
+export function flatNodes(plan: Pick<Plan, 'nodes'>): string[] {
+  if (plan.nodes.length < 2 || plan.nodes.some(n => n.after.length)) return [];
+  return plan.nodes.map(n => n.id);
 }
 
 /** 진행 중이었는데 앞에 끝나지 않은 노드가 새로 생겨 잠시 멈춰야 하는 노드 */

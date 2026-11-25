@@ -364,9 +364,13 @@ test('계획은 선으로 이어진 그래프다: muwi add에 자리를 주지 �
   // 계획을 통째로 낼 때도 after를 빼먹은 노드를 알려 준다
   const lost = muwi(['plan', '--work', 'b', JSON.stringify({ title: 't', nodes: [{ id: 'x', title: 'X' }, { id: 'y', title: 'Y', after: ['x'] }, { id: 'z', title: 'Z' }] })]);
   assert.match(lost.out, /다른 노드와 이어지지 않은 노드가 있어요: z/);
-  // 선이 하나도 없는 계획(순서 없이 늘어놓은 할 일)은 그대로 둔다
+  // 선이 하나도 없는 계획도 알려 준다 (처음 계획에서 after를 빼먹은 것. 나란히 할 일일 수도 있어서 막지는 않는다)
   const flat = muwi(['plan', '--work', 'c', JSON.stringify({ title: 't', nodes: [{ id: 'x', title: 'X' }, { id: 'y', title: 'Y' }] })]);
+  assert.equal(flat.code, 0, flat.err);
+  assert.match(flat.out, /노드 사이에 선이 없어요: x, y/);
   assert.doesNotMatch(flat.out, /이어지지 않은 노드/);
+  // 노드가 하나인 계획은 선이 없어도 알리지 않는다
+  assert.doesNotMatch(muwi(['plan', '--work', 'd', JSON.stringify({ title: 't', nodes: [{ id: 'x', title: 'X' }] })]).out, /선이 없어요/);
 });
 
 test('터미널 연결과 보기 없이: 기록과 보기는 되고, 새 세션 명령은 무엇이 필요한지 알린다. 연결과 보기는 setup이 적어 둔 경로에서 불러오고, 불러오지 못해도 훅은 그대로 돈다', () => {
