@@ -442,3 +442,40 @@ test('setup.json이 깨져도 명령과 훅은 돈다 (훅은 지침을 준다).
   assert.match(setup.out, /새로 적어요/);
   assert.equal(JSON.parse(fs.readFileSync(setupFile, 'utf8')).root, path.resolve(import.meta.dirname, '..'));
 });
+
+test('보관: 끝났거나 멈춘 작업을 목록에서 치우고, 기록은 그대로 두고, 다시 시작하면 목록으로 돌아온다', () => {
+  const { muwi } = bench();
+  const one = JSON.stringify({ title: '끝낼 작업', nodes: [{ id: 'a', title: 'A' }] });
+  muwi(['plan', '--work', 'fin', '--request', '끝내 줘', one]);
+  muwi(['node', 'a', 'start', '--work', 'fin']);
+  muwi(['node', 'a', 'done', '--work', 'fin']);
+  muwi(['plan', '--work', 'busy', '--request', '하는 중', one]);
+  muwi(['node', 'a', 'start', '--work', 'busy']);
+  const summary = (work: string) => JSON.parse(muwi(['status', '--json']).out).works.find((w: any) => w.work === work);
+  // 하는 중인 작업은 보관하지 않는다. 하나라도 안 되면 아무것도 적지 않는다
+  const refused = muwi(['archive', 'fin', 'busy']);
+  assert.equal(refused.code, 1);
+  assert.match(refused.err, /아직 하는 중이라 보관하지 않아요: busy\(작업 중\)/);
+  assert.equal(summary('fin').archived, undefined);
+  // 보관하면 목록에서 빠진다. 끝난 때는 그대로다 (보관은 작업이 바뀐 것이 아니다)
+  const finishedAt = summary('fin').updatedAt;
+  assert.match(muwi(['archive', 'fin']).out, /fin: 보관했어요/);
+  assert.equal(summary('fin').archived, true);
+  assert.equal(summary('fin').updatedAt, finishedAt);
+  const listed = muwi(['status']).out;
+  assert.doesNotMatch(listed, / fin /);
+  assert.match(listed, /보관한 작업 1개는 뺐어요/);
+  assert.match(muwi(['status', '--all']).out, /보관 +fin /);
+  assert.match(muwi(['show', 'fin']).out, /끝낼 작업/);
+  assert.match(muwi(['archive', 'fin']).out, /fin: 이미 보관했어요/);
+  // 다시 시작하면 목록으로 돌아온다
+  muwi(['node', 'a', 'start', '--work', 'fin']);
+  assert.equal(summary('fin').archived, undefined);
+  muwi(['node', 'a', 'done', '--work', 'fin']);
+  // 끝난 작업을 모두 보관하고, 꺼낸다
+  assert.match(muwi(['archive', '--done']).out, /^fin: 보관했어요/);
+  assert.equal(summary('busy').archived, undefined);
+  assert.match(muwi(['unarchive', 'fin']).out, /fin: 목록으로 꺼냈어요/);
+  assert.equal(summary('fin').archived, undefined);
+  assert.match(muwi(['unarchive', 'fin']).out, /fin: 보관한 작업이 아니에요/);
+});

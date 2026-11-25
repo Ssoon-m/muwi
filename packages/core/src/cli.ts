@@ -56,7 +56,10 @@ const HELP = `사용법: muwi <명령>
   muwi resume <id> [--new] [--show pane|tab]   닫힌 세션이 하던 노드를 이어 한다 (하던 대화를 다시 열거나 새 대화로)
 
   보기
-  muwi status [--all] [--json]         작업 목록 (응답 대기·막힘·새 결과가 위). 오래된 작업은 접어 두고, --all이면 다 보여 준다
+  muwi status [--all] [--json]         작업 목록 (응답 대기·막힘·새 결과가 위). 오래된 작업과 보관한 작업은 빼고, --all이면 다 보여 준다
+  muwi archive <작업>… | --done        끝났거나 멈춘 작업을 목록에서 치운다 (보관). 기록은 그대로 있고, 다시 시작하면 목록으로 돌아온다
+                                       --done: 끝난 작업을 모두 보관한다
+  muwi unarchive <작업>…               보관한 작업을 목록으로 꺼낸다
   muwi show [<작업>] [--json]           작업 하나의 기록: 노드, 읽은 skill, 계획이 바뀐 이유, 문제 표시
   muwi session                         이 세션이 붙어 있는 작업과 읽은 skill
   muwi guide                           작업 진행 방식(지침)을 보여 준다. muwi가 업데이트되면 muwi 명령의 출력 끝에도 한 번 나온다
@@ -367,6 +370,33 @@ function cmdFlag(a: Args, dir: string) {
 }
 
 /** 끝난 작업을 본 것으로 적는다. 그래프 칸이 사람이 고른 작업을 보여 줄 때 부른다. 아직 안 본 결과일 때만 적는다 */
+/**
+ * 보관: 끝났거나 멈춘 작업을 목록(그래프 칸, muwi status)에서 치운다. 기록은 그대로 두어 muwi show와 원인 찾기는 그대로 된다.
+ * 사건 하나만 남기고, 그 뒤에 작업에 무슨 일이 생기면(다시 시작) 목록으로 돌아온다. 하는 중인 작업은 보관하지 않는다
+ */
+function cmdArchive(a: Args, dir: string, on: boolean) {
+  const names = on && a.flags.done
+    ? loadBoard(dir).works.filter(w => w.state === 'done' && !w.archived).map(w => w.work)
+    : a.pos.length ? a.pos : [resolveWork(a, dir, { guess: true })];
+  if (!names.length) return out('보관할 끝난 작업이 없어요');
+  const views = names.map(work => {
+    const v = loadView(dir, work);
+    if (!v) throw new Fail(`없는 작업이에요: ${work} (muwi status --all로 목록을 봐요)`);
+    return v;
+  });
+  // 하나라도 받을 수 없으면 아무것도 적지 않는다
+  const busy = on ? views.filter(v => v.state !== 'done' && v.state !== 'stalled' && !v.archived) : [];
+  if (busy.length) throw new Fail(`아직 하는 중이라 보관하지 않아요: ${busy.map(v => `${v.work}(${STATE_NAME[v.state]})`).join(', ')}. 끝났거나 멈춘 작업만 보관해요`);
+  for (const v of views) {
+    if (on === Boolean(v.archived)) {
+      out(`${v.work}: ${on ? '이미 보관했어요' : '보관한 작업이 아니에요'}`);
+      continue;
+    }
+    appendEvent(dir, v.work, { type: on ? 'archive' : 'unarchive' }, null);
+    out(on ? `${v.work}: 보관했어요. 목록에서 빠지고 기록은 그대로 있어요 (꺼내려면 muwi unarchive ${v.work})` : `${v.work}: 목록으로 꺼냈어요`);
+  }
+}
+
 function cmdViewed(a: Args, dir: string) {
   const work = resolveWork(a, dir);
   const v = loadView(dir, work);
@@ -519,18 +549,20 @@ function cmdStatus(a: Args, dir: string) {
   const board = loadBoard(dir);
   if (a.flags.json) return out(JSON.stringify({ dir, ...board }, null, 2));
   if (!board.works.length) out(`기록된 작업이 없어요 (${dir})`);
-  // 끝났거나 멈춘 채로 오래된 작업은 접어 둔다. --all이면 다 보여 준다
+  // 끝났거나 멈춘 채로 오래된 작업은 접어 두고, 보관한 작업은 뺀다. --all이면 다 보여 준다
   const past = board.works.filter(w => w.past);
+  const shelved = board.works.filter(w => w.archived);
   for (const w of board.works) {
-    if (w.past && !a.flags.all) continue;
+    if ((w.past || w.archived) && !a.flags.all) continue;
     // 끝났는데 사람이 아직 안 본 작업은 "새 결과"로 보여 준다
-    out(`${(w.unread ? '새 결과' : STATE_NAME[w.state]).padEnd(7)} ${w.work}  ${w.counts.done}/${w.counts.total}${w.spentMs > 0 ? ` · ${dur(w.spentMs)}` : ''}${w.title ? `  ${w.title}` : ''}`);
+    out(`${(w.archived ? '보관' : w.unread ? '새 결과' : STATE_NAME[w.state]).padEnd(7)} ${w.work}  ${w.counts.done}/${w.counts.total}${w.spentMs > 0 ? ` · ${dur(w.spentMs)}` : ''}${w.title ? `  ${w.title}` : ''}`);
     for (const n of w.active) out(`          ${MARK[n.status]} ${n.id}  ${n.title}${n.closed ? ' (세션이 닫힘)' : n.quiet ? ` (${QUIET_NAME[n.quiet]})` : ''}${n.note ? ` : ${n.note}` : ''}`);
     // 하는 노드가 없으면 그 작업의 세션이 무얼 하는지
     const between = w.between ? BETWEEN_NAME[w.between] : undefined;
     if (between) out(`          · ${between}`);
   }
   if (past.length && !a.flags.all) out(`지난 작업 ${past.length}개는 접어 뒀어요 (${PAST_DAYS}일 넘게 바뀐 것이 없는 작업). muwi status --all로 봐요.`);
+  if (shelved.length && !a.flags.all) out(`보관한 작업 ${shelved.length}개는 뺐어요. muwi status --all로 봐요.`);
   for (const e of board.errors) out(`⚠ ${e.work}: ${e.message}`);
 }
 
@@ -707,6 +739,8 @@ async function run(cmd: string | undefined, a: Args, dir: string) {
     case 'node': return cmdNode(a.pos[0], a.pos[1], a.pos[2], a, dir);
     case 'flag': return cmdFlag(a, dir);
     case 'viewed': return cmdViewed(a, dir);
+    case 'archive': return cmdArchive(a, dir, true);
+    case 'unarchive': return cmdArchive(a, dir, false);
     case 'show': return cmdShow(a, dir);
     case 'status': return cmdStatus(a, dir);
     case 'board': return cmdBoard(a, dir);
