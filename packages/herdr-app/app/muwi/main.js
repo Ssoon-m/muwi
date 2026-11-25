@@ -505,10 +505,11 @@ export default class Muwi extends View {
         const r = await runMuwi(args, { timeout: 20000 });
         if (r.code !== 0) throw new Error(r.stderr.trim() || `muwi가 ${r.code}로 끝났어요`);
         const data = JSON.parse(r.stdout);
-        // 고른 작업이 없어졌으면 보는 중으로, 보는 중인 작업이 없어졌으면 맨 위 작업으로
+        // 고른 작업이 없어졌으면 보는 중으로, 보는 중인 작업이 없어졌으면 보는 중을 비운다.
+        // 읽는 사이 사람이 다른 작업을 골랐으면(보는 중이 바뀜) 그 선택을 지우지 않는다
         if (main && !data.selected && data.works.length) {
           if (this.picked) this.picked = null;
-          else {
+          else if (this.wanted() === want) {
             this.selected = null;
             if (!this.pinned()) setShared(SELECTED, null);
           }
@@ -521,14 +522,18 @@ export default class Muwi extends View {
           this.picked = null;
           this.again = true;
         }
-        if (!this.pinned() && shelved(want)) {
+        if (!this.pinned() && shelved(want) && this.wanted() === want) {
           this.selected = null;
           this.picked = null;
           setShared(SELECTED, null);
           this.again = true;
         }
         // 방금 보관한 작업은 그래프 칸에서 빠진다. 화면을 다시 그리기 전에 다시 읽어도 그 작업을 또 읽지 않게 지금 뺀다
-        if (this.laneTargets.some(shelved)) this.laneTargets = this.laneTargets.filter((w) => !shelved(w));
+        // 그 작업을 그래프로 받았으면 그리지 않으므로 곧 다시 읽는다
+        if (this.laneTargets.some(shelved)) {
+          this.laneTargets = this.laneTargets.filter((w) => !shelved(w));
+          this.again = true;
+        }
         // 없어진 작업은 고정에서 뺀다 (같은 이름으로 새로 만든 작업이 처음부터 고정돼 나오지 않게)
         const pins = this.pinList();
         const gone = pins.filter((id) => !data.works.some((w) => w.work === id) && !(data.errors ?? []).some((e) => e.work === id));
@@ -791,8 +796,9 @@ export default class Muwi extends View {
     this.lanesOn = Boolean(plan);
     const pickedView = this.picked ? this.views.get(this.picked) : null;
     // 나눠 그릴 때 보는 중이 없으면(아직 아무도 고르지 않음, 보는 중을 보관함) 첫 작업을 고른 것처럼 그리지 않는다
-    // 읽어 둔 그래프가 보관한 작업인데 보는 중도 고른 작업도 아니면(방금 보관함) 그리지 않는다. 다음 읽기가 곧 바꾼다
-    const usable = loaded && (!loaded.archived || [want, this.picked, this.followTo].includes(loaded.work)) ? loaded : null;
+    // 읽어 둔 그래프가 보관한 작업인데 보는 중도 고른 작업도 아니면(방금 보관함) 그리지 않고, 기억해 둔 보는 중의 그래프를 그린다. 다음 읽기가 곧 바꾼다
+    const fresh = loaded && (!loaded.archived || [want, this.picked, this.followTo].includes(loaded.work));
+    const usable = fresh ? loaded : (want ? this.views.get(want) ?? null : null);
     const main = pickedView ?? (this.planless || (plan && !plan.viewing) ? null : usable);
     const view = main ? this.shownView(main, links, live) : null;
     this.mainWork = view?.work ?? null;
