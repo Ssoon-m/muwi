@@ -77,10 +77,11 @@ export function guideUpdate(dir: string, key: string, env: NodeJS.ProcessEnv = p
 
 /**
  * 새 판이 나왔으면 이 세션에 한 번 알릴 말 (세션이 시작될 때나 사람이 말할 때). 캐시만 보고 훅을 늦추지 않는다 (update.ts).
+ * 세션이 시작될 때(start)는 30초 뒤에 npm에 묻게 해서, 그 뒤에 말할 때와 그래프 칸에 새 판이 보인다.
  * 같은 판은 세션마다 한 번만 알린다
  */
-function updateNotice(dir: string, key: string, root: string, env: NodeJS.ProcessEnv): string | undefined {
-  const newer = newerKnown({ current: versionOf(root), root, plugins: [...views().map(v => v.package), terminals().package], env });
+function updateNotice(dir: string, key: string, root: string, env: NodeJS.ProcessEnv, start = false): string | undefined {
+  const newer = newerKnown({ current: versionOf(root), root, plugins: [...views().map(v => v.package), terminals().package], env, start });
   if (!newer || readSession(dir, key)?.toldUpdate === newer.latest) return undefined;
   touchSession(dir, key, { toldUpdate: newer.latest }, env);
   return updateLine(newer);
@@ -241,7 +242,7 @@ export function handleEvent(h: Happened, dir: string, env: NodeJS.ProcessEnv = p
       appendEvent(dir, session.work, { type: 'session', what: 'compact' }, key);
     }
     const text = [inFile ? '' : guide, adoptSpawn(dir, key, env)].filter(Boolean).join('\n\n');
-    const notice = agent ? undefined : updateNotice(dir, key, root, env);
+    const notice = agent ? undefined : updateNotice(dir, key, root, env, true);
     return { ...(text ? { say: text } : {}), ...(notice ? { notice } : {}) };
   }
 

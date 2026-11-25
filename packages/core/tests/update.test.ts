@@ -4,11 +4,13 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { afterCommand, cacheFile, checkLatest, decide, installedPackage, notice, updateTarget, type UpdateCache } from '../src/update.ts';
+import { spawn } from 'node:child_process';
+import { afterCommand, cacheFile, checkAfter, checkLatest, decide, installedPackage, newerKnown, notice, START_DELAY, updateTarget, type UpdateCache } from '../src/update.ts';
 import { handleHook } from '../src/hook.ts';
 import { readSession } from '../src/session.ts';
 
-const HOUR = 60 * 60 * 1000;
+const MIN = 60 * 1000;
+const HOUR = 60 * MIN;
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'muwi-update-'));
 
 /** npm으로 깐 것처럼 패키지 폴더를 만든다 (src/cli.js가 있으면 npm으로 받은 판이다) */
@@ -24,18 +26,19 @@ test('새 버전 알림: 캐시만 보고 알릴지와 다시 물어볼지를 �
   const c = (x: Partial<UpdateCache>): UpdateCache => ({ name: '@muwi/herdr-app', ...x });
   // 물어본 적이 없으면 알릴 것은 없고 물어본다
   assert.deepEqual(decide(null, '@muwi/herdr-app', '0.7.0', now), { tell: undefined, refresh: true });
-  // 하루 안에 물어봤고 더 새 판이 있으면 알린다
-  assert.deepEqual(decide(c({ latest: '0.7.1', checkedAt: now - HOUR }), '@muwi/herdr-app', '0.7.0', now), { tell: '0.7.1', refresh: false });
+  // 1시간 안에 물어봤고 더 새 판이 있으면 알린다. 다시 묻지 않는다
+  assert.deepEqual(decide(c({ latest: '0.7.1', checkedAt: now - 59 * MIN }), '@muwi/herdr-app', '0.7.0', now), { tell: '0.7.1', refresh: false });
   // 같거나 낮으면 알리지 않는다
-  assert.equal(decide(c({ latest: '0.7.0', checkedAt: now - HOUR }), '@muwi/herdr-app', '0.7.0', now).tell, undefined);
-  assert.equal(decide(c({ latest: '0.6.9', checkedAt: now - HOUR }), '@muwi/herdr-app', '0.7.0', now).tell, undefined);
-  // 하루 안에 이미 알렸으면 다시 알리지 않는다. 하루가 지나면 다시 알린다
-  assert.equal(decide(c({ latest: '0.7.1', checkedAt: now - HOUR, toldAt: now - 2 * HOUR }), '@muwi/herdr-app', '0.7.0', now).tell, undefined);
-  assert.equal(decide(c({ latest: '0.7.1', checkedAt: now - HOUR, toldAt: now - 25 * HOUR }), '@muwi/herdr-app', '0.7.0', now).tell, '0.7.1');
-  // 하루가 지났으면 다시 물어본다 (알 수 있는 것은 그대로 알린다)
-  assert.deepEqual(decide(c({ latest: '0.7.1', checkedAt: now - 25 * HOUR }), '@muwi/herdr-app', '0.7.0', now), { tell: '0.7.1', refresh: true });
+  assert.equal(decide(c({ latest: '0.7.0', checkedAt: now - MIN }), '@muwi/herdr-app', '0.7.0', now).tell, undefined);
+  assert.equal(decide(c({ latest: '0.6.9', checkedAt: now - MIN }), '@muwi/herdr-app', '0.7.0', now).tell, undefined);
+  // 같은 판을 하루 안에 이미 알렸으면 다시 알리지 않는다. 하루가 지나거나, 그사이 더 새 판이 나왔으면 알린다
+  assert.equal(decide(c({ latest: '0.7.1', checkedAt: now - MIN, told: '0.7.1', toldAt: now - 2 * HOUR }), '@muwi/herdr-app', '0.7.0', now).tell, undefined);
+  assert.equal(decide(c({ latest: '0.7.1', checkedAt: now - MIN, told: '0.7.1', toldAt: now - 25 * HOUR }), '@muwi/herdr-app', '0.7.0', now).tell, '0.7.1');
+  assert.equal(decide(c({ latest: '0.7.2', checkedAt: now - MIN, told: '0.7.1', toldAt: now - 2 * HOUR }), '@muwi/herdr-app', '0.7.0', now).tell, '0.7.2');
+  // 물어본 지 1시간이 지났으면 다시 물어본다 (알 수 있는 것은 그대로 알린다)
+  assert.deepEqual(decide(c({ latest: '0.7.1', checkedAt: now - HOUR }), '@muwi/herdr-app', '0.7.0', now), { tell: '0.7.1', refresh: true });
   // 다른 패키지를 물어본 캐시는 쓰지 않는다 (코어만 깔았다가 화면으로 바꿨을 때)
-  assert.deepEqual(decide({ name: '@muwi/core', latest: '0.9.0', checkedAt: now - HOUR }, '@muwi/herdr-app', '0.7.0', now), { tell: undefined, refresh: true });
+  assert.deepEqual(decide({ name: '@muwi/core', latest: '0.9.0', checkedAt: now - MIN }, '@muwi/herdr-app', '0.7.0', now), { tell: undefined, refresh: true });
 });
 
 test('새 버전 알림: 업데이트 명령에 쓸 패키지는 사람이 npm으로 깐 패키지다', () => {
@@ -54,14 +57,14 @@ test('새 버전 알림: 업데이트 명령에 쓸 패키지는 사람이 npm�
   assert.equal(installedPackage(elsewhere, [undefined, '@muwi/herdr']), '@muwi/herdr');
 });
 
-test('새 버전 알림: 사람이 터미널에서 친 명령에서만, 하루 한 번 알리고 npm에는 따로 묻는다', () => {
+test('새 버전 알림: 사람이 터미널에서 친 명령에서만, 같은 판은 하루 한 번 알리고 npm에는 1시간마다 따로 묻는다', () => {
   const t = tmp();
   const root = pkg(path.join(t, 'lib', 'node_modules', '@muwi', 'core'), '@muwi/core');
   const env = { HOME: path.join(t, 'home') } as NodeJS.ProcessEnv;
   const file = cacheFile(env);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const now = 100 * 24 * HOUR;
-  fs.writeFileSync(file, JSON.stringify({ name: '@muwi/core', latest: '0.7.1', checkedAt: now - HOUR }));
+  fs.writeFileSync(file, JSON.stringify({ name: '@muwi/core', latest: '0.7.1', checkedAt: now - 10 * MIN }));
   const run = (o: { cmd?: string; tty?: boolean; env?: NodeJS.ProcessEnv; at?: number } = {}) => {
     const said: string[] = [];
     const asked: string[] = [];
@@ -74,23 +77,28 @@ test('새 버전 알림: 사람이 터미널에서 친 명령에서만, 하루 �
   assert.deepEqual(run({ cmd: 'board' }), { said: '', asked: [] });
   assert.deepEqual(run({ env: { ...env, MUWI_NO_UPDATE_CHECK: '1' } }), { said: '', asked: [] });
   assert.deepEqual(run({ env: { ...env, CI: 'true' } }), { said: '', asked: [] });
-  // 사람이 친 명령: 알리고, 오늘은 이미 물어봤으니 다시 묻지 않는다
+  // 사람이 친 명령: 알리고, 10분 전에 물어봤으니 다시 묻지 않는다
   const first = run();
   assert.equal(first.said, notice('@muwi/core', '0.7.0', '0.7.1'));
   assert.match(first.said, /새 버전이 나왔어요: 0\.7\.0 → 0\.7\.1\n {2}muwi update\n {2}바뀐 것: https:\/\/github\.com\/Ssoon-m\/muwi\/releases\/tag\/v0\.7\.1/);
   assert.deepEqual(first.asked, []);
-  // 같은 날 다음 명령은 조용하다
-  assert.deepEqual(run({ at: now + HOUR }), { said: '', asked: [] });
-  // 하루가 지나면 다시 알리고, npm에 다시 묻는다
-  const later = run({ at: now + 25 * HOUR });
-  assert.match(later.said, /0\.7\.0 → 0\.7\.1/);
+  // 같은 판은 그날 다시 알리지 않는다. 물어본 지 1시간이 지나면 npm에 다시 묻는다
+  assert.deepEqual(run({ at: now + 20 * MIN }), { said: '', asked: [] });
+  assert.deepEqual(run({ at: now + HOUR }), { said: '', asked: ['@muwi/core'] });
+  // 그사이 더 새 판이 나왔으면 같은 날에도 알린다
+  fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, 'utf8')), latest: '0.7.2', checkedAt: now + HOUR }));
+  assert.match(run({ at: now + HOUR + MIN }).said, /0\.7\.0 → 0\.7\.2/);
+  assert.deepEqual(run({ at: now + HOUR + 2 * MIN }), { said: '', asked: [] });
+  // 하루가 지나면 같은 판도 다시 알리고, npm에 다시 묻는다
+  const later = run({ at: now + 26 * HOUR });
+  assert.match(later.said, /0\.7\.0 → 0\.7\.2/);
   assert.deepEqual(later.asked, ['@muwi/core']);
   // 캐시가 깨져 있어도 명령은 실패하지 않는다
   fs.writeFileSync(file, '{깨짐');
   assert.deepEqual(run({ at: now + 50 * HOUR }), { said: '', asked: ['@muwi/core'] });
 });
 
-test('새 버전 알림: npm의 latest를 물어 캐시에 적고, 답이 없어도 하루 동안은 다시 묻지 않는다', async () => {
+test('새 버전 알림: npm의 latest를 물어 캐시에 적고, 답이 없어도 물어본 때는 적는다 (한동안 다시 묻지 않는다)', async () => {
   const t = tmp();
   const file = path.join(t, 'cache', 'update.json');
   let latest = '0.7.3';
@@ -106,17 +114,94 @@ test('새 버전 알림: npm의 latest를 물어 캐시에 적고, 답이 없어
     await checkLatest('@muwi/herdr-app', file, registry, 1000);
     assert.equal(asked, '/-/package/@muwi%2fherdr-app/dist-tags');
     assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { name: '@muwi/herdr-app', latest: '0.7.3', checkedAt: 1000 });
-    // 알린 때는 지키고 latest만 바꾼다
-    fs.writeFileSync(file, JSON.stringify({ name: '@muwi/herdr-app', latest: '0.7.3', checkedAt: 1000, toldAt: 1500 }));
+    // 알린 판과 때는 지키고 latest만 바꾼다
+    fs.writeFileSync(file, JSON.stringify({ name: '@muwi/herdr-app', latest: '0.7.3', checkedAt: 1000, told: '0.7.3', toldAt: 1500 }));
     latest = '0.7.4';
     await checkLatest('@muwi/herdr-app', file, registry, 2000);
-    assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { name: '@muwi/herdr-app', latest: '0.7.4', checkedAt: 2000, toldAt: 1500 });
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { name: '@muwi/herdr-app', latest: '0.7.4', checkedAt: 2000, told: '0.7.3', toldAt: 1500 });
   } finally {
     await new Promise(ok => server.close(ok));
   }
   // npm이 답하지 않으면(오프라인) 아는 latest를 두고 물어본 때만 적는다
   await checkLatest('@muwi/herdr-app', file, registry, 3000);
-  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { name: '@muwi/herdr-app', latest: '0.7.4', checkedAt: 3000, toldAt: 1500 });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { name: '@muwi/herdr-app', latest: '0.7.4', checkedAt: 3000, told: '0.7.3', toldAt: 1500 });
+});
+
+/** dist-tags를 답하는 가짜 npm. hits: 물어본 횟수 */
+async function fakeRegistry(latest: string) {
+  const state = { hits: 0, url: '', close: () => new Promise(ok => server.close(ok)) };
+  const server = http.createServer((_req, res) => {
+    state.hits++;
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ latest }));
+  });
+  await new Promise<void>(ok => server.listen(0, '127.0.0.1', ok));
+  state.url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  return state;
+}
+
+test('새 판 확인: 세션이 시작되면 30초 뒤에 묻고, 그 밖에는 물어본 지 1시간이 지났을 때 바로 묻는다 (VS Code처럼)', () => {
+  const t = tmp();
+  const root = pkg(path.join(t, 'lib', 'node_modules', '@muwi', 'core'), '@muwi/core');
+  const env = { HOME: path.join(t, 'home') } as NodeJS.ProcessEnv;
+  const file = cacheFile(env);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const now = 100 * 24 * HOUR;
+  const at = (checkedAt: number, start = false) => {
+    fs.writeFileSync(file, JSON.stringify({ name: '@muwi/core', latest: '0.7.1', checkedAt }));
+    const asked: (number | undefined)[] = [];
+    const newer = newerKnown({ current: '0.7.0', root, env, now, start, check: (_n, _f, delay) => asked.push(delay) });
+    return { newer, asked };
+  };
+  assert.equal(START_DELAY, 30 * 1000);
+  // 세션이 시작될 때: 방금 물어봤어도 30초 뒤에 다시 묻는다. 알릴 것은 지금 아는 것으로 알린다
+  assert.deepEqual(at(now - MIN, true), { newer: { name: '@muwi/core', current: '0.7.0', latest: '0.7.1' }, asked: [START_DELAY] });
+  // 오래됐어도 세션 시작에서는 30초 뒤에 한 번만 묻는다
+  assert.deepEqual(at(now - 2 * HOUR, true).asked, [START_DELAY]);
+  // 말할 때와 그래프 칸: 1시간 안이면 묻지 않고, 지났으면 바로 묻는다
+  assert.deepEqual(at(now - 59 * MIN).asked, []);
+  assert.deepEqual(at(now - HOUR).asked, [undefined]);
+  // 끄면 묻지도 알리지도 않는다
+  assert.equal(newerKnown({ current: '0.7.0', root, env: { ...env, MUWI_NO_UPDATE_CHECK: '1' }, now, start: true, check: () => assert.fail('묻지 않는다') }), null);
+});
+
+test('새 판 확인: 세션 시작의 확인은 기다리는 동안 다른 쪽이 이미 물었으면 묻지 않는다 (세션 여럿이 한꺼번에 시작해도 한 번)', async () => {
+  const t = tmp();
+  const file = path.join(t, 'cache', 'update.json');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const npm = await fakeRegistry('0.7.5');
+  try {
+    // 기다리는 동안 다른 세션의 확인이 캐시를 새로 적었다
+    await checkAfter(START_DELAY, '@muwi/core', file, npm.url, async ms => {
+      assert.equal(ms, START_DELAY);
+      fs.writeFileSync(file, JSON.stringify({ name: '@muwi/core', latest: '0.7.4', checkedAt: Date.now() }));
+    });
+    assert.equal(npm.hits, 0);
+    assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).latest, '0.7.4');
+    // 아무도 묻지 않았으면 묻는다
+    fs.writeFileSync(file, JSON.stringify({ name: '@muwi/core', latest: '0.7.4', checkedAt: Date.now() - MIN }));
+    await checkAfter(START_DELAY, '@muwi/core', file, npm.url, async () => {});
+    assert.equal(npm.hits, 1);
+    assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).latest, '0.7.5');
+  } finally {
+    await npm.close();
+  }
+});
+
+test('새 판 확인: 따로 띄운 확인 프로세스가 캐시를 적는다 (import.meta.main이 없는 Node 24.0·24.1에서도)', async () => {
+  const t = tmp();
+  const file = path.join(t, 'cache', 'update.json');
+  const npm = await fakeRegistry('0.7.6');
+  try {
+    // 확인 프로세스와 같은 모양으로 실행한다: node <update> --check <패키지> <캐시>
+    const script = path.join(import.meta.dirname, '..', 'src', 'update.ts');
+    const run = spawn(process.execPath, [script, '--check', '@muwi/core', file], { env: { ...process.env, MUWI_UPDATE_REGISTRY: npm.url } });
+    await new Promise(ok => run.on('exit', ok));
+    assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).latest, '0.7.6');
+    assert.equal(npm.hits, 1);
+  } finally {
+    await npm.close();
+  }
 });
 
 test('muwi update가 받을 곳: 지금 도는 muwi가 깔린 npm 전역 자리와 사람이 깐 패키지, 그 자리의 Node와 같은 폴더의 npm', () => {

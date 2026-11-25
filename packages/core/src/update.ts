@@ -3,8 +3,9 @@
 //   2. 대화 자리: 세션이 시작될 때와 사람이 말할 때 (newerKnown → 훅의 답. 도구 화면에 바로 띄우거나 AI가 전한다. events.ts, hook.ts)
 //   3. 보기 (muwi board의 update. 그래프 칸의 배너)
 // 업데이트는 muwi update 하나로 한다: 지금 도는 muwi가 깔린 자리에 최신판을 받고, 새 판으로 muwi setup을 다시 해서 훅·보기·커넥터를 맞춘다 (updateTarget)
-// - 명령을 늦추지 않는다: 알릴지는 캐시만 보고 정한다. npm에 묻는 일은 하루 한 번 따로 띄운 프로세스가 하고, 결과는 다음 명령에서 쓴다
-// - 같은 알림은 하루 한 번만 한다
+// - 명령을 늦추지 않는다: 알릴지는 캐시만 보고 정한다. npm에 묻는 일은 따로 띄운 프로세스가 하고, 결과는 다음에 쓴다
+// - npm에 묻는 때 (VS Code처럼): 세션이 시작되고 30초 뒤, 그 밖에는 마지막으로 물은 지 1시간이 지났을 때.
+//   하루에 여러 번 나오는 판도 그날 안에 알아챈다. 알림이 잦아지지는 않는다 (대화 자리는 세션마다, 배너는 [나중에]까지, 터미널은 하루에 판마다 한 번)
 // - npm으로 깐 판(.js)에서만 묻는다. 저장소에서 .ts로 돌릴 때는 하지 않는다
 // - 끄기: MUWI_NO_UPDATE_CHECK=1 (NO_UPDATE_NOTIFIER나 CI가 있어도 끈다)
 // npm에는 패키지 이름만 묻는다 (https://registry.npmjs.org/-/package/<이름>/dist-tags)
@@ -14,12 +15,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { olderThan } from './setup.ts';
 
-const DAY = 24 * 60 * 60 * 1000;
+const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
+/** npm에 다시 묻는 간격 */
+const EVERY = HOUR;
+/** 세션이 시작되고 npm에 묻기까지 */
+export const START_DELAY = 30 * 1000;
 const REGISTRY = 'https://registry.npmjs.org';
 const RELEASES = 'https://github.com/Ssoon-m/muwi/releases/tag';
 
-/** 마지막으로 npm에 물어본 결과와 알린 때 */
-export type UpdateCache = { name: string; latest?: string; checkedAt?: number; toldAt?: number };
+/** 마지막으로 npm에 물어본 결과와, 터미널에서 알린 판과 때 */
+export type UpdateCache = { name: string; latest?: string; checkedAt?: number; told?: string; toldAt?: number };
 
 export const cacheFile = (env: NodeJS.ProcessEnv) =>
   path.join(env.XDG_CACHE_HOME || path.join(env.HOME || os.homedir(), '.cache'), 'muwi', 'update.json');
@@ -64,9 +70,10 @@ export function installedPackage(root: string, plugins: (string | undefined)[] =
 /** 캐시만 보고 정한다: 알릴 새 버전(tell)과, npm에 다시 물어볼지(refresh) */
 export function decide(c: UpdateCache | null, name: string, current: string, now: number): { tell?: string; refresh: boolean } {
   const same = c?.name === name ? c : null;
-  const refresh = !same?.checkedAt || now - same.checkedAt >= DAY;
+  const refresh = !same?.checkedAt || now - same.checkedAt >= EVERY;
   const latest = same?.latest;
-  const toldRecently = Boolean(same?.toldAt && now - same.toldAt < DAY);
+  // 같은 판은 하루 한 번. 그사이 더 새 판이 나오면 다시 알린다
+  const toldRecently = Boolean(same?.toldAt && now - same.toldAt < DAY && same.told === latest);
   return { tell: latest && olderThan(current, latest) && !toldRecently ? latest : undefined, refresh };
 }
 
@@ -84,11 +91,15 @@ const off = (env: NodeJS.ProcessEnv) => Boolean(env.MUWI_NO_UPDATE_CHECK || env.
 
 export type Newer = { name: string; current: string; latest: string };
 
+/** npm에 물을 프로세스를 띄운다. delay를 주면 그만큼 기다렸다 묻는다 (시험에서는 바꾼다) */
+export type Check = (name: string, file: string, delay?: number) => void;
+
 /**
  * 대화 자리와 보기에서 알릴 새 판. 캐시만 본다 (훅과 보기를 늦추지 않는다).
- * 하루가 지났으면 npm에 묻는 프로세스를 따로 띄우고, 그 결과는 다음에 쓴다. 끈 경우와 npm으로 깐 판이 아니면 null
+ * npm에 묻는 프로세스는 따로 띄우고, 그 결과는 다음에 쓴다: 세션이 시작될 때(start)는 30초 뒤에 묻고,
+ * 그 밖에는 마지막으로 물은 지 1시간이 지났을 때 바로 묻는다. 끈 경우와 npm으로 깐 판이 아니면 null
  */
-export function newerKnown(o: { current: string; root: string; plugins?: (string | undefined)[]; env?: NodeJS.ProcessEnv; now?: number; check?: (name: string, file: string) => void }): Newer | null {
+export function newerKnown(o: { current: string; root: string; plugins?: (string | undefined)[]; env?: NodeJS.ProcessEnv; now?: number; start?: boolean; check?: Check }): Newer | null {
   const env = o.env ?? process.env;
   try {
     if (off(env)) return null;
@@ -98,7 +109,9 @@ export function newerKnown(o: { current: string; root: string; plugins?: (string
     const c = readCache(file);
     const same = c?.name === name ? c : null;
     const now = o.now ?? Date.now();
-    if (!same?.checkedAt || now - same.checkedAt >= DAY) (o.check ?? spawnCheck(o.root))(name, file);
+    const check = o.check ?? spawnCheck(o.root);
+    if (o.start) check(name, file, START_DELAY);
+    else if (!same?.checkedAt || now - same.checkedAt >= EVERY) check(name, file);
     return same?.latest && olderThan(o.current, same.latest) ? { name, current: o.current, latest: same.latest } : null;
   } catch {
     return null;
@@ -143,8 +156,7 @@ export type UpdateContext = {
   tty?: boolean;
   now?: number;
   write?: (text: string) => void;
-  /** npm에 물어볼 프로세스를 띄운다 (시험에서는 바꾼다) */
-  check?: (name: string, file: string) => void;
+  check?: Check;
 };
 
 /** 명령이 끝난 뒤 부른다. 무엇이 잘못돼도 명령은 실패하지 않는다 */
@@ -163,7 +175,7 @@ export function afterCommand(o: UpdateContext) {
     const d = decide(c, name, o.current, now);
     if (d.tell) {
       (o.write ?? (t => process.stderr.write(t)))(notice(name, o.current, d.tell));
-      writeCache(file, { ...(c?.name === name ? c : { name }), toldAt: now });
+      writeCache(file, { ...(c?.name === name ? c : { name }), told: d.tell, toldAt: now });
     }
     if (d.refresh) (o.check ?? spawnCheck(o.root))(name, file);
   } catch {
@@ -172,8 +184,8 @@ export function afterCommand(o: UpdateContext) {
 }
 
 /** npm에 묻는 일은 명령과 따로 돈다 (명령은 기다리지 않고 끝난다) */
-const spawnCheck = (root: string) => (name: string, file: string) => {
-  const child = spawn(process.execPath, [path.join(root, 'src', 'update.js'), '--check', name, file], {
+const spawnCheck = (root: string): Check => (name, file, delay) => {
+  const child = spawn(process.execPath, [path.join(root, 'src', 'update.js'), '--check', name, file, ...(delay ? [String(delay)] : [])], {
     detached: true,
     stdio: 'ignore',
     windowsHide: true,
@@ -181,7 +193,7 @@ const spawnCheck = (root: string) => (name: string, file: string) => {
   child.unref();
 };
 
-/** npm의 latest 버전을 물어 캐시에 적는다. 실패해도(오프라인) 물어본 때는 적어서 하루 동안 다시 묻지 않는다 */
+/** npm의 latest 버전을 물어 캐시에 적는다. 실패해도(오프라인) 물어본 때는 적어서 한동안 다시 묻지 않는다 */
 export async function checkLatest(name: string, file: string, registry: string = REGISTRY, now = Date.now()) {
   let latest: string | undefined;
   try {
@@ -192,11 +204,33 @@ export async function checkLatest(name: string, file: string, registry: string =
   }
   const prev = readCache(file);
   const same = prev?.name === name ? prev : null;
-  writeCache(file, { name, latest: latest ?? same?.latest, checkedAt: now, toldAt: same?.toldAt });
+  writeCache(file, { ...same, name, latest: latest ?? same?.latest, checkedAt: now });
 }
 
-if (import.meta.main && process.argv[2] === '--check') {
-  const [name, file] = process.argv.slice(3);
+/**
+ * 세션이 시작될 때: delay만큼 기다렸다 묻는다. 그사이 다른 쪽이 이미 물었으면 묻지 않는다
+ * (세션 여럿이 한꺼번에 시작해도 npm에는 한 번 묻는다)
+ */
+export async function checkAfter(delay: number, name: string, file: string, registry: string = REGISTRY, wait = (ms: number) => new Promise<void>(r => setTimeout(r, ms))) {
+  const since = Date.now();
+  await wait(delay);
+  const c = readCache(file);
+  if (c?.name === name && (c.checkedAt ?? 0) >= since) return;
+  await checkLatest(name, file, registry);
+}
+
+/** 이 파일을 직접 실행했나. import.meta.main은 Node 24.2부터라 쓰지 않는다 (muwi는 Node 24.0부터 돈다) */
+function runDirectly(): boolean {
+  try {
+    return Boolean(process.argv[1]) && fs.realpathSync(process.argv[1]) === fs.realpathSync(import.meta.filename);
+  } catch {
+    return false;
+  }
+}
+
+if (process.argv[2] === '--check' && runDirectly()) {
+  const [name, file, delay] = process.argv.slice(3);
   // MUWI_UPDATE_REGISTRY: 시험에서 npm 대신 쓸 주소
-  if (name && file) await checkLatest(name, file, process.env.MUWI_UPDATE_REGISTRY || REGISTRY);
+  const registry = process.env.MUWI_UPDATE_REGISTRY || REGISTRY;
+  if (name && file) await (Number(delay) > 0 ? checkAfter(Number(delay), name, file, registry) : checkLatest(name, file, registry));
 }
