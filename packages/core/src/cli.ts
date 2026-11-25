@@ -9,7 +9,7 @@ import { cmdBoard } from './board.ts';
 import { cmdPeek, cmdResume, cmdRun, cmdTell, cmdTidy, cmdWait } from './delegate.ts';
 import { Fail, dur, join, needPlan, out, parseArgs, resolveWork, str, type Args } from './kit.ts';
 import { hasTerminals, loadPlugins, pluginFailures, terminals, views } from './plugins.ts';
-import { fromSubagent, markNode } from './node.ts';
+import { earlyStart, fromSubagent, markNode } from './node.ts';
 import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
 import { readSession, sessionKey, sessionLabel } from './session.ts';
 import { installedTools, newerElsewhere, olderThan, readInstall, refreshSetup, removeSetup, runSetup } from './setup.ts';
@@ -371,6 +371,9 @@ function cmdNode(id: string | undefined, action: string | undefined, text: strin
   const label = { doing: '시작', done: '끝', waiting: '응답 대기', blocked: '막힘', todo: '잠시 멈춤 (다시 start하면 같은 회차로 이어져요)' }[status];
   out(`${status === 'todo' ? '⏸' : MARK[status]} ${id} ${label} (${work}, ${done}/${result.nodes.length} 끝)`);
   if (status === 'done' && done === result.nodes.length) out('모든 노드가 끝났어요.');
+  // 앞 노드가 끝나기 전에 시작했다: 같이 하는 거면 계획을 고치라고 알린다. 맡은 서브에이전트는 계획을 고치지 않으므로 알리지 않는다
+  const early = status === 'doing' && !sub ? earlyStart(result.nodes, id) : null;
+  if (early) out(early);
 }
 
 function cmdFlag(a: Args, dir: string) {
@@ -651,7 +654,7 @@ function cmdSetup(a: Args, dir: string) {
   if (!done.length) {
     const have = installedTools().map(t => t.id);
     out(`AI 도구에는 아직 넣지 않았어요. 넣으려면 muwi setup --tool <도구> 또는 muwi setup --all${have.length ? ` (이 컴퓨터에 깔린 도구: ${have.join(', ')})` : ''}`);
-  } else out('이미 열려 있는 세션은 다시 시작해야 새로 넣은 훅이 돌아요.');
+  }
   tellNewer();
 }
 
@@ -690,7 +693,7 @@ async function cmdUpdate(a: Args, dir: string) {
     const set = spawnSync(t.bin, ['setup'], { stdio: 'inherit', shell: win });
     if (set.status !== 0) throw new Fail(`새 판의 muwi setup이 ${set.status ?? set.error?.message}로 끝났어요. ${t.bin} setup을 직접 실행해 보세요`);
   } else out('muwi setup을 한 적이 없어서 맞출 것이 없어요. 쓰려면 muwi setup --tool <도구>를 실행하세요');
-  out(`${current} → ${latest}로 올렸어요. 열려 있는 AI 세션은 새로 열면 새 판으로 돌아요.`);
+  out(`${current} → ${latest}로 올렸어요.`);
 }
 
 /** 설정의 이름, 기본값, 설명은 보기가 정한다 (보기 규격의 config). 코어에는 설정이 없다 */

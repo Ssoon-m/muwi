@@ -37,6 +37,28 @@ export function removeHooks(settings: Settings): Settings {
   return next;
 }
 
+/**
+ * 설정 파일에 걸린 우리 훅 (사건과 묶음). 업데이트로 훅이 바뀌었는지 볼 때 쓴다 (열린 세션은 시작할 때 훅을 읽어 둔다).
+ * 사건 표가 "hooks" 아래에 있든 파일 맨 위에 있든(hooks.json) 읽는다. 읽지 못하면 빈 글
+ */
+export function ourHooks(file: string): string {
+  let settings: unknown;
+  try {
+    settings = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return '';
+  }
+  if (!settings || typeof settings !== 'object') return '';
+  const nested = (settings as Settings).hooks;
+  const table = (nested && typeof nested === 'object' && !Array.isArray(nested) ? nested : settings) as Record<string, unknown>;
+  return Object.entries(table)
+    .flatMap(([event, groups]) => (Array.isArray(groups) ? (groups as HookGroup[]) : [])
+      .filter(isOurs)
+      .map(g => `${event} ${JSON.stringify({ ...g, hooks: (g.hooks ?? []).filter(h => isOurCommand(h.command)) })}`))
+    .sort()
+    .join('\n');
+}
+
 /** 걸 훅 하나: 어느 사건에, 어떤 도구에(matcher), 어떤 명령을 */
 export type HookEntry = { event: string; matcher?: string; command: string; extra?: Record<string, unknown> };
 
