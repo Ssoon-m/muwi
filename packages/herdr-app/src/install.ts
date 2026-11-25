@@ -46,9 +46,10 @@ export function setupHerdr(o: { dir: string; env: NodeJS.ProcessEnv; log: (line:
     const checked = checkMod(mod);
     if (checked && checked !== 'ok') o.log(`Herdr 앱 칸 점검에서 문제가 나왔어요:\n${checked}`);
     // 그림 없이 만든 muwi 레이아웃이면 Herdr 설정 화면에 보일 그림을 넣는다
-    if (ensurePreview(o.dir)) o.log('Herdr 설정 화면(Look > Layout)의 muwi 레이아웃 그림을 새로 그렸어요.');
+    // 0.10까지의 오른쪽 자리를 먼저 아래로 옮긴다 (옮기면 그림도 새 자리대로 그린다)
     const moved = moveOffRight(o.dir, o.env);
     if (moved) o.log(moved);
+    if (ensurePreview(o.dir)) o.log('Herdr 설정 화면(Look > Layout)의 muwi 레이아웃 그림을 새로 그렸어요.');
     const screen = screenState(o.dir);
     // 안내를 꺼 뒀으면 화면이 이미 muwi일 때만 알린다
     if (config(o.dir).layout || screen.muwi) o.log(describeScreen(screen));
@@ -69,7 +70,8 @@ export function moveOffRight(dir: string, env: NodeJS.ProcessEnv): string | null
     applyLayout(dir, env, { graphAt: 'bottom' });
     return '그래프 칸의 오른쪽 자리는 없어져서 터미널 아래로 옮겼어요. 위로 두려면 muwi layout --graph top';
   } catch (e) {
-    if (e instanceof ScreenError) return `${later} (${e.message})`;
+    // 앱이 닫혀 있으면 다음에, 손으로 고친 레이아웃이면 그 까닭(고치는 법)을 그대로 알린다
+    if (e instanceof ScreenError) return `그래프 칸의 오른쪽 자리는 없어졌어요. ${e.message}`;
     throw e;
   }
 }

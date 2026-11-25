@@ -22,7 +22,7 @@ export function describeScreen(s: Screen): string {
     return `Herdr 앱 화면: ${why} muwi 레이아웃(${s.shown})이 옛 모양이에요. muwi layout을 다시 실행하면 새 모양으로 맞춰요.`;
   }
   if (s.muwi) return `Herdr 앱 화면: 지금 레이아웃(${s.shown})에 muwi 칸이 있어요.`;
-  if (!s.canList && !s.canGraph) return `Herdr 앱 화면: 지금 레이아웃(${s.shown})에는 muwi 칸을 넣을 자리가 없어요. 그래프는 muwi open으로 터미널 옆에 열어요.`;
+  if (!s.canList && !s.canGraph) return `Herdr 앱 화면: 지금 레이아웃(${s.shown})에는 muwi 칸을 넣을 자리가 없어요. 그래프는 muwi open으로 터미널 아래에 열어요.`;
   const what = [s.canList ? '사이드바의 Agents 자리에 작업 목록을' : null, s.canGraph ? '터미널 아래에 그래프를' : null].filter(Boolean).join(', ');
   return [
     `Herdr 앱 화면: 지금 레이아웃(${s.shown})에는 muwi 칸이 없어요.`,

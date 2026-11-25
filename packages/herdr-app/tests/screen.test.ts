@@ -324,6 +324,16 @@ test('0.10까지의 오른쪽 자리: muwi layout과 muwi setup이 그래프 칸
   h3.set({ layout: 'main' });
   assert.match(moveOffRight(h3.records, h3.env)!, /muwi layout을 실행하면 터미널 아래로 옮겨요/);
   assert.equal(find(h3.layout('muwi')!, 'muwi-split')!.type, 'row');
+  // 그동안 설정 화면의 그림도 아래 그림으로 바꾸지 않는다 (옮길 때 새로 그린다)
+  assert.equal(ensurePreview(h3.records, h3.env), false);
+  // 손으로 고친 레이아웃이면 그 까닭과 고치는 법을 알린다
+  const h4 = fakeApp();
+  onRight(h4);
+  const file = path.join(h4.app, 'layouts', 'muwi.json');
+  const edited = JSON.parse(fs.readFileSync(file, 'utf8'));
+  edited.note = '손으로 고침';
+  fs.writeFileSync(file, JSON.stringify(edited));
+  assert.match(moveOffRight(h4.records, h4.env)!, /오른쪽 자리는 없어졌어요\. 그래프 자리를 바꾸려고 했지만[\s\S]*손으로 고친 것 같아/);
 });
 
 test('레이아웃 그림: 설정 화면에 보일 그림을 그래프 자리마다 다르게 그린다', () => {
@@ -415,6 +425,10 @@ test('muwi layout 명령: 상태 보기, 바꾸기, 되돌리기를 사람이 �
   assert.match(muwi('layout', '--graph', 'top').out, /그래프를 터미널 위에 뒀어요/);
   assert.match(muwi('layout', '--graph', 'right').err, /오른쪽 자리는 없어졌어요[\s\S]*--graph는 bottom, top 중 하나예요/);
   assert.match(muwi('layout', '--graph', 'left').err, /--graph는 bottom, top 중 하나예요/);
+  // muwi open --right도 없어졌다고 알린다 (앱에 묻기 전에 멈춘다)
+  const right = muwi('open', '--right');
+  assert.equal(right.code, 1);
+  assert.match(right.err, /오른쪽 자리는 없어졌어요[\s\S]*이 터미널 아래에 열어요/);
   assert.equal(JSON.parse(muwi('layout', '--status', '--json').out).muwi, true);
   const removed = muwi('layout', '--remove');
   assert.match(removed.out, /main 레이아웃으로 되돌렸어요[\s\S]*복제본을 지웠어요/);

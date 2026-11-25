@@ -403,6 +403,8 @@ test('muwi board: --work를 여러 번 주면 그 작업들의 그래프를 모�
   assert.deepEqual(b.graphs.map((g: { work: string }) => g.work), ['qa-2', 'shop-1']);
   // 그래프마다 좌표가 있다
   for (const g of b.graphs) assert.equal(g.layout.nodes.length, g.nodes.length);
+  // 작업 목록에는 만든 때가 있다 (보기가 늘 같은 순서로 늘어놓을 때 쓴다)
+  for (const w of b.works) assert.match(w.createdAt, /^\d{4}-\d{2}-\d{2}T/);
   // --work가 하나면 지금처럼 고른 작업만 준다
   const one = JSON.parse(muwi(['board', '--work', 'shop-1']).out);
   assert.equal(one.selected.work, 'shop-1');

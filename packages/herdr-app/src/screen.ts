@@ -365,7 +365,7 @@ export function applyLayout(dir: string, env: NodeJS.ProcessEnv = process.env, o
   if (!from) throw new ScreenError(`${base} 레이아웃 파일을 읽지 못했어요.`);
   const check = placeMuwi(from.tree, where);
   if (!check.list && !check.graph) {
-    throw new ScreenError(`${base} 레이아웃에는 Agents 칸도 터미널 영역도 없어서 muwi 칸을 넣을 자리를 못 찾았어요. 그래프는 muwi open으로 터미널 옆에 열어요.`);
+    throw new ScreenError(`${base} 레이아웃에는 Agents 칸도 터미널 영역도 없어서 muwi 칸을 넣을 자리를 못 찾았어요. 그래프는 muwi open으로 터미널 아래에 열어요.`);
   }
 
   const name = freeName(env, readLayoutRecord(dir));
@@ -418,7 +418,7 @@ function rebuild(dir: string, env: NodeJS.ProcessEnv, state: Screen, where: Grap
   if (!from) throw new ScreenError(`${record.base} 레이아웃 파일을 읽지 못했어요.`);
   const placed = placeMuwi(from.tree, where);
   if (!placed.list && !placed.graph) {
-    throw new ScreenError(`${record.base} 레이아웃에 muwi 칸을 넣을 자리가 없어졌어요. muwi layout --remove 뒤에 muwi open으로 터미널 옆에 열어요.`);
+    throw new ScreenError(`${record.base} 레이아웃에 muwi 칸을 넣을 자리가 없어졌어요. muwi layout --remove 뒤에 muwi open으로 터미널 아래에 열어요.`);
   }
   const before = readTree(env, record.name);
   const version = state.version ?? before?.tree.cloned_from?.version ?? record.version;
@@ -529,6 +529,8 @@ export function ensurePreview(dir: string, env: NodeJS.ProcessEnv = process.env)
   if (!record) return false;
   const file = readTree(env, record.name);
   if (!file || !untouched(record, file)) return false;
+  // 0.10까지의 오른쪽 자리에 그대로 있는 레이아웃은 옮길 때 그림도 새로 그린다 (그 전에 아래 그림으로 바꾸지 않는다)
+  if (record.graphAt === 'right') return false;
   if (file.tree.preview && fs.existsSync(previewPath(env, record.name))) {
     // 그림이 이미 있으면 그림 파일만 지금 판의 그림으로 맞춘다 (색 같은 것이 바뀌었을 때). 레이아웃 파일은 건드리지 않는다
     const want = layoutPreview(placeOf(record));

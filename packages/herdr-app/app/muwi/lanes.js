@@ -89,3 +89,28 @@ export function stripOrder(hidden, rowOf, pins = []) {
 
 /** 고정을 켜고 끈다. 새로 고정하면 고정 묶음의 맨 뒤 */
 export const togglePin = (pins, work) => (pins.includes(work) ? pins.filter((x) => x !== work) : [...pins, work]);
+
+/**
+ * 그래프 칸에 큰 그래프와 지도 줄을 놓는다. 돌려주는 auto를 다음에 그대로 넘긴다.
+ *   area: 큰 그래프들이 놓이는 곳의 크기. strip: 지도 줄이 생기면 차지할 높이.
+ *   focus: 크게 보기 (lead 하나만 크게, 자동 자리는 그대로 둔다)
+ * 지도 줄이 생길 때만 그 높이를 빼고 자리 수를 다시 센다. 생기는지는 다음에도 남을 작업으로 정한다:
+ * 방금 자동 자리에서 내보낸 끝·멈춤 작업은 다음부터 대상이 아니므로 지도 줄에 넣지 않는다
+ */
+export function layoutLanes(o) {
+  const { area, targets, rowOf, viewing, picked, focus, lead, strip } = o;
+  const pins = o.pins ?? [];
+  const keeps = (id, auto) => {
+    const r = rowOf(id);
+    return pins.includes(id) || id === viewing || id === picked || auto.includes(id) || (going(r) && !r?.past);
+  };
+  const place = (cap) => (focus ? { shown: [lead], auto: o.auto ?? [] } : arrange({ targets, rowOf, cap, pins, viewing, auto: o.auto ?? [] }));
+  const rest = (r) => targets.filter((id) => !r.shown.includes(id) && keeps(id, r.auto));
+  let grid = laneGrid(area);
+  let r = place(grid.cols * grid.rows);
+  if (rest(r).length > 0) {
+    grid = laneGrid(area, strip);
+    r = place(grid.cols * grid.rows);
+  }
+  return { grid, shown: r.shown, auto: r.auto, below: stripOrder(rest(r), rowOf, pins) };
+}
