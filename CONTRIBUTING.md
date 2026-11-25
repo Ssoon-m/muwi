@@ -162,7 +162,7 @@ npm에서는 모든 패키지가 Settings > Trusted Publisher에 이 저장소(`
 
 ### 새 패키지를 처음 올릴 때
 
-Trusted Publisher는 npm에 이미 있는 패키지에만 등록할 수 있습니다. 그래서 새 패키지(예: `@muwi/herdr`)는 릴리스 전에 한 번, 사람이 npm의 [staged publishing](https://docs.npmjs.com/staged-publishing)으로 자리를 잡아 둡니다. 없는 패키지를 stage하면 npm이 `0.0.0-stage`를 공개로 올려 패키지가 생깁니다. `0.0.0-stage`는 npm이 쓰는 번호라 직접 올릴 수 없습니다. `pnpm release`와 release.yml은 npm에 없는 패키지가 있으면 아무것도 올리기 전에 멈춥니다. 앞 패키지만 올라가고 멈춰서 패키지마다 버전이 어긋나지 않게 하려는 것입니다.
+Trusted Publisher는 npm에 이미 있는 패키지에만 등록할 수 있습니다. 그래서 새 패키지(예: `@muwi/herdr`)는 릴리스 전에 한 번, 사람이 npm의 [staged publishing](https://docs.npmjs.com/staged-publishing)으로 자리를 잡아 둡니다. 없는 패키지를 stage하면 npm이 `0.0.0-stage`를 공개로 올려 패키지가 생깁니다. `0.0.0-stage`는 npm이 쓰는 번호라 직접 올릴 수 없습니다. `pnpm release`는 npm에 없는 패키지가 있으면 태그를 달기 전에 멈춥니다 (로그인한 계정이 쓸 수 있는 패키지 목록으로 봅니다). 앞 패키지만 올라가고 멈춰서 패키지마다 버전이 어긋나지 않게 하려는 것입니다.
 
 ```sh
 npm login

@@ -54,18 +54,14 @@ jobs:
             *) echo "dist_tag=latest" >> "$GITHUB_OUTPUT" ;;
           esac
 
-      # Trusted Publishing은 npm에 이미 있는 패키지에만 등록할 수 있다. 처음 올리는 패키지가 있으면 아무것도 올리기 전에 멈춘다
-      # (앞 패키지만 올라가고 멈추면 패키지마다 버전이 어긋난다). 처음 올리는 법: CONTRIBUTING.md의 "새 패키지를 처음 올릴 때"
-      - name: npm에 모든 패키지가 있는지
-        run: node scripts/release.mjs registered
-
       - run: pnpm test
       # 배포할 패키지를 하나씩 npm i -g로 깔아서 npm이 건 muwi로 돌려 본다
       - run: pnpm check:package
       - run: pnpm build
 
       # 기대는 패키지 먼저: 코어 → @muwi/herdr → @muwi/herdr-app (같은 버전을 npm에서 받는다).
-      # 이미 올라간 패키지는 건너뛴다: 한쪽만 올라가고 멈췄을 때 다시 실행하면 나머지만 올린다
+      # 이미 올라간 패키지는 건너뛴다: 한쪽만 올라가고 멈췄을 때 다시 실행하면 나머지만 올린다.
+      # 처음 올리는 패키지가 npm에 있는지는 태그를 달기 전에 pnpm release가 본다 (로그인한 계정으로. 여기서는 막 만든 패키지가 안 보일 수 있다)
       - name: npm에 올리기
         env:
           VERSION: ${{ steps.meta.outputs.version }}

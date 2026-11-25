@@ -6,7 +6,7 @@
 //   pnpm release 0.7.1 --dry-run   무엇을 할지만 보여 준다
 //   node scripts/release.mjs verify 0.7.1   (release.yml) 모든 패키지 버전과 CHANGELOG 섹션이 맞는지
 //   node scripts/release.mjs notes 0.7.1    (release.yml) 그 버전의 CHANGELOG 내용. GitHub 릴리스 노트로 쓴다
-//   node scripts/release.mjs registered     (release.yml) 모든 패키지가 npm에 있는지. 처음 올리는 패키지가 있으면 멈춘다
+//   node scripts/release.mjs registered     모든 패키지가 npm에 있는지 (pnpm release도 태그를 달기 전에 본다)
 //   pnpm release stage                      npm에 아직 없는 패키지의 자리를 잡는다 (npm stage publish. npm이 0.0.0-stage를 만든다). npm 로그인이 필요하다
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -120,8 +120,23 @@ function missingNotes(version) {
 const INIT = '0.0.0-init';
 const npmCmd = (args, o = {}) => execFileSync('npm', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], shell: process.platform === 'win32', ...o });
 
-/** npm에 아직 없는 패키지들. npm에 물어보지 못하면(네트워크 등) 멈춘다 */
-export function missingOnNpm(view = name => npmCmd(['view', name, 'name'])) {
+/**
+ * npm에 아직 없는 패키지들. npm에 물어보지 못하면(네트워크 등) 멈춘다.
+ * 로그인했으면 그 계정이 쓸 수 있는 패키지 목록(npm access)으로 본다. stage로 막 만든 패키지는 npm이 0.0.0-stage를 공개하기 전까지
+ * 공개 레지스트리(npm view)에는 없다고 나오지만, 패키지는 있어서 Trusted Publisher를 등록하고 올릴 수 있다.
+ * 로그인하지 않았으면 공개 레지스트리로 본다
+ */
+export function missingOnNpm(
+  owned = scope => JSON.parse(npmCmd(['access', 'list', 'packages', scope, '--json']) || '{}'),
+  view = name => npmCmd(['view', name, 'name']),
+) {
+  const scope = PACKAGES[0].name.split('/')[0];
+  try {
+    const mine = owned(scope);
+    return PACKAGES.filter(p => !(p.name in mine));
+  } catch {
+    // 로그인하지 않았다: 공개 레지스트리로 본다
+  }
   const missing = [];
   for (const p of PACKAGES) {
     try {
