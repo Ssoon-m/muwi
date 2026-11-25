@@ -1,6 +1,6 @@
 {
   "name": "@muwi/herdr",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "description": "muwi를 Herdr 터미널에: 새 세션에 맡기기, 세션이 살아 있는지 보기",
   "license": "MIT",
   "type": "module",
