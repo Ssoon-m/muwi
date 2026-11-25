@@ -82,8 +82,22 @@ function programIcon(p, size, color) {
  * Windows에서는 muwi.cmd를 cmd.exe로 실행한다. sh 스크립트는 Windows에서 바로 실행되지 않는다
  */
 function runMuwi(args, options) {
-  if (appWindow()?.platform === "windows") return exec("cmd.exe", ["/d", "/c", `${home()}\\.local\\bin\\muwi.cmd`, ...args], options);
-  return exec(`${home()}/.local/bin/muwi`, args, options);
+  return exec(...muwiArgv(args), options);
+}
+
+/** muwi 명령을 실행할 프로그램과 인자 (새 탭의 터미널에서 실행할 때도 쓴다) */
+function muwiArgv(args) {
+  if (appWindow()?.platform === "windows") return ["cmd.exe", ["/d", "/c", `${home()}\\.local\\bin\\muwi.cmd`, ...args]];
+  return [`${home()}/.local/bin/muwi`, args];
+}
+
+/** 나중에 알리라고 한 새 판 (그 판은 다시 알리지 않는다). 브라우저 저장소를 못 쓰면 이번에만 닫는다 */
+const LATER_KEY = "muwi.update.later";
+function laterVersion() {
+  try { return localStorage.getItem(LATER_KEY); } catch { return null; }
+}
+function setLaterVersion(v) {
+  try { localStorage.setItem(LATER_KEY, v); } catch { /* 이번에만 닫는다 */ }
 }
 
 /** 레이아웃 나무에서 id로 칸을 찾는다 */
@@ -190,6 +204,8 @@ const SAMPLE = (() => {
       { ...work, work: "shelved", title: "보관한 작업", state: "done", archived: true, past: false, active: [] },
     ],
     errors: [],
+    // herdr-app check는 견본으로 새 판 배너까지 그려 본다
+    update: { current: "0.9.0", latest: "0.10.0", url: "https://github.com/Ssoon-m/muwi/releases/tag/v0.10.0" },
     sessions: [{ key: "s1", terminal: "t1", work: "sample", seenAt: "2026-01-01T00:00:00.000Z" }],
     owners: { t1: "s1" },
     suggest: false,
@@ -262,6 +278,8 @@ export default class Muwi extends View {
     this.applying = false;
     this.bannerNote = null;
     this.bannerClosed = false;
+    /** muwi 새 판 안내를 이번에 닫았다 (나중에) */
+    this.updateClosed = false;
     /** 그래프 칸의 자리를 바꾸는 중 */
     this.moving = false;
     /** 그래프를 위→아래로 그렸는가 (마지막으로 읽은 것) */
@@ -1249,11 +1267,14 @@ export default class Muwi extends View {
    *   muwi layout으로 만든 화면인데 Herdr가 업데이트됐으면: 새 모양에 맞추자고
    */
   banner(t, variant) {
-    if (checking() || !this.data || this.bannerClosed) return null;
-    const tree = shownLayout();
-    const has = anyNode(tree, (n) => n?.content?.mod === "muwi");
-    let text = null, act = null, later = null;
-    if (!has && variant === "full" && this.data.suggest) {
+    if (!this.data) return null;
+    let text = null, act = null, later = null, more = null;
+    // 화면에 대한 안내(Herdr 업데이트, 칸 배치)가 먼저다. 화면이 어긋나는 문제라서. 닫으면 muwi 새 판 안내가 뜬다
+    const tree = checking() || this.bannerClosed ? null : shownLayout();
+    const has = tree ? anyNode(tree, (n) => n?.content?.mod === "muwi") : true;
+    if (checking() || this.bannerClosed) {
+      // 견본과 닫은 뒤에는 화면 안내를 보지 않는다
+    } else if (!has && variant === "full" && this.data.suggest) {
       text = "사이드바의 Agents 자리에 작업 목록을 두고, 그래프를 터미널 아래에 고정할 수 있어요. 지금 레이아웃은 그대로 남아요.";
       act = { label: "바꾸기", run: (cx) => this.applyLayout(cx, true) };
       later = { label: "묻지 않기", run: (cx) => this.stopAsking(cx) };
@@ -1273,6 +1294,14 @@ export default class Muwi extends View {
         later = later0;
       }
     }
+    // muwi 새 판: [업데이트]는 새 탭에서 muwi update를 돌린다 (진행과 오류가 보이게). [나중에]는 그 판만 다시 알리지 않는다
+    const update = this.data.update;
+    if (!text && update?.latest && !this.updateClosed && laterVersion() !== update.latest) {
+      text = `muwi ${update.latest}이 나왔어요 (지금 ${update.current}). 업데이트하면 훅·그래프 칸·커넥터까지 새 판에 맞춰요.`;
+      act = { label: "업데이트", run: () => { const [program, args] = muwiArgv(["update"]); this.openTerminal("muwi-update", [program, ...args], null, "muwi update"); } };
+      more = update.url ? { label: "바뀐 점", run: (cx) => cx.open_url(update.url) } : null;
+      later = { label: "나중에", run: (cx) => { setLaterVersion(update.latest); this.updateClosed = true; cx.notify(); } };
+    }
     if (!text) return null;
     const button = (id, b, primary) => h_flex().id(id).h(24).px(10).flex_none().items_center().rounded(6)
       .bg(primary ? t.accent : t.raised).border_1().border_color(primary ? t.accent : t.border)
@@ -1282,7 +1311,9 @@ export default class Muwi extends View {
       .child(b.label);
     return h_flex().flex_none().px(14).py(7).gap(10).items_center().bg(t.surface).border_b(1).border_color(t.border)
       .child(div().flex_1().min_w(0).text_size(11.5).text_color(this.bannerNote && !this.applying ? t.blocked : t.foreground).child(this.bannerNote ?? text))
-      .when(!this.applying, (el) => el.child(button("banner-act", act, true)).child(button("banner-later", later, false)));
+      .when(!this.applying, (el) => el.child(button("banner-act", act, true))
+        .when(Boolean(more), (el2) => el2.child(button("banner-more", more, false)))
+        .child(button("banner-later", later, false)));
   }
 
   /** muwi layout을 실행한다. 터미널 옆에 따로 연 칸이면 바꾼 뒤 그 칸을 닫는다 (같은 그래프가 두 번 보이지 않게) */
