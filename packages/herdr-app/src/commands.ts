@@ -54,21 +54,23 @@ function cmdLayout(a: Args, dir: string) {
     return out(a.flags.json ? JSON.stringify(s) : describeScreen(s));
   }
   const graphAt = str(a, 'graph');
+  if (graphAt === 'right') throw new Fail(`그래프 칸의 오른쪽 자리는 없어졌어요 (여러 작업을 가로로 나눠 그려서 너비가 필요해요). --graph는 ${GRAPH_AT.join(', ')} 중 하나예요`);
   if (graphAt !== undefined && !GRAPH_AT.includes(graphAt as GraphAt)) throw new Fail(`--graph는 ${GRAPH_AT.join(', ')} 중 하나예요`);
   const r = guardScreen(() => applyLayout(dir, process.env, graphAt ? { graphAt: graphAt as GraphAt } : {}));
   if (a.flags.json) return out(JSON.stringify(r));
-  const spot = { bottom: '터미널 아래', top: '터미널 위', right: '터미널 오른쪽' }[r.graphAt];
+  const spot = { bottom: '터미널 아래', top: '터미널 위' }[r.graphAt];
   if (r.already) return out(`이미 muwi 칸이 있는 레이아웃이에요: ${r.name} (그래프: ${spot})`);
   if (r.moved) return out(`그래프를 ${spot}에 뒀어요.`);
   out(`Herdr 앱 화면을 ${r.name} 레이아웃으로 ${r.refreshed ? '새 모양에 맞춰 다시 만들었어요' : '바꿨어요'} (${r.base} 레이아웃을 복제했어요).`);
   if (r.list) out('  사이드바: Agents 자리에 작업 목록 (작업에 붙지 않은 열린 세션도 같이 보여요)');
-  if (r.graph) out(`  ${spot}: ${r.list ? '고른 작업의 그래프 (지금 보는 탭의 작업을 따라가요)' : '작업 목록과 그래프'}`);
-  out('그래프 자리는 muwi layout --graph bottom|top|right 로 바꿔요. 그래프 칸 위쪽의 버튼으로도 바꿀 수 있어요.');
+  if (r.graph) out(`  ${spot}: ${r.list ? '그래프 (지금 보는 터미널의 작업을 따라가고, 볼 작업이 여럿이면 나눠 그려요)' : '작업 목록과 그래프'}`);
+  out('그래프 자리는 muwi layout --graph bottom|top 으로 바꿔요. 그래프 칸 위쪽의 버튼으로도 바꿀 수 있어요.');
   out(`되돌리려면 muwi layout --remove (${r.base} 레이아웃으로 돌아가요)`);
 }
 
-/** Herdr 앱에서 그래프 칸을 연다. 이 터미널 옆에 열고, 글자 입력은 터미널에 그대로 둔다 */
+/** Herdr 앱에서 그래프 칸을 연다. 이 터미널 아래에 열고, 글자 입력은 터미널에 그대로 둔다 */
 function cmdOpen(a: Args) {
+  if (a.flags.right) throw new Fail('그래프 칸의 오른쪽 자리는 없어졌어요 (여러 작업을 가로로 나눠 그려서 너비가 필요해요). muwi open은 이 터미널 아래에 열어요.');
   const app = (args: string[]) => spawnSync('herdr-app', args, { encoding: 'utf8' });
   const terminal = process.env.HC_TERMINAL_ID;
   const ls = app(['ls']);
@@ -84,7 +86,7 @@ function cmdOpen(a: Args) {
     // 목록을 읽지 못하면 지금 보고 있는 칸 옆에 연다
   }
   const before = focusedPane();
-  const split = app(['do', 'pane.split', JSON.stringify({ direction: a.flags.right ? 'right' : 'down', mod: 'muwi', ...(pane ? { pane } : {}) })]);
+  const split = app(['do', 'pane.split', JSON.stringify({ direction: 'down', mod: 'muwi', ...(pane ? { pane } : {}) })]);
   if (split.status !== 0) throw new Fail(`그래프 칸을 열지 못했어요: ${(split.stderr || split.stdout).trim()}`);
   // 글자 입력이 그래프 칸으로 넘어가지 않게, 키보드가 있던 칸으로 되돌린다
   keepFocus(before, pane ? { pane } : undefined);

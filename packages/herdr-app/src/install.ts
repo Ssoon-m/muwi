@@ -6,7 +6,7 @@ import path from 'node:path';
 import { copyDir } from '@muwi/core/connectors/files';
 import type { ViewInstall } from '@muwi/core/plugins';
 import { config, describeScreen, guardScreen, layoutRemoved } from './commands.ts';
-import { ensurePreview, removeLayout, screenState } from './screen.ts';
+import { ScreenError, applyLayout, ensurePreview, readLayoutRecord, removeLayout, screenState } from './screen.ts';
 
 /** Herdr 앱의 설정 폴더. 없으면 Herdr 앱이 없는 것이다 */
 export const appHome = (env: NodeJS.ProcessEnv) => env.HERDR_APP_HOME || path.join(env.HOME || os.homedir(), '.config', 'herdr-app');
@@ -47,11 +47,31 @@ export function setupHerdr(o: { dir: string; env: NodeJS.ProcessEnv; log: (line:
     if (checked && checked !== 'ok') o.log(`Herdr 앱 칸 점검에서 문제가 나왔어요:\n${checked}`);
     // 그림 없이 만든 muwi 레이아웃이면 Herdr 설정 화면에 보일 그림을 넣는다
     if (ensurePreview(o.dir)) o.log('Herdr 설정 화면(Look > Layout)의 muwi 레이아웃 그림을 새로 그렸어요.');
+    const moved = moveOffRight(o.dir, o.env);
+    if (moved) o.log(moved);
     const screen = screenState(o.dir);
     // 안내를 꺼 뒀으면 화면이 이미 muwi일 때만 알린다
     if (config(o.dir).layout || screen.muwi) o.log(describeScreen(screen));
   }
   return { mod };
+}
+
+/**
+ * 0.10까지 고를 수 있던 오른쪽 자리에 둔 그래프 칸을 터미널 아래로 옮긴다. 알릴 말을 돌려준다 (옮길 것이 없으면 null).
+ * 그 레이아웃을 보고 있을 때만 옮긴다 (다른 레이아웃을 보는 중이면 그 레이아웃을 건드리지 않고, 다음 muwi layout 때 옮긴다)
+ */
+export function moveOffRight(dir: string, env: NodeJS.ProcessEnv): string | null {
+  const record = readLayoutRecord(dir);
+  if (record?.graphAt !== 'right') return null;
+  const later = '그래프 칸의 오른쪽 자리는 없어졌어요. Herdr 앱에서 muwi 레이아웃을 보는 중에 muwi layout을 실행하면 터미널 아래로 옮겨요.';
+  try {
+    if (screenState(dir, env).shown !== record.name) return later;
+    applyLayout(dir, env, { graphAt: 'bottom' });
+    return '그래프 칸의 오른쪽 자리는 없어져서 터미널 아래로 옮겼어요. 위로 두려면 muwi layout --graph top';
+  } catch (e) {
+    if (e instanceof ScreenError) return `${later} (${e.message})`;
+    throw e;
+  }
 }
 
 /** 넣은 것을 뺀다. 화면을 바꿔 뒀으면 먼저 되돌린다 (그래프 칸을 빼면 그 레이아웃의 칸이 빈다) */
