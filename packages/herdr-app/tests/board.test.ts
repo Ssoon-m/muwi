@@ -94,7 +94,7 @@ test('muwi setup: Herdr 앱이 있으면 그래프 칸을 넣고 연결과 보�
   runSetup({ root: CORE, version: '0.1.0', dir: h.records, env: h.env });
   runSetup({ root: CORE, version: '0.1.0', dir: h.records, env: h.env });
   const mod = path.join(h.dir, '.config', 'herdr-app', 'mods', 'muwi');
-  assert.deepEqual(fs.readdirSync(mod).sort(), ['arc.svg', 'focus.svg', 'lanes.js', 'main.js', 'mod.json', 'pin-on.svg', 'pin.svg', 'split.svg']);
+  assert.deepEqual(fs.readdirSync(mod).sort(), ['arc.svg', 'focus.svg', 'lanes.js', 'main.js', 'mod.json', 'pin-on.svg', 'pin.svg', 'split.svg', 'terminal.svg']);
   assert.deepEqual([readInstall(h.records)!.terminals, readInstall(h.records)!.views], [TERMINALS, [{ path: VIEW, installed: { mod } }]]);
   removeSetup(h.records);
   assert.equal(fs.existsSync(mod), false);

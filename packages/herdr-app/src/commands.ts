@@ -63,7 +63,7 @@ function cmdLayout(a: Args, dir: string) {
   if (r.moved) return out(`그래프를 ${spot}에 뒀어요.`);
   out(`Herdr 앱 화면을 ${r.name} 레이아웃으로 ${r.refreshed ? '새 모양에 맞춰 다시 만들었어요' : '바꿨어요'} (${r.base} 레이아웃을 복제했어요).`);
   if (r.list) out('  사이드바: Agents 자리에 작업 목록 (작업에 붙지 않은 열린 세션도 같이 보여요)');
-  if (r.graph) out(`  ${spot}: ${r.list ? '그래프 (지금 보는 터미널의 작업을 따라가고, 볼 작업이 여럿이면 나눠 그려요)' : '작업 목록과 그래프'}`);
+  if (r.graph) out(`  ${spot}: ${r.list ? '그래프 (끝나지 않은 작업을 탭과 상관없이 모두 그리고, 지금 보는 터미널의 작업을 앞에 둬요)' : '작업 목록과 그래프'}`);
   out('그래프 자리는 muwi layout --graph bottom|top 으로 바꿔요. 그래프 칸 위쪽의 버튼으로도 바꿀 수 있어요.');
   out(`되돌리려면 muwi layout --remove (${r.base} 레이아웃으로 돌아가요)`);
 }
