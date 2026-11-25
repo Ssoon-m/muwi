@@ -242,11 +242,13 @@ export default class Muwi extends View {
     this.focusKey = null;
     this.stale = false;
     this.showPast = false;
-    /** 보관한 작업 묶음을 펼쳤는가, 마우스가 올라간 작업 줄 (보관 버튼을 보여 준다), 보관하거나 꺼내는 중, 못 했을 때의 까닭 */
+    /** 보관한 작업 묶음을 펼쳤는가, 마우스가 올라간 작업 줄 (보관 버튼을 보여 준다), 보관하거나 꺼내는 중 */
     this.showShelf = false;
     this.hoverRow = null;
     this.shelving = false;
-    this.shelfNote = null;
+    /** 목록 아래의 알림: 보관·꺼내기의 결과와 되돌리기, 못 했을 때의 까닭. 잠시 뒤에 사라진다 */
+    this.shelfToast = null;
+    this.toastSeq = 0;
     /** 접어 둔 묶음 (작업 목록의 "응답 대기" 같은 것) */
     this.folded = new Set();
     /** 키보드가 있는 터미널과 그 작업. 바뀔 때만 따라간다 (사람이 고른 것을 덮어쓰지 않게) */
@@ -284,6 +286,9 @@ export default class Muwi extends View {
       this.data = SAMPLE;
       this.node = "impl";
       this.tab = "node";
+      // herdr-app check는 견본으로 보관함과 알림 줄까지 그려 본다
+      this.showShelf = true;
+      this.shelfToast = { id: 0, text: "1개 보관했어요. 목록 맨 아래 \"보관\"에 있어요", undo: { works: ["finished"], on: false } };
       return;
     }
     this.load(cx);
@@ -1003,13 +1008,15 @@ export default class Muwi extends View {
   list(t, works, groups, selected, now, fill, compact) {
     const c = this.colors(t);
     const box = fill ? v_flex().flex_1().min_h(0) : v_flex().flex_none();
+    const outer = fill ? v_flex().flex_1().min_h(0) : v_flex().flex_none();
     const row = (item) => (item.kind === "work" ? this.workRow(t, c, item, selected, now, compact) : this.agentRow(t, item.a, compact));
     const past = works.filter((w) => w.past);
     const shelf = works.filter((w) => w.archived);
     // 접어 둔 작업을 보고 있으면 펼쳐 둔다
     const open = this.showPast || past.some((w) => w.work === selected);
-    const openShelf = this.showShelf || shelf.some((w) => w.work === selected);
-    return box.id("works").overflow_y_scrollbar().px(compact ? 4 : 8).pb(8).gap(1)
+    // 보관함은 사람이 펼칠 때만 연다 (모두 보관한 뒤에 수십 줄이 한꺼번에 펼쳐지지 않게). 어디로 갔는지는 알림이 알려 준다
+    const openShelf = this.showShelf;
+    return outer.child(box.id("works").overflow_y_scrollbar().px(compact ? 4 : 8).pb(8).gap(1)
       .children(groups.flatMap((g) => [
         ...(compact ? [] : [this.groupHead(t, g)]),
         ...(this.folded.has(g.id) && !compact ? [] : g.items.map(row)),
@@ -1027,8 +1034,26 @@ export default class Muwi extends View {
           .on_click((_e, cx) => { this.showShelf = !openShelf; cx.notify(); })
           .child(div().w(14).flex_none().text_size(10).text_color(t.dim).child(openShelf ? "▾" : "▸"))
           .child(div().flex_1().text_size(11).text_color(t.dim).child(`보관 ${shelf.length}개`)))
-        .when(openShelf, (el2) => el2.children(shelf.map((w) => row({ kind: "work", w, agents: [], ask: false })))))
-      .when(Boolean(this.shelfNote) && !compact, (el) => el.child(div().px(8).py(4).text_size(10.5).text_color(t.blocked).child(this.shelfNote)));
+        .when(openShelf, (el2) => el2.children(shelf.map((w) => row({ kind: "work", w, agents: [], ask: false }))))))
+      // 알림은 스크롤 밖, 목록 아래에 붙인다 (목록이 길어도 보인다)
+      .when(Boolean(this.shelfToast) && !compact, (el) => el.child(this.toastBar(t)));
+  }
+
+  /** 목록 아래의 알림 줄: 결과, 되돌리기, 닫기 */
+  toastBar(t) {
+    const n = this.shelfToast;
+    return h_flex().id("shelf-toast").flex_none().mx(8).mb(8).px(10).py(7).gap(8).items_center().rounded(7)
+      .bg(t.surface).border_1().border_color(n.error ? t.blocked : t.border).text_size(11)
+      .child(div().flex_1().min_w(0).text_color(n.error ? t.blocked : t.foreground).child(n.text))
+      .when(Boolean(n.undo), (el) => el.child(div().id("shelf-undo").flex_none().px(6).py(2).rounded(5).font_medium().text_color(t.accent).cursor_pointer()
+        .hover((s) => s.bg(t.hover))
+        .on_click((_e, cx) => { const u = n.undo; this.shelfToast = null; this.shelve(u.works, u.on, cx); })
+        .child("되돌리기")))
+      .child(div().id("shelf-toast-close").flex_none().px(4).text_color(t.dim).cursor_pointer()
+        .hover((s) => s.text_color(t.foreground))
+        .tooltip("닫기")
+        .on_click((_e, cx) => { this.shelfToast = null; cx.notify(); })
+        .child("×"));
   }
 
   /**
@@ -1038,22 +1063,41 @@ export default class Muwi extends View {
   shelve(args, on, cx) {
     if (this.shelving) return;
     this.shelving = true;
-    this.shelfNote = null;
     cx.notify();
     cx.spawn(async (cx) => {
       const r = await runMuwi([on ? "archive" : "unarchive", ...args], { timeout: 10000 }).catch((e) => ({ code: 1, stderr: String(e?.message ?? e) }));
       this.shelving = false;
-      if (r?.code !== 0) this.shelfNote = `${on ? "보관" : "꺼내기"}하지 못했어요: ${(r?.stderr || r?.stdout || "").trim().split("\n")[0]}`;
       this.stale = true;
+      let toast;
+      if (r?.code !== 0) toast = { text: `${on ? "보관" : "꺼내기"}하지 못했어요: ${(r?.stderr || r?.stdout || "").trim().split("\n")[0]}`, error: true };
+      else {
+        // muwi가 실제로 보관하거나 꺼낸 작업들. 되돌리기는 이 작업들만 되돌린다
+        const moved = (r.stdout ?? "").split("\n").map((l) => /^(.+?): (보관했어요|목록으로 꺼냈어요)/.exec(l)?.[1]).filter(Boolean);
+        toast = moved.length
+          ? { text: on ? `${moved.length}개 보관했어요. 목록 맨 아래 "보관"에 있어요` : `${moved.length}개를 목록으로 꺼냈어요`, undo: { works: moved, on: !on } }
+          : { text: (r.stdout ?? "").trim().split("\n")[0] || "바뀐 것이 없어요" };
+      }
+      const id = ++this.toastSeq;
+      this.shelfToast = { ...toast, id };
       cx.notify();
+      // 잠시 뒤에 사라진다. 그 사이에 다른 알림이 떴으면 그대로 둔다
+      await cx.sleep(toast.error ? 10000 : 6000);
+      if (this.shelfToast?.id === id) {
+        this.shelfToast = null;
+        cx.notify();
+      }
     });
   }
 
-  /** 끝났거나 멈춘 작업 줄에 마우스를 올리면 나오는 버튼: 보관 (보관한 작업은 꺼내기) */
-  shelveButton(t, w) {
+  /**
+   * 끝났거나 멈춘 작업 줄의 버튼: 보관 (보관한 작업은 꺼내기). 마우스를 올린 줄과 고른 줄에 보인다.
+   * 줄 오른쪽 위에 겹쳐 띄워서 줄의 모양이 흔들리지 않게 한다
+   */
+  shelveButton(t, w, selected) {
     const on = !w.archived;
-    return div().id(`shelve-${w.work}`).flex_none().px(6).py(2).rounded(5).text_size(10.5).text_color(t.dim).cursor_pointer()
-      .hover((s) => s.text_color(t.foreground).bg(t.hover))
+    return div().id(`shelve-${w.work}`).absolute().top(5).right(6).px(7).py(2).rounded(5).text_size(10.5).text_color(t.muted).cursor_pointer()
+      .bg(selected ? t.selected : t.hover).border_1().border_color(t.border)
+      .hover((s) => s.text_color(t.foreground).bg(t.surface))
       .tooltip(on ? "목록에서 치워요. 기록은 그대로예요 (다시 시작하면 돌아와요)" : "목록으로 꺼내요")
       // 줄을 누른 것으로 치지 않는다 (그 작업을 고르지 않는다)
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
@@ -1071,9 +1115,9 @@ export default class Muwi extends View {
       .child(div().text_color(t.dim).child(String(g.items.length)))
       .child(div().flex_1())
       // 끝난 작업을 한 번에 보관한다
-      .when(g.id === "done", (el) => el.child(div().id("shelve-done").flex_none().px(6).rounded(5).text_size(10.5).font_normal().text_color(t.dim).cursor_pointer()
+      .when(g.id === "done", (el) => el.child(div().id("shelve-done").flex_none().px(7).py(2).rounded(5).text_size(10.5).font_normal().text_color(t.dim).cursor_pointer()
         .hover((s) => s.text_color(t.foreground).bg(t.hover))
-        .tooltip("끝난 작업을 모두 보관해요. 목록에서만 빠지고 기록은 그대로예요")
+        .tooltip(`끝난 작업 ${g.items.length}개를 모두 보관해요. 목록에서만 빠지고 기록은 그대로예요 (되돌릴 수 있어요)`)
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click((_e, cx) => { cx.stop_propagation(); this.shelve(["--done"], true, cx); })
         .child(this.shelving ? "보관하는 중…" : "모두 보관")))
@@ -1138,7 +1182,7 @@ export default class Muwi extends View {
       : (w.between && BETWEEN_NAME[w.between]) || "다음 노드 전";
     // 끝났거나 멈춘 작업(과 보관한 작업)은 마우스를 올리면 보관(꺼내기) 버튼이 나온다
     const shelvable = w.archived || w.state === "done" || w.state === "stalled";
-    return h_flex().id(`work-${w.work}`).px(8).py(6).gap(8).items_center().rounded(7)
+    return h_flex().id(`work-${w.work}`).relative().px(8).py(6).gap(8).items_center().rounded(7)
       .bg(on ? t.selected : t.chrome).hover((s) => s.bg(on ? t.selected : t.hover)).cursor_pointer()
       .on_click(click)
       .when(shelvable, (el) => el.on_hover((hovered, cx) => {
@@ -1153,7 +1197,7 @@ export default class Muwi extends View {
           // 끝나지 않은 작업은 몇 단계째인지: 끝난 노드 / 전체
           // 오른쪽: 몇 단계째인지와 작업 시간 (노드들이 작업한 시간의 합. 작업 중이면 초마다 늘어난다). 끝난 작업은 작업 시간과 끝난 때
           .child(div().flex_none().text_color(t.dim).child(this.rowMeta(w, now)))))
-      .when(shelvable && this.hoverRow === w.work, (el) => el.child(this.shelveButton(t, w)));
+      .when(shelvable && (this.hoverRow === w.work || on), (el) => el.child(this.shelveButton(t, w, on)));
   }
 
   /** 계획 없이 일하는 세션 한 줄 (Herdr의 Agents 칸과 같은 모양). 누르면 그 터미널로 간다 */
