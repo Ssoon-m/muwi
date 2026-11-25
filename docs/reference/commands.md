@@ -58,6 +58,7 @@
 | `muwi setup --remove` | `muwi setup`으로 설치한 것을 지웁니다. 보기가 바꾼 것(`muwi layout`으로 바꾼 화면 등)도 그 보기가 되돌립니다 |
 | `muwi config` | 현재 설정을 보여 줍니다. 설정은 보기가 정합니다 (보기 없이 쓰면 설정이 없습니다) |
 | `muwi config layout on\|off` | (`@muwi/herdr-app`) 화면에 muwi 칸이 없을 때 `muwi layout`을 권하는 안내를 켜거나 끕니다. 기본값은 `on`입니다 |
+| `muwi update [--check]` | npm에 나온 최신판으로 올리고, 전에 setup을 했으면 새 판으로 setup을 다시 해서 훅·그래프 칸·커넥터를 맞춥니다. 지금 `muwi`가 깔린 자리에 같은 Node의 npm으로 받습니다. `--check`는 새 판이 있는지만 봅니다. [업데이트하기](setup.md#업데이트하기) |
 
 각 항목이 무엇을 설치하고 설정하는지는 [설치와 설정](setup.md)에 있습니다.
 
@@ -177,7 +178,7 @@
 | `MUWI_TERMINALS` | `muwi setup`이 적어 둔 연결 | 터미널 연결 모듈의 경로. `@muwi/herdr`와 `@muwi/herdr-app`의 `muwi` 명령이 Herdr 연결로 정합니다 |
 | `MUWI_VIEWS` | `muwi setup`이 적어 둔 보기 | 보기 모듈의 경로들 (경로 구분자로 잇습니다). `@muwi/herdr-app`의 `muwi` 명령이 Herdr 앱 보기로 정합니다 |
 | `MUWI_WAIT_POLL_MS` | `2000` | `muwi wait`가 기록을 다시 읽는 간격 (ms) |
-| `MUWI_NO_UPDATE_CHECK` | 없음 | `1`이면 새 버전 알림을 끕니다. [업데이트하기](setup.md#업데이트하기) |
+| `MUWI_NO_UPDATE_CHECK` | 없음 | `1`이면 새 버전 알림(대화 자리, 그래프 칸, 터미널)을 끕니다. [업데이트하기](setup.md#업데이트하기) |
 
 ## 내부 명령
 

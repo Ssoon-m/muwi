@@ -18,6 +18,11 @@ export function handleHook(
   const happened = adapter.from(payload, mode, env);
   if (!happened) return nothing;
   seen?.(happened);
-  const result = adapter.to(happened, handleEvent(happened, dir, env, root));
+  const reply = handleEvent(happened, dir, env, root);
+  // 사람에게 보여 줄 말(새 판 알림)을 도구 화면에 바로 띄울 수 없는 도구는 AI가 전하게 한다
+  const told = reply.notice && !adapter.can.tell
+    ? { say: [reply.say, `(muwi) 사용자에게 다음 한 줄을 그대로 한 번 전한다: ${reply.notice}`].filter(Boolean).join('\n\n') }
+    : reply;
+  const result = adapter.to(happened, told);
   return result.stdout || result.stderr || result.code ? result : nothing;
 }

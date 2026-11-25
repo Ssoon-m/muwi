@@ -156,6 +156,18 @@ function onlyAllowedTs(pkg) {
   const viaClaude = run(SH, ['-c', command], JSON.stringify({ session_id: 'c2', hook_event_name: 'SessionStart', source: 'startup' }));
   assert.match(JSON.parse(viaClaude).hookSpecificOutput.additionalContext, /작업 진행 방식 \(muwi\)/);
   assert.ok(fs.existsSync(path.join(home, '.claude', 'skills', 'muwi', 'SKILL.md')));
+
+  // 새 판 알림: 캐시에 더 새 판이 있으면 보기가 읽는 board에 싣고, 세션 시작 훅이 Claude Code 화면에 알린다 (npm에 묻지 않는다).
+  // CI에서는 알림이 꺼지므로 이 확인에서만 켠다
+  const loud = { ...env, CI: '', NO_UPDATE_NOTIFIER: '', MUWI_NO_UPDATE_CHECK: '', XDG_CACHE_HOME: path.join(home, '.cache') };
+  const cache = path.join(home, '.cache', 'muwi', 'update.json');
+  fs.mkdirSync(path.dirname(cache), { recursive: true });
+  fs.writeFileSync(cache, JSON.stringify({ name: '@muwi/herdr-app', latest: '99.0.0', checkedAt: Date.now() }));
+  const runLoud = runner(loud);
+  const told = (WIN ? runLoud(process.execPath, [path.join(herdr, 'bin', 'muwi.js'), 'board']) : runLoud(bin, ['board']));
+  assert.equal(JSON.parse(told).update.latest, '99.0.0');
+  const viaClaudeNew = runLoud(SH, ['-c', command], JSON.stringify({ session_id: 'c3', hook_event_name: 'SessionStart', source: 'startup' }));
+  assert.match(JSON.parse(viaClaudeNew).systemMessage, /muwi 99\.0\.0이 나왔어요 .*muwi update/);
   run(bin, ['setup', '--remove']);
   assert.equal(JSON.parse(fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8')).hooks, undefined);
   assert.equal(fs.existsSync(path.join(home, '.config', 'herdr-app', 'mods', 'muwi')), false);

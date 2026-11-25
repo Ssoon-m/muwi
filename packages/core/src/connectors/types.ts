@@ -30,6 +30,11 @@ export type Can = {
   start: boolean;
   /** skill을 읽는 것을 알려 준다. 없으면 읽은 skill이 "볼 수 없었음"으로 나온다 */
   skills: boolean;
+  /**
+   * 사람에게 바로 보여 줄 말을 그 도구 화면에 띄울 수 있다 (Claude Code의 systemMessage). 커넥터의 to가 Reply.notice를 그렇게 낸다.
+   * 없으면 그 말을 AI가 전하게 say에 붙인다 (hook.ts)
+   */
+  tell?: boolean;
 };
 
 /** 선언에 없는 것을 사람이 읽는 말로 (muwi setup --tools와 문서의 도구 표) */

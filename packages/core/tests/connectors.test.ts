@@ -199,7 +199,8 @@ test('커넥터 규격: 도구 표와 커넥터가 하나씩 짝이고, 커넥�
     assert.ok(a, `${t.id}에 커넥터가 없어요`);
     // 꼭 해야 하는 일 넷과 선언
     for (const k of ['install', 'remove', 'from', 'to'] as const) assert.equal(typeof a[k], 'function', `${t.id}.${k}`);
-    assert.deepEqual(Object.keys(a.can).sort(), ['skills', 'start', 'subagents'], t.id);
+    // tell(사람에게 바로 보여 줄 말을 띄울 수 있다)은 할 수 있는 커넥터만 적는다
+    assert.deepEqual(Object.keys(a.can).filter(k => k !== 'tell').sort(), ['skills', 'start', 'subagents'], t.id);
     // 선언에 없는 것은 사람이 읽는 말로 나온다 (muwi setup --tools와 문서의 표)
     assert.equal(gaps(a.can).length, Object.values(a.can).filter(v => !v).length, t.id);
   }

@@ -483,3 +483,10 @@ test('보관: 끝났거나 멈춘 작업을 목록에서 치우고, 기록은 �
   assert.equal(summary('fin').archived, undefined);
   assert.match(muwi(['unarchive', 'fin']).out, /fin: 보관한 작업이 아니에요/);
 });
+
+test('muwi update: npm으로 전역에 깐 muwi가 아니면(저장소에서 돌리면) 올리지 않고 까닭을 알린다', () => {
+  const { muwi } = bench();
+  const r = muwi(['update']);
+  assert.equal(r.code, 1);
+  assert.match(r.err, /npm으로 전역에 깐 muwi가 아니라서 여기서 올릴 수 없어요/);
+});

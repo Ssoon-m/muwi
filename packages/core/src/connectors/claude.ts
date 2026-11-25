@@ -67,14 +67,16 @@ export function fromClaude(payload: any, mode: HookMode, env: NodeJS.ProcessEnv 
 
 /** 코어의 답 → Claude Code 훅의 출력 */
 export function toClaude(h: Happened, r: Reply): HookResult {
-  const out = (o: object): HookResult => ({ stdout: JSON.stringify({ hookSpecificOutput: o }) });
-  if (r.say && h.kind === 'session-start') return out({ hookEventName: 'SessionStart', additionalContext: r.say });
-  if (r.say && h.kind === 'prompt') return out({ hookEventName: 'UserPromptSubmit', additionalContext: r.say });
-  return {};
+  const event = h.kind === 'session-start' ? 'SessionStart' : h.kind === 'prompt' ? 'UserPromptSubmit' : null;
+  const body: Record<string, unknown> = {};
+  if (r.say && event) body.hookSpecificOutput = { hookEventName: event, additionalContext: r.say };
+  // 사람에게 바로 보여 줄 말: Claude Code 화면에 뜬다 (AI의 문맥에는 들어가지 않는다)
+  if (r.notice) body.systemMessage = r.notice;
+  return Object.keys(body).length ? { stdout: JSON.stringify(body) } : {};
 }
 
 export const claude: Adapter = {
-  can: { subagents: true, start: true, skills: true },
+  can: { subagents: true, start: true, skills: true, tell: true },
   install(ctx) {
     const settings = path.join(ctx.home, 'settings.json');
     installHooks(settings, toolCommand(ctx.root, 'claude', ctx.platform));

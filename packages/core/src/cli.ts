@@ -1,6 +1,7 @@
 // muwi: 작업 계획과 진행을 기록하는 명령.
 // AI가 이번 작업의 계획을 스스로 짜서 여기에 적고, 사람은 그 기록을 그래프로 본다.
 // 이 명령은 적어 두기만 한다. 순서를 막거나 다음에 할 일을 정하지 않는다.
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, adoptSpawn, guideUpdate, handleHook, sessionInstructions } from './hook.ts';
@@ -11,7 +12,7 @@ import { hasTerminals, loadPlugins, pluginFailures, terminals, views } from './p
 import { fromSubagent, markNode } from './node.ts';
 import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
 import { readSession, sessionKey, sessionLabel } from './session.ts';
-import { installedTools, newerElsewhere, readInstall, refreshSetup, removeSetup, runSetup } from './setup.ts';
+import { installedTools, newerElsewhere, olderThan, readInstall, refreshSetup, removeSetup, runSetup } from './setup.ts';
 import { adapterOf } from './connectors/index.ts';
 import { gaps } from './connectors/types.ts';
 import { TOOLS, toolById } from './connectors/tools.ts';
@@ -19,7 +20,7 @@ import {
   SCHEMA, appendEvent, listWorks, nowIso, readConfig, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
   type NodeStatus, type Plan, type RunBy, type ShowIn,
 } from './store.ts';
-import { afterCommand } from './update.ts';
+import { afterCommand, cacheFile, cachedLatest, checkLatest, releaseUrl, updateTarget } from './update.ts';
 import { PAST_DAYS, loadBoard, loadView, type Actor, type Between, type NodeView, type Quiet, type Try, type WorkView } from './view.ts';
 
 const HELP = `사용법: muwi <명령>
@@ -72,6 +73,8 @@ const HELP = `사용법: muwi <명령>
   muwi setup --all                   이 컴퓨터에 깔린 도구 전부에 넣는다
   muwi setup --remove                setup으로 넣은 것을 뺀다 (보기가 바꾼 것도 보기가 되돌린다)
   muwi config [<이름> on|off]         설정을 보고 켜고 끈다 (보기가 정하는 설정)
+  muwi update [--check]              npm에 나온 최신판으로 올리고, 새 판으로 muwi setup을 다시 해서 훅·보기·커넥터를 맞춘다
+                                     (지금 muwi가 깔린 자리에 같은 Node의 npm으로 받는다). --check: 새 판이 있는지만 본다
   muwi --version
 
 작업은 --work <이름>으로 고른다. 없으면 이 세션이 붙어 있는 작업을 쓴다.
@@ -658,6 +661,38 @@ function tellNewer() {
   if (newer) process.stderr.write(`더 새 muwi(${newer.version})가 다른 자리에 있어요: ${newer.bin}\n지금 도는 판은 ${version()} (${ROOT})예요. 새 판으로 옮기려면 그 자리의 명령으로 muwi setup을 실행하세요: "${newer.bin}" setup\n`);
 }
 
+/** 붙은 보기와 터미널 연결의 패키지 이름 (보기 먼저). 사람이 어느 패키지를 깔았는지 알 때 쓴다 */
+const pluginPackages = () => [...views().map(v => v.package), terminals().package];
+
+/**
+ * muwi update: npm에 나온 최신판으로 올린다. 사람이 직접 하거나 AI에게 시킬 때 쓴다 (스스로 올리지는 않는다).
+ * 지금 도는 muwi가 깔린 자리에 같은 Node의 npm으로 받고, 전에 setup을 했으면 새 판으로 setup을 다시 해서
+ * 명령·훅·보기·커넥터를 새 판에 맞춘다 (훅 입구가 바뀐 판도 이걸로 맞춰진다)
+ */
+async function cmdUpdate(a: Args, dir: string) {
+  const t = updateTarget(ROOT, pluginPackages());
+  if (!t) throw new Fail('npm으로 전역에 깐 muwi가 아니라서 여기서 올릴 수 없어요. 저장소에서 돌리는 muwi는 git pull로 받아요');
+  const current = version();
+  const file = cacheFile(process.env);
+  // 사람이 시킨 것이라 지금 npm에 묻는다
+  await checkLatest(t.name, file, process.env.MUWI_UPDATE_REGISTRY || undefined);
+  const latest = cachedLatest(file, t.name);
+  if (!latest) throw new Fail('npm에 물어보지 못했어요 (오프라인이거나 npm이 답하지 않아요). 잠시 뒤에 다시 해 보세요');
+  if (!olderThan(current, latest)) return out(`최신이에요: ${t.name} ${current}`);
+  out(`새 판이 있어요: ${current} → ${latest} (${t.name}). 바뀐 점: ${releaseUrl(latest)}`);
+  if (a.flags.check) return out('올리려면 muwi update');
+  const win = process.platform === 'win32';
+  out(`올려요: npm i -g ${t.name}@${latest} (자리: ${t.prefix})`);
+  const got = spawnSync(t.npm, ['i', '-g', `${t.name}@${latest}`, '--prefix', t.prefix, '--no-audit', '--no-fund'], { stdio: 'inherit', shell: win });
+  if (got.status !== 0) throw new Fail(`npm이 ${got.status ?? got.error?.message}로 끝났어요. 위의 npm 메시지를 보세요`);
+  if (readInstall(dir)) {
+    out('새 판으로 muwi setup을 다시 해요 (전에 넣은 도구·보기를 그대로 맞춰요)');
+    const set = spawnSync(t.bin, ['setup'], { stdio: 'inherit', shell: win });
+    if (set.status !== 0) throw new Fail(`새 판의 muwi setup이 ${set.status ?? set.error?.message}로 끝났어요. ${t.bin} setup을 직접 실행해 보세요`);
+  } else out('muwi setup을 한 적이 없어서 맞출 것이 없어요. 쓰려면 muwi setup --tool <도구>를 실행하세요');
+  out(`${current} → ${latest}로 올렸어요. 열려 있는 AI 세션은 새로 열면 새 판으로 돌아요.`);
+}
+
 /** 설정의 이름, 기본값, 설명은 보기가 정한다 (보기 규격의 config). 코어에는 설정이 없다 */
 function cmdConfig(a: Args, dir: string) {
   const [key, value] = a.pos;
@@ -766,6 +801,7 @@ async function run(cmd: string | undefined, a: Args, dir: string) {
     case 'hook': return cmdHook(a, dir);
     case 'setup': return cmdSetup(a, dir);
     case 'config': return cmdConfig(a, dir);
+    case 'update': return cmdUpdate(a, dir);
     case 'version': case '--version': case '-v':
       out(version());
       return tellNewer();
@@ -784,7 +820,7 @@ async function run(cmd: string | undefined, a: Args, dir: string) {
 const argv = process.argv.slice(2);
 main(argv)
   // 사람이 터미널에서 친 명령이면 npm에 새 판이 있을 때 알린다 (update.ts)
-  .then(() => afterCommand({ cmd: argv[0], current: version(), root: ROOT, plugins: [...views().map(v => v.package), terminals().package] }))
+  .then(() => afterCommand({ cmd: argv[0], current: version(), root: ROOT, plugins: pluginPackages() }))
   .catch(e => {
     process.stderr.write((e instanceof Error ? e.message : String(e)) + '\n');
     process.exit(e instanceof Fail ? e.code : 1);
