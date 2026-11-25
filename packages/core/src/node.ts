@@ -3,7 +3,7 @@
 import crypto from 'node:crypto';
 import { readSession, touchSession } from './session.ts';
 import { appendEvent, clock, nowIso, readPlan, withLock, workDir, writePlan } from './store.ts';
-import type { NodeStatus, Plan } from './store.ts';
+import type { NodeStatus, Plan, PlanNode } from './store.ts';
 
 /** 서브에이전트가 "곧 시작한다"고 훅이 적어 둔 것을 얼마 동안 믿을지 */
 const STARTING_MS = 120_000;
@@ -34,6 +34,25 @@ export function fromSubagent(dir: string, work: string, id: string, key: string 
  * 회차: 처음 시작하거나, 끝냈거나 막혔던 노드를 다시 시작하면 새 회차다.
  * 기다리다 이어 하거나, 잠시 멈췄다(pause) 다시 하거나, 하는 중에 다른 쪽이 이어받는 것은 같은 회차다.
  */
+/**
+ * 앞 노드가 끝나기 전에 시작한 노드에 붙일 말. 그래프는 계획대로 앞 노드 다음에 그려지고 "순서 앞당김"으로만 보이므로,
+ * 같이 하는 거면 계획에서 나란히 두라고 알린다 (막지는 않는다). 나란히 = 안 끝난 앞 노드 대신 그 노드의 앞 노드들 뒤
+ */
+export function earlyStart(nodes: PlanNode[], id: string): string | null {
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const node = byId.get(id);
+  if (!node) return null;
+  const open = (node.after ?? []).filter(p => byId.has(p) && byId.get(p)!.status !== 'done');
+  if (!open.length) return null;
+  const side = [...new Set([...(node.after ?? []).filter(p => byId.has(p) && !open.includes(p)), ...open.flatMap(p => byId.get(p)!.after ?? [])])];
+  const names = open.join(', ');
+  return [
+    `앞 노드 ${names}가 아직 끝나지 않았어요. 그래프에는 계획대로 ${names} 다음에 그려지고 "순서 앞당김"으로 보여요.`,
+    `같이 하는 거면 계획에서 나란히 두세요: muwi show로 지금 계획을 보고 ${id}의 after를 ${side.length ? `[${side.map(s => `"${s}"`).join(', ')}]` : '빈 목록(맨 앞)'}으로 바꿔 muwi plan --why "<같이 하는 이유>" '<계획 JSON>'으로 다시 적어요.`,
+    `순서대로 하려던 거면 muwi node ${id} pause로 멈추고 ${names}를 먼저 끝내요.`,
+  ].join('\n');
+}
+
 export function markNode(dir: string, work: string, id: string, status: NodeStatus, note: string | undefined, key: string | null, env: NodeJS.ProcessEnv = process.env, o: { sub?: boolean } = {}): Plan | null {
   // 서브에이전트가 시작하는 것이면 훅이 방금 그 서브에이전트를 적어 뒀다 (명령에서는 세션 id가 같아 구분할 수 없다).
   // 훅이 알려 주지 않는 도구에서는 서브에이전트가 스스로 밝힌다 (--sub). 그때는 이름을 지어 준다

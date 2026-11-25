@@ -149,6 +149,40 @@ test('muwi setup --tool claude: Claude Code에 훅과 사용법 skill을 넣는�
   assert.equal(fs.existsSync(path.join(h.dir, '.claude', 'skills', 'muwi')), false);
 });
 
+test('다시 맞출 때 열린 세션을 다시 열라고 하는 것은 처음 넣었거나 걸린 훅·플러그인 파일이 바뀐 도구뿐이다 (훅이 부르는 파일은 다음 훅부터 새 판)', () => {
+  const h = home();
+  fs.mkdirSync(path.join(h.dir, '.claude'));
+  const file = path.join(h.dir, '.claude', 'settings.json');
+  const setup = (tools?: string[]) => {
+    const lines: string[] = [];
+    runSetup({ root: ROOT, version: '0.1.0', dir: h.records, env: h.env, tools, log: l => lines.push(l) });
+    return lines.filter(l => /다시 열/.test(l));
+  };
+  // 처음 넣으면: 이미 열린 세션에는 muwi 훅이 없다
+  assert.deepEqual(setup(['claude']), ['이미 열려 있는 Claude Code 세션은 다시 열어야 muwi 훅이 돌아요.']);
+  // 같은 판으로 다시 맞추면(muwi update로 같은 자리에서 올린 경우) 훅이 그대로라 다시 열 필요가 없다
+  const same = ['훅은 그대로라 열려 있는 세션도 다음 훅부터 이 판으로 돌아요. 다시 열지 않아도 돼요.'];
+  assert.deepEqual(setup(), same);
+  // 설정 파일의 모양이 바뀌었거나 남의 훅이 늘어도 우리 훅이 같으면 그대로다
+  const settings = JSON.parse(fs.readFileSync(file, 'utf8'));
+  settings.hooks.Stop.push(theirs);
+  fs.writeFileSync(file, JSON.stringify(settings));
+  assert.deepEqual(setup(), same);
+  // 전 판이 건 훅의 종류가 달랐으면(이번 판이 사건을 더 건다) 다시 열어야 한다
+  const older = JSON.parse(fs.readFileSync(file, 'utf8'));
+  delete older.hooks.SessionEnd;
+  fs.writeFileSync(file, JSON.stringify(older));
+  assert.deepEqual(setup(), ['열려 있는 Claude Code 세션은 다시 열어야 바뀐 훅이 돌아요.']);
+  // 플러그인 파일을 넣는 도구: 파일이 바뀌었으면 그 도구만 다시 연다
+  fs.mkdirSync(path.join(h.dir, '.config', 'opencode'), { recursive: true });
+  assert.deepEqual(setup(['opencode']), ['이미 열려 있는 OpenCode 세션은 다시 열어야 muwi 훅이 돌아요.']);
+  const plugin = readInstall(h.records)!.tools!.opencode.files![0];
+  fs.writeFileSync(plugin, '// 전 판의 플러그인');
+  assert.deepEqual(setup(), ['열려 있는 OpenCode 세션은 다시 열어야 바뀐 훅이 돌아요.']);
+  assert.deepEqual(setup(), same);
+  removeSetup(h.records);
+});
+
 test('muwi setup: 남이 만든 muwi 명령은 덮어쓰지 않는다', () => {
   const h = home();
   const bin = path.join(h.dir, '.local', 'bin', 'muwi');

@@ -1109,11 +1109,12 @@ export default class Muwi extends View {
 
   /**
    * 끝났거나 멈춘 작업 줄의 버튼: 보관 (보관한 작업은 꺼내기). 마우스를 올린 줄과 고른 줄에 보인다.
-   * 줄 오른쪽 위에 겹쳐 띄워서 줄의 모양이 흔들리지 않게 한다
+   * 아래 줄 오른쪽의 시간 자리에 바꿔 넣는다 (Gmail의 보관 버튼처럼). 제목과 글을 가리지 않고, 줄 높이도 그대로다
+   * (버튼은 테두리까지 아래 줄 글 한 줄보다 낮다). 고른 작업의 시간은 그래프 위 머리줄에 나온다
    */
   shelveButton(t, w, selected) {
     const on = !w.archived;
-    return div().id(`shelve-${w.work}`).absolute().top(5).right(6).px(7).py(2).rounded(5).text_size(10.5).text_color(t.muted).cursor_pointer()
+    return div().id(`shelve-${w.work}`).flex_none().px(7).line_height("14px").rounded(4).text_size(10.5).text_color(t.muted).cursor_pointer()
       .bg(selected ? t.selected : t.hover).border_1().border_color(t.border)
       .hover((s) => s.text_color(t.foreground).bg(t.surface))
       .tooltip(on ? "목록에서 치워요. 기록은 그대로예요 (다시 시작하면 돌아와요)" : "목록으로 꺼내요")
@@ -1200,7 +1201,8 @@ export default class Muwi extends View {
       : (w.between && BETWEEN_NAME[w.between]) || "다음 노드 전";
     // 끝났거나 멈춘 작업(과 보관한 작업)은 마우스를 올리면 보관(꺼내기) 버튼이 나온다
     const shelvable = w.archived || w.state === "done" || w.state === "stalled";
-    return h_flex().id(`work-${w.work}`).relative().px(8).py(6).gap(8).items_center().rounded(7)
+    const button = shelvable && (this.hoverRow === w.work || on);
+    return h_flex().id(`work-${w.work}`).px(8).py(6).gap(8).items_center().rounded(7)
       .bg(on ? t.selected : t.chrome).hover((s) => s.bg(on ? t.selected : t.hover)).cursor_pointer()
       .on_click(click)
       .when(shelvable, (el) => el.on_hover((hovered, cx) => {
@@ -1210,12 +1212,11 @@ export default class Muwi extends View {
       .child(this.workMark(t, w, c, item.ask))
       .child(v_flex().flex_1().min_w(0).gap(1)
         .child(div().truncate().text_size(12).text_color(on || w.unread ? t.foreground : t.muted).when(on || w.unread, (el) => el.font_medium()).child(w.title ?? w.work))
-        .child(h_flex().gap(6).text_size(10.5)
+        .child(h_flex().gap(6).items_center().text_size(10.5)
           .child(div().flex_1().min_w(0).truncate().text_color(item.ask ? c.waiting : c[w.state] ?? t.dim).child(line))
-          // 끝나지 않은 작업은 몇 단계째인지: 끝난 노드 / 전체
-          // 오른쪽: 몇 단계째인지와 작업 시간 (노드들이 작업한 시간의 합. 작업 중이면 초마다 늘어난다). 끝난 작업은 작업 시간과 끝난 때
-          .child(div().flex_none().text_color(t.dim).child(this.rowMeta(w, now)))))
-      .when(shelvable && (this.hoverRow === w.work || on), (el) => el.child(this.shelveButton(t, w, on)));
+          // 오른쪽: 몇 단계째인지와 작업 시간 (노드들이 작업한 시간의 합. 작업 중이면 초마다 늘어난다). 끝난 작업은 작업 시간과 끝난 때.
+          // 마우스를 올린 줄과 고른 줄에서는 그 자리에 보관 버튼
+          .child(button ? this.shelveButton(t, w, on) : div().flex_none().text_color(t.dim).child(this.rowMeta(w, now)))));
   }
 
   /** 계획 없이 일하는 세션 한 줄 (Herdr의 Agents 칸과 같은 모양). 누르면 그 터미널로 간다 */

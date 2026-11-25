@@ -76,9 +76,18 @@ test('muwi plan: 새 작업인데 이름이 없으면 알려 주고, 틀린 계�
 test('진행: 노드 상태를 적는다. 순서는 막지 않고, 없는 노드와 빠진 설명만 알려 준다', () => {
   const { dir, muwi } = bench();
   muwi(['plan', '--work', 'w', PLAN]);
-  // 앞 노드가 끝나지 않아도 시작할 수 있다 (기록일 뿐이다)
-  assert.equal(muwi(['node', 'check', 'start']).code, 0);
-  assert.match(muwi(['node', 'read', 'start']).out, /● read 시작 \(w, 0\/3 끝\)/);
+  // 앞 노드가 끝나지 않아도 시작할 수 있다 (기록일 뿐이다). 같이 하는 거면 계획에서 나란히 두라고 알린다
+  const early = muwi(['node', 'check', 'start']);
+  assert.equal(early.code, 0);
+  assert.match(early.out, /앞 노드 impl가 아직 끝나지 않았어요/);
+  assert.match(early.out, /check의 after를 \["read"\]으로 바꿔 muwi plan --why/);
+  assert.match(early.out, /muwi node check pause로 멈추고 impl를 먼저 끝내요/);
+  // 맡은 서브에이전트는 계획을 고치지 않으므로 알리지 않는다
+  assert.doesNotMatch(muwi(['node', 'check', 'start', '--sub']).out, /앞 노드/);
+  // 앞 노드가 없거나 다 끝났으면 알리지 않는다
+  const first = muwi(['node', 'read', 'start']).out;
+  assert.match(first, /● read 시작 \(w, 0\/3 끝\)/);
+  assert.doesNotMatch(first, /앞 노드/);
   assert.match(muwi(['node', 'read', 'done', '요구사항 2건']).out, /✓ read 끝 \(w, 1\/3 끝\)/);
   assert.match(muwi(['node', 'check', 'done']).out, /2\/3 끝/);
   assert.match(muwi(['node', 'nope', 'start']).err, /없는 노드예요: nope\. 있는 노드: read, impl, check/);

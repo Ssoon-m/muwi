@@ -10,6 +10,7 @@ import { pluginFailures, pluginPaths, views, type ViewInstall } from './plugins.
 import { nowIso, readJson, writeJson } from './store.ts';
 import { copyDir, installBlock, shPath, uninstallBlock, writeText } from './connectors/files.ts';
 import { adapterOf } from './connectors/index.ts';
+import { ourHooks } from './connectors/settings-hooks.ts';
 import { TOOLS, toolHome, toolSkills, type Tool } from './connectors/tools.ts';
 import type { Wired } from './connectors/types.ts';
 
@@ -175,15 +176,40 @@ export function runSetup(o: SetupOptions): Install {
   }
 
   const want = new Set<string>([...(o.tools ?? []), ...Object.keys(before?.tools ?? {})]);
+  // 열린 세션을 다시 열어야 하는 도구: 처음 넣었거나(fresh), 걸린 훅·플러그인 파일이 바뀌었다(changed)
+  const fresh: string[] = [];
+  const changed: string[] = [];
   // 표의 순서대로 넣는다
   for (const tool of TOOLS.filter(t => want.has(t.id))) {
+    const prev = before?.tools?.[tool.id];
+    const was = prev ? wiringOf(prev) : null;
     const done = installTool(tool, { root: o.root, env, platform, home: toolHome(tool, env, p.home) }, p.home, block, skill);
     if (tool.note) log(`  ${tool.note}`);
     install.tools = { ...(install.tools ?? {}), [tool.id]: done };
     log(`${tool.name} 커넥터: ${[done.instructions, done.skill, ...(done.settings ?? []), ...(done.files ?? [])].filter(Boolean).join(', ')}`);
+    if (was === null) fresh.push(tool.name);
+    else if (was !== wiringOf(done)) changed.push(tool.name);
   }
+  if (fresh.length) log(`이미 열려 있는 ${fresh.join(', ')} 세션은 다시 열어야 muwi 훅이 돌아요.`);
+  if (changed.length) log(`열려 있는 ${changed.join(', ')} 세션은 다시 열어야 바뀐 훅이 돌아요.`);
+  if (install.tools && !fresh.length && !changed.length) log('훅은 그대로라 열려 있는 세션도 다음 훅부터 이 판으로 돌아요. 다시 열지 않아도 돼요.');
   writeJson(installFile(o.dir), install);
   return install;
+}
+
+/**
+ * 도구에 걸린 muwi의 훅과 플러그인 파일. 열린 세션은 시작할 때 이것을 읽어 두므로, 바뀌면 그 세션을 다시 열어야 한다.
+ * 훅이 부르는 파일(hooks/tool.sh와 코어)은 같은 자리에서 바뀌므로 다음 훅부터 새 판으로 돈다
+ */
+function wiringOf(done: ToolInstall): string {
+  const read = (f: string) => {
+    try {
+      return fs.readFileSync(f, 'utf8');
+    } catch {
+      return '';
+    }
+  };
+  return [...(done.settings ?? []).map(f => `${f}\n${ourHooks(f)}`), ...(done.files ?? []).map(f => `${f}\n${read(f)}`)].join('\n\n');
 }
 
 /** 한 도구에 커넥터를 넣는다: 지침(늘 읽히는 파일이 있으면), 사용법 skill, 훅 */
