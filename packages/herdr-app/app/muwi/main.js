@@ -528,6 +528,8 @@ export default class Muwi extends View {
           setShared(SELECTED, null);
           this.again = true;
         }
+        // 방금 보관한 작업은 그래프 칸에서 빠진다. 화면을 다시 그리기 전에 다시 읽어도 그 작업을 또 읽지 않게 지금 뺀다
+        if (this.laneTargets.some(shelved)) this.laneTargets = this.laneTargets.filter((w) => !shelved(w));
         // 없어진 작업은 고정에서 뺀다 (같은 이름으로 새로 만든 작업이 처음부터 고정돼 나오지 않게)
         const pins = this.pinList();
         const gone = pins.filter((id) => !data.works.some((w) => w.work === id) && !(data.errors ?? []).some((e) => e.work === id));

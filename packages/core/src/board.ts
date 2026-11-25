@@ -31,9 +31,9 @@ export async function cmdBoard(a: Args, dir: string) {
   const now = clock.now().getTime();
   const board = loadBoard(dir);
   // --work를 여러 번 주면 그 작업들을 모두 그린다. 첫 작업이 고른 작업이다.
-  // 고른 작업이 없으면 맨 위 작업을 보여 준다. 접어 둔 지난 작업보다 지금 작업이 먼저다
+  // 고른 작업이 없으면 맨 위 작업을 보여 준다. 접어 둔 지난 작업보다 지금 작업이 먼저이고, 보관한 작업은 고르지 않는다
   const asked = [...new Set(a.multi.work ?? [])];
-  const pick = asked[0] ?? (board.works.find(w => !w.past) ?? board.works[0])?.work;
+  const pick = asked[0] ?? (board.works.find(w => !w.past && !w.archived) ?? board.works.find(w => !w.archived) ?? board.works[0])?.work;
   // --down: 칸이 세로로 길면 위→아래로 그린다. --fit WxH: 칸의 크기. 반대 방향이 칸에 훨씬 크게 들어가면 그 방향으로 그린다.
   // 여러 작업을 그릴 때는 모두 같은 칸 크기로 배치한다 (나눠 그리는 칸은 크기가 같다)
   const m = /^(\d+)x(\d+)$/.exec(str(a, 'fit') ?? '');
