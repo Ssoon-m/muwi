@@ -976,7 +976,7 @@ export default class Muwi extends View {
   }
 
   /**
-   * 작업 목록의 묶음. 급한 순서: 응답 대기 → 막힘 → 새 결과 → 작업 중 → 멈춤 → 계획 없는 세션 → 끝.
+   * 작업 목록의 묶음. 급한 순서: 응답 대기 → 막힘 → 새 결과 → 작업 중 → 멈춤 → 열린 세션 → 끝.
    * 하는 노드가 없는 작업은 그 작업의 세션이 하는 일로 묶는다 (shownView).
    * 새 결과: 모두 끝났는데 사람이 아직 보지 않은 작업. 그 작업을 골라 그래프로 보면 "끝"으로 내려간다.
    * 계획 없이 일하는 세션(작업에 붙지 않은 에이전트)도 넣는다. 그래서 Herdr의 Agents 칸이 없어도 모든 세션이 보인다.
@@ -991,7 +991,7 @@ export default class Muwi extends View {
     const free = [];
     for (const a of checking() ? [] : agents()) {
       const work = links.get(a.address);
-      // 끝나지 않은 작업을 하는 세션은 그 작업 줄에 들어간다. 나머지 열린 대화(작업을 끝냈거나 계획 없이 일하는 것)는 "열린 대화"에
+      // 끝나지 않은 작업을 하는 세션은 그 작업 줄에 들어간다. 나머지(작업을 끝냈거나 계획 없이 일하는 세션)는 "열린 세션"에
       if (work && open.has(work)) byWork.set(work, [...(byWork.get(work) ?? []), a]);
       else free.push(a);
     }
@@ -1013,7 +1013,7 @@ export default class Muwi extends View {
       { id: "fresh", label: "새 결과", color: t.accent, items: bucket.fresh },
       { id: "doing", label: STATE_NAME.doing, color: c.doing, items: bucket.doing },
       { id: "stalled", label: STATE_NAME.stalled, color: t.muted, items: bucket.stalled },
-      { id: "free", label: "열린 대화", color: t.dim, items: bucket.free },
+      { id: "free", label: "열린 세션", color: t.dim, items: bucket.free },
       { id: "done", label: STATE_NAME.done, color: c.done, items: bucket.done },
     ].filter((g) => g.items.length > 0);
   }
