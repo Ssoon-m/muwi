@@ -88,6 +88,17 @@ export function stripOrder(hidden, rowOf, pins = []) {
     || (group(a) < 0 ? pins.indexOf(a) - pins.indexOf(b) : made(a) - made(b) || (a < b ? -1 : a > b ? 1 : 0)));
 }
 
+/**
+ * 방금 보관한 작업인가: 지난번 목록(before)에는 보관하지 않은 작업으로 있었고, 이번 목록(after)에서 보관한 작업이다.
+ * 보는 중·고른 작업을 비우고 그래프 칸 대상에서 뺄 때 쓴다. 전부터 보관한 작업(보관함에서 일부러 누른 작업)은 아니다
+ */
+export function justShelved(before, after, id) {
+  if (!id) return false;
+  const was = (before ?? []).find((w) => w.work === id);
+  const now = (after ?? []).find((w) => w.work === id);
+  return Boolean(was) && !was.archived && Boolean(now?.archived);
+}
+
 /** 고정을 켜고 끈다. 새로 고정하면 고정 묶음의 맨 뒤 */
 export const togglePin = (pins, work) => (pins.includes(work) ? pins.filter((x) => x !== work) : [...pins, work]);
 

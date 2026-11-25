@@ -1,7 +1,7 @@
 // 그래프 칸에 여러 작업을 나눠 그릴 때의 자리 규칙 (app/muwi/lanes.js). 화면 없이 계산만 본다
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { arrange, laneGrid, laneTargets, layoutLanes, stripOrder, togglePin } from '../app/muwi/lanes.js';
+import { arrange, justShelved, laneGrid, laneTargets, layoutLanes, stripOrder, togglePin } from '../app/muwi/lanes.js';
 
 type Row = { work: string; state: string; createdAt?: string; updatedAt?: string; archived?: boolean; past?: boolean };
 /** 작업 줄: 상태와 만든 때·마지막으로 움직인 때 (분) */
@@ -155,4 +155,15 @@ test('고정을 풀면 고정 묶음에서 빠져 남은 자리 규칙을 따른
   assert.deepEqual(r.shown, ['P', 'V', 'A']);
   r = arrange({ targets, rowOf, cap: 3, pins: [], viewing: 'V', auto: r.auto });
   assert.deepEqual(r.shown, ['V', 'A', 'P']);
+});
+
+test('방금 보관한 작업: 지난번에 보관하지 않았고 이번에 보관한 작업만 (전부터 보관한 작업, 꺼낸 작업, 없는 작업은 아니다)', () => {
+  const before = [row('A', 'done'), row('B', 'done', 0, 0, { archived: true }), row('C', 'done', 0, 0, { archived: true })];
+  const after = [row('A', 'done', 0, 0, { archived: true }), row('B', 'done', 0, 0, { archived: true }), row('C', 'done'), row('D', 'done', 0, 0, { archived: true })];
+  assert.equal(justShelved(before, after, 'A'), true);
+  assert.equal(justShelved(before, after, 'B'), false); // 보관함에서 일부러 누른 작업
+  assert.equal(justShelved(before, after, 'C'), false); // 꺼냄
+  assert.equal(justShelved(before, after, 'D'), false); // 지난번 목록에 없던 작업
+  assert.equal(justShelved(before, after, null), false);
+  assert.equal(justShelved(undefined, after, 'A'), false); // 처음 읽을 때
 });

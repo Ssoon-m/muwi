@@ -8,7 +8,7 @@
 // 키보드가 있는 터미널이 바뀌면 그 터미널의 세션이 하는 작업으로 바꿔 보여 준다.
 import { View, div, svg, image, PathBuilder } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { LANE, laneTargets, layoutLanes, togglePin } from "./lanes.js";
+import { LANE, justShelved, laneTargets, layoutLanes, togglePin } from "./lanes.js";
 import {
   exec, home, theme, watchFolder, checking, shared, setShared, agents, panes, terminals, focused, updates, run, notify,
   layout as shownLayout, props as blockProps, window as appWindow, settings,
@@ -516,8 +516,7 @@ export default class Muwi extends View {
         }
         // 보는 중이거나 고른 작업이 방금 보관됐다: 보는 중을 비우고 고른 것을 푼다 (그래프 칸에 나오지 않는 작업이다).
         // 보관한 작업을 목록에서 일부러 눌러 보면 그대로 보여 준다
-        const before = (id) => this.data?.works?.find((w) => w.work === id);
-        const shelved = (id) => Boolean(id) && Boolean(data.works.find((w) => w.work === id)?.archived) && Boolean(before(id)) && !before(id).archived;
+        const shelved = (id) => justShelved(this.data?.works, data.works, id);
         if (shelved(this.picked)) {
           this.picked = null;
           this.again = true;
@@ -792,11 +791,13 @@ export default class Muwi extends View {
     this.lanesOn = Boolean(plan);
     const pickedView = this.picked ? this.views.get(this.picked) : null;
     // 나눠 그릴 때 보는 중이 없으면(아직 아무도 고르지 않음, 보는 중을 보관함) 첫 작업을 고른 것처럼 그리지 않는다
-    const main = pickedView ?? (this.planless || (plan && !plan.viewing) ? null : loaded);
+    // 읽어 둔 그래프가 보관한 작업인데 보는 중도 고른 작업도 아니면(방금 보관함) 그리지 않는다. 다음 읽기가 곧 바꾼다
+    const usable = loaded && (!loaded.archived || [want, this.picked, this.followTo].includes(loaded.work)) ? loaded : null;
+    const main = pickedView ?? (this.planless || (plan && !plan.viewing) ? null : usable);
     const view = main ? this.shownView(main, links, live) : null;
     this.mainWork = view?.work ?? null;
-    // 목록에서 고른 표시: 보는 중인 작업
-    const listed = this.planless ? null : (want ?? loaded?.work ?? null);
+    // 목록에서 고른 표시: 보는 중인 작업. 보는 중을 일부러 비웠으면(보는 중인 작업을 보관함) 아무것도 칠하지 않는다
+    const listed = this.planless || (!this.pinned() && shared(SELECTED) === null) ? null : (want ?? usable?.work ?? null);
     // 점검(herdr-app check)에서는 화면은 그래프 하나 그대로 두고, 나눠 그리는 코드(큰 그래프·지도 줄·고정 단추)도 한 번 만들어 본다. 그리지는 않는다
     if (checking() && view && variant !== "list") {
       // 고정 셋에 자리는 둘이라 넘친 고정이 지도 줄로 간다 (지도 줄과 작은 지도까지 만든다)

@@ -493,7 +493,7 @@ test('보관: 끝났거나 멈춘 작업을 목록에서 치우고, 기록은 �
   assert.match(muwi(['unarchive', 'fin']).out, /fin: 보관한 작업이 아니에요/);
 });
 
-test('muwi board: 작업을 고르지 않으면 보관한 작업은 맨 위여도 고르지 않는다', () => {
+test('muwi board: 작업을 고르지 않으면 보관한 작업은 맨 위여도 고르지 않는다 (모두 보관했으면 고른 작업이 없다)', () => {
   const { muwi } = bench();
   const one = JSON.stringify({ title: '끝낼 작업', nodes: [{ id: 'a', title: 'A' }] });
   for (const work of ['old', 'new']) {
@@ -510,9 +510,10 @@ test('muwi board: 작업을 고르지 않으면 보관한 작업은 맨 위여�
   assert.equal(top().works.find((w: any) => w.work === 'new').archived, true);
   assert.equal(top().selected.work, 'old');
   assert.equal(JSON.parse(muwi(['board', '--work', 'new']).out).selected.work, 'new');
-  // 모두 보관했으면 전처럼 맨 위 작업을 준다
+  // 모두 보관했으면 아무것도 고르지 않는다. 작업 목록에는 그대로 있다 (보관함)
   muwi(['archive', 'old']);
-  assert.ok(top().selected);
+  assert.equal(top().selected, null);
+  assert.deepEqual(top().works.map((w: any) => w.work).sort(), ['new', 'old']);
 });
 
 test('muwi update: npm으로 전역에 깐 muwi가 아니면(저장소에서 돌리면) 올리지 않고 까닭을 알린다', () => {
