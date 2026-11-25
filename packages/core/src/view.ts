@@ -526,7 +526,7 @@ const NOTES: ReadonlySet<string> = new Set(['viewed', 'flag']);
 /** 이만큼 지나도록 바뀐 것이 없으면 "지난 작업"으로 접는다. 지우지는 않는다 */
 export const PAST_DAYS = 7;
 
-export type WorkSummary = Pick<WorkView, 'work' | 'title' | 'request' | 'state' | 'between' | 'quiet' | 'unread' | 'archived' | 'updatedAt' | 'counts' | 'spentMs'> & {
+export type WorkSummary = Pick<WorkView, 'work' | 'title' | 'request' | 'state' | 'between' | 'quiet' | 'unread' | 'archived' | 'createdAt' | 'updatedAt' | 'counts' | 'spentMs'> & {
   /** 이 작업을 한 대화(세션)들: 계획을 낸 대화 먼저, 나머지는 최근에 본 순. 보기가 누를 때 그 대화로 간다 */
   talks?: string[];
   /**
@@ -584,6 +584,8 @@ export function loadBoard(dir: string, env: NodeJS.ProcessEnv = process.env): { 
         talks: talksOf(v),
         ...(v.unread ? { unread: true } : {}),
         ...(v.archived ? { archived: true } : {}),
+        // 만든 때: 보기가 작업을 늘 같은 순서로 늘어놓을 때 쓴다 (그래프 칸의 지도 줄)
+        createdAt: v.createdAt,
         updatedAt: v.updatedAt,
         counts: v.counts,
         spentMs: v.spentMs,

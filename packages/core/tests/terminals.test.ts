@@ -391,3 +391,22 @@ test('muwi board: 보기가 터미널과 대화를 잇도록 터미널마다 지
   // 계획을 낸 세션(lead)은 t2에서 돈다
   assert.deepEqual(JSON.parse(muwi(['board']).out).owners, { t2: 'lead', t4: 'new' });
 });
+
+test('muwi board: --work를 여러 번 주면 그 작업들의 그래프를 모두 준다 (첫 작업이 고른 작업, 없는 작업은 뺀다)', () => {
+  const { muwi } = bench();
+  const plan = JSON.stringify({ title: 'QA 수정', nodes: [{ id: 'repro', title: '재현' }, { id: 'fix', title: '수정', after: ['repro'] }] });
+  assert.equal(muwi(['plan', '--work', 'qa-2', '--request', '고쳐줘', plan], { MUWI_SESSION: 'other', TEST_PLACE: 't5' }).code, 0);
+  const r = muwi(['board', '--work', 'qa-2', '--work', 'shop-1', '--work', 'gone', '--work', 'qa-2', '--fit', '600x260']);
+  assert.equal(r.code, 0, r.err);
+  const b = JSON.parse(r.out);
+  assert.equal(b.selected.work, 'qa-2');
+  assert.deepEqual(b.graphs.map((g: { work: string }) => g.work), ['qa-2', 'shop-1']);
+  // 그래프마다 좌표가 있다
+  for (const g of b.graphs) assert.equal(g.layout.nodes.length, g.nodes.length);
+  // 작업 목록에는 만든 때가 있다 (보기가 늘 같은 순서로 늘어놓을 때 쓴다)
+  for (const w of b.works) assert.match(w.createdAt, /^\d{4}-\d{2}-\d{2}T/);
+  // --work가 하나면 지금처럼 고른 작업만 준다
+  const one = JSON.parse(muwi(['board', '--work', 'shop-1']).out);
+  assert.equal(one.selected.work, 'shop-1');
+  assert.equal(one.graphs, undefined);
+});

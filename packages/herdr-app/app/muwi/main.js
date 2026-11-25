@@ -1,12 +1,14 @@
 // muwi 그래프 칸 (Herdr 앱 mod).
 // AI가 적은 작업 계획과 진행 기록을 `muwi board`로 읽어 그린다. 기록도 세션도 바꾸지 않는다.
 //   작업 목록: 급한 순서로 묶는다 (응답 대기가 위, 끝났는데 아직 안 본 작업은 "새 결과"). 계획 없이 일하는 세션도 같이 보여서 Herdr의 Agents 칸을 대신한다
-//   그래프: 고른 작업의 계획. 카드와 선의 좌표는 `muwi board`가 ELK로 계산해서 준다. 기록이 바뀌면 전체를 다시 그린다
+//   그래프: 고른 작업의 계획. 카드와 선의 좌표는 `muwi board`가 ELK로 계산해서 준다. 기록이 바뀌면 전체를 다시 그린다.
+//     지금 볼 작업이 여럿이면(고정한 작업, 보는 중, 진행 중인 작업) 칸을 나눠 큰 그래프 여럿과 맨 아래 지도 줄로 그린다 (자리 규칙은 lanes.js)
 //   기록: 고른 노드의 기록 (맡은 세션, 걸린 시간, 읽은 skill, 문제 표시) 또는 작업의 기록 (계획이 바뀐 이유)
 // 끌어서 옮기고, cmd/ctrl+스크롤로 확대한다. 지금 일어나는 곳(작업 중, 응답 대기)이 보이게 따라간다.
 // 키보드가 있는 터미널이 바뀌면 그 터미널의 세션이 하는 작업으로 바꿔 보여 준다.
 import { View, div, svg, image, PathBuilder } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
+import { LANE, justShelved, laneTargets, layoutLanes, togglePin } from "./lanes.js";
 import {
   exec, home, theme, watchFolder, checking, shared, setShared, agents, panes, terminals, focused, updates, run, notify,
   layout as shownLayout, props as blockProps, window as appWindow, settings,
@@ -20,7 +22,11 @@ const PICKED = "muwi.picked";
  * 키보드를 따라가는 그래프 칸들이 그 작업으로 바꾸지 않고 누른 작업을 그대로 보여 주게 한다 { terminal, at }
  */
 const JUMP = "muwi.jump";
-const PLACE_NAME = { bottom: "아래", top: "위", right: "오른쪽" };
+/** 고정한 작업들 (고정한 순서). 모든 칸이 같이 쓰고 앱을 다시 켜도 남는다 */
+const PINS = "muwi.pins";
+const PLACE_NAME = { bottom: "아래", top: "위" };
+/** 지도 줄의 높이: 펼쳤을 때(지도 한 줄)와 접었을 때. 큰 그래프 줄 수를 셀 때 뺀다 */
+const STRIP_OPEN = 120, STRIP_FOLDED = 25;
 /** 오른쪽 기록 칸의 가장 좁은 너비 */
 const DETAIL_MIN = 220;
 
@@ -42,6 +48,23 @@ const unzoom = (s) => {
   const z = uiZoom();
   return { width: s.width / z, height: s.height / z };
 };
+/** 그래프 하나를 그리는 곳의 크기 (배율을 뺐다). 아직 모르면 null */
+const laneSize = (lane) => (lane?.px ? unzoom(lane.px) : null);
+/** 이 칸이 기억해 둔 값 (브라우저 저장소). 못 읽으면 null */
+function remembered(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function remember(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // 기억하지 못하면 이번에만 그렇게 그린다
+  }
+}
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const STATE_NAME = { waiting: "응답 대기", blocked: "막힘", doing: "작업 중", stalled: "멈춤", done: "끝" };
 /**
@@ -229,7 +252,7 @@ const SAMPLE = (() => {
 
 /**
  * 자리마다 다른 모양으로 쓴다 (레이아웃이나 pane의 props.variant)
- *   full (기본): 작업 목록 + 그래프 + 기록. muwi open으로 터미널 옆에 연 칸
+ *   full (기본): 작업 목록 + 그래프 + 기록. muwi open으로 터미널 아래에 연 칸
  *   list:        작업 목록만 (사이드바의 Agents 자리. muwi layout이 넣는다)
  *   graph:       그래프와 기록만 (터미널 아래. 목록은 사이드바에서 고른다)
  * 고른 작업은 shared 상태로 칸끼리 나눠 쓴다. props.work를 주면 그 작업에 고정한다.
@@ -250,12 +273,29 @@ export default class Muwi extends View {
     this.again = false;
     this.watching = false;
     this.lastLoad = 0;
-    this.pan = { x: 0, y: 0 };
-    this.zoom = 1;
-    this.press = null;
-    /** 그래프를 그리는 곳의 크기, 보이는 픽셀. 쓸 때는 배율을 뺀 canvasSize를 쓴다 */
-    this.canvasPx = null;
-    this.focusKey = null;
+    /** 그래프마다 옮기기·확대 상태 (작업 → { pan, zoom, press, px, focusKey }). 나눠 그린 그래프는 저마다 움직인다 */
+    this.lanes = new Map();
+    /** 그래프 배치에 넘기는 크기(그래프 하나를 그리는 곳), 보이는 픽셀. 쓸 때는 배율을 뺀 canvasSize를 쓴다 */
+    this.fitPx = null;
+    /** 기록 칸과 머리줄에 나오는 작업 (큰 그래프를 눌러 고름). 없으면 보는 중인 작업. 칸마다 따로다 */
+    this.picked = null;
+    /** 기록 칸에 나오는 작업 (마지막으로 그린 것) */
+    this.mainWork = null;
+    /** 자동으로 채운 큰 그래프 자리 (lanes.js의 arrange가 돌려준 것. 다음에 그대로 넘겨 자리를 지킨다) */
+    this.autoSlots = [];
+    /** 그래프 칸에 나올 작업들 (마지막으로 그린 것). 읽을 때 이 작업들의 그래프를 함께 읽는다 */
+    this.laneTargets = [];
+    /** 마지막으로 읽을 때 그래프를 달라고 한 작업들 (못 읽은 작업을 계속 조르지 않게) */
+    this.asked = new Set();
+    /** 큰 그래프들이 놓이는 곳의 크기, 보이는 픽셀 */
+    this.lanesPx = null;
+    /** 보는 방식(split 나눠 보기, focus 크게 보기)과 지도 줄을 접었는가. 칸마다 기억한다 */
+    this.laneMode = remembered("laneMode") === "focus" ? "focus" : "split";
+    this.stripFolded = remembered("stripFolded") === "1";
+    /** 여러 작업을 나눠 그리는 중인가 (마지막으로 그린 것) */
+    this.lanesOn = false;
+    /** 마지막으로 그릴 때 보는 중이던 작업. 바뀌면 큰 그래프를 눌러 고른 것을 푼다 */
+    this.lastWant = undefined;
     this.stale = false;
     this.showPast = false;
     /** 보관한 작업 묶음을 펼쳤는가, 마우스가 올라간 작업 줄 (보관 버튼을 보여 준다), 보관하거나 꺼내는 중 */
@@ -302,6 +342,8 @@ export default class Muwi extends View {
     this.resizing = null;
     if (checking()) {
       this.data = SAMPLE;
+      // 나눠 그리는 코드를 점검할 때 큰 그래프와 작은 지도에 그릴 견본 그래프
+      for (const w of SAMPLE.works) this.views.set(w.work, { ...SAMPLE.selected, work: w.work, title: w.title, state: w.state });
       this.node = "impl";
       this.tab = "node";
       // herdr-app check는 견본으로 보관함과 알림 줄까지 그려 본다
@@ -346,17 +388,59 @@ export default class Muwi extends View {
     return unzoom(this.sizePx);
   }
 
-  /** 그래프를 그리는 곳의 크기. 칸 안에 놓는 길이와 같은 단위다. 아직 모르면 null */
+  /** 그래프 하나를 그리는 곳의 크기 (배치에 넘긴다). 칸 안에 놓는 길이와 같은 단위다. 아직 모르면 null */
   get canvasSize() {
-    return this.canvasPx ? unzoom(this.canvasPx) : null;
+    return this.fitPx ? unzoom(this.fitPx) : null;
   }
 
-  /** 그래프를 위→아래로 그릴까: 칸이 세로로 길 때. 크기를 모르면 그래프 칸이 터미널 오른쪽에 있는지로 짐작한다 */
+  /** 그래프를 위→아래로 그릴까: 그리는 곳이 세로로 길 때 */
   wantsDown() {
     const s = this.canvasSize;
-    if (s) return s.height > s.width * 1.15;
-    if (checking() || this.variant() === "list") return false;
-    return findNode(shownLayout(), "muwi-split")?.type === "row";
+    return Boolean(s) && s.height > s.width * 1.15;
+  }
+
+  /** 그래프 하나의 옮기기·확대 상태 */
+  laneOf(work) {
+    let lane = this.lanes.get(work);
+    if (lane) {
+      this.lanes.delete(work);
+      this.lanes.set(work, lane);
+    } else {
+      lane = { pan: { x: 0, y: 0 }, zoom: 1, press: null, px: null, focusKey: null };
+      this.lanes.set(work, lane);
+      if (this.lanes.size > 80) this.lanes.delete(this.lanes.keys().next().value);
+    }
+    return lane;
+  }
+
+  /** 고정한 작업들 (고정한 순서) */
+  pinList() {
+    const v = checking() ? null : shared(PINS);
+    return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+  }
+
+  /** 고정을 켜고 끈다. 새로 고정하면 고정 묶음의 맨 뒤. 모든 칸이 같이 쓴다 */
+  togglePinOf(work, cx) {
+    if (!checking()) setShared(PINS, togglePin(this.pinList(), work));
+    cx.notify();
+  }
+
+  /** 보는 방식을 바꾼다 (split 나눠 보기, focus 크게 보기) */
+  setLaneMode(mode, cx) {
+    this.laneMode = mode;
+    remember("laneMode", mode);
+    cx.notify();
+  }
+
+  /** 큰 그래프를 눌렀다: 자리는 그대로 두고 기록 칸과 머리줄만 그 작업으로 */
+  pick(work, cx) {
+    if (work === (this.picked ?? this.viewingNow())) return;
+    this.picked = work === this.viewingNow() ? null : work;
+    this.pickedAt = shared(PICKED) ?? 0;
+    this.node = null;
+    this.tab = "work";
+    this.stale = true;
+    cx?.notify();
   }
 
   pinned() {
@@ -368,9 +452,18 @@ export default class Muwi extends View {
     return `${home()}/.muwi`;
   }
 
-  /** 지금 고른 작업: 고정된 작업 → 칸끼리 나눠 쓰는 선택 → 이 칸의 선택 */
+  /**
+   * 보는 중인 작업: 작업을 정해 연 칸 → 칸끼리 나눠 쓰는 선택 → 이 칸의 선택.
+   * 나눠 쓰는 선택을 일부러 비웠으면(보는 중인 작업을 보관함) 칸마다 예전 선택으로 돌아가지 않고 비운다
+   */
   wanted() {
-    return this.pinned() ?? shared(SELECTED) ?? this.selected ?? null;
+    const s = shared(SELECTED);
+    return this.pinned() ?? (s === null ? null : s ?? this.selected ?? null);
+  }
+
+  /** 지금 보는 중인 작업. 키보드가 있는 세션이 계획 없이 일하면 없다 */
+  viewingNow() {
+    return this.planless ? null : this.wanted();
   }
 
   watch(cx) {
@@ -397,7 +490,10 @@ export default class Muwi extends View {
     cx.spawn(async (cx) => {
       try {
         const want = this.wanted();
-        const args = want ? ["board", "--work", String(want)] : ["board"];
+        // 기록 칸에 나올 작업(고른 작업, 없으면 보는 중)을 먼저, 그다음 그래프 칸에 나눠 그릴 작업들 (그래프를 한 번에 받는다)
+        const main = this.picked ?? want;
+        const asked = [...new Set([main, ...this.laneTargets].filter(Boolean))];
+        const args = ["board", ...asked.flatMap((w) => ["--work", String(w)])];
         // 세로로 긴 칸이면 위→아래로 그린다
         const down = this.wantsDown();
         if (down) args.push("--down");
@@ -409,18 +505,46 @@ export default class Muwi extends View {
         const r = await runMuwi(args, { timeout: 20000 });
         if (r.code !== 0) throw new Error(r.stderr.trim() || `muwi가 ${r.code}로 끝났어요`);
         const data = JSON.parse(r.stdout);
-        // 고른 작업이 없어졌으면 맨 위 작업으로
-        if (want && !data.selected && data.works.length) {
-          this.selected = null;
-          if (!this.pinned()) setShared(SELECTED, null);
+        // 고른 작업이 없어졌으면 보는 중으로, 보는 중인 작업이 없어졌으면 보는 중을 비운다.
+        // 읽는 사이 사람이 다른 작업을 골랐으면(보는 중이 바뀜) 그 선택을 지우지 않는다
+        if (main && !data.selected && data.works.length) {
+          if (this.picked) this.picked = null;
+          else if (this.wanted() === want) {
+            this.selected = null;
+            if (!this.pinned()) setShared(SELECTED, null);
+          }
           this.again = true;
         }
-        this.data = data;
-        if (data.selected) {
-          this.views.delete(data.selected.work); // 최근 것을 뒤로 (오래된 것부터 버린다)
-          this.views.set(data.selected.work, data.selected);
-          if (this.views.size > 40) this.views.delete(this.views.keys().next().value);
+        // 보는 중이거나 고른 작업이 방금 보관됐다: 보는 중을 비우고 고른 것을 푼다 (그래프 칸에 나오지 않는 작업이다).
+        // 보관한 작업을 목록에서 일부러 눌러 보면 그대로 보여 준다
+        const shelved = (id) => justShelved(this.data?.works, data.works, id);
+        if (shelved(this.picked)) {
+          this.picked = null;
+          this.again = true;
         }
+        if (!this.pinned() && shelved(want) && this.wanted() === want) {
+          this.selected = null;
+          this.picked = null;
+          setShared(SELECTED, null);
+          this.again = true;
+        }
+        // 방금 보관한 작업은 그래프 칸에서 빠진다. 화면을 다시 그리기 전에 다시 읽어도 그 작업을 또 읽지 않게 지금 뺀다
+        // 그 작업을 그래프로 받았으면 그리지 않으므로 곧 다시 읽는다
+        if (this.laneTargets.some(shelved)) {
+          this.laneTargets = this.laneTargets.filter((w) => !shelved(w));
+          this.again = true;
+        }
+        // 없어진 작업은 고정에서 뺀다 (같은 이름으로 새로 만든 작업이 처음부터 고정돼 나오지 않게)
+        const pins = this.pinList();
+        const gone = pins.filter((id) => !data.works.some((w) => w.work === id) && !(data.errors ?? []).some((e) => e.work === id));
+        if (gone.length && !checking()) setShared(PINS, pins.filter((id) => !gone.includes(id)));
+        this.data = data;
+        this.asked = new Set(asked);
+        for (const g of data.graphs ?? (data.selected ? [data.selected] : [])) {
+          this.views.delete(g.work); // 최근 것을 뒤로 (오래된 것부터 버린다)
+          this.views.set(g.work, g);
+        }
+        while (this.views.size > Math.max(40, asked.length + 10)) this.views.delete(this.views.keys().next().value);
         this.error = null;
         this.loadedDown = down;
         this.loadedFit = fit;
@@ -430,7 +554,8 @@ export default class Muwi extends View {
         // 끝났는데 아직 안 본 작업을 사람이 골라 보고 있으면(목록에서 눌렀거나, 그 작업의 터미널로 와서 따라왔으면) 본 것으로 적는다.
         // 아무도 고르지 않아 맨 위 작업을 보여 줄 때는 적지 않는다 (새 결과는 목록 위쪽에 오므로, 보지 않았는데 지워질 수 있다)
         const sel = data.selected;
-        if (sel?.unread && want && sel.work === want && this.variant() !== "list" && !checking()) this.markViewed(sel.work, cx);
+        const chosen = this.picked ?? want;
+        if (sel?.unread && chosen && sel.work === chosen && this.variant() !== "list" && !checking()) this.markViewed(sel.work, cx);
         if (this.node && !data.selected?.nodes.some((n) => n.id === this.node)) {
           this.node = null;
           this.tab = "work";
@@ -514,9 +639,10 @@ export default class Muwi extends View {
     this.selected = work;
     // 사람이 작업을 골랐다 (또는 따라간 터미널에 작업이 있다). 계획 없는 세션의 빈 화면 대신 그 작업을 보여 준다
     this.planless = false;
+    this.picked = null;
+    this.laneOf(work).focusKey = null;
     this.node = null;
     this.tab = "work";
-    this.focusKey = null;
     if (!this.pinned()) {
       setShared(SELECTED, work);
       setShared(PICKED, Date.now());
@@ -563,11 +689,14 @@ export default class Muwi extends View {
     if (jumped?.terminal === term && Date.now() - (jumped.at ?? 0) < 5000) return;
     this.planless = !known && agent;
     this.planlessSince = shared(PICKED) ?? 0;
+    // 키보드가 작업이 있는 터미널이나 계획 없는 세션으로 갔다: 큰 그래프를 눌러 고른 것은 풀린다
+    if (known || this.planless) this.picked = null;
     if (known) {
       const showing = this.data?.selected?.work;
       if (showing !== work) {
-        // 다른 작업으로 간다: 고른 노드는 그 작업의 것이 아니다 (같은 id의 노드가 있어도 다른 노드다)
+        // 다른 작업으로 간다: 고른 노드는 그 작업의 것이 아니다 (같은 id의 노드가 있어도 다른 노드다). 지금 일어나는 곳으로 다시 맞춘다
         this.node = null;
+        this.laneOf(work).focusKey = null;
         this.tab = "work";
         // 전에 본 작업이면 기억해 둔 그래프를 바로 보여 준다. 새로 읽는 것은 타이머가 곧바로 한다
         this.showCached(work);
@@ -646,7 +775,11 @@ export default class Muwi extends View {
     let loaded = this.data?.selected ?? null;
     // 다른 칸에서 작업을 바꿨다: 기억해 둔 그 작업의 그래프를 바로 보여 주고, 새로 읽는 것은 타이머가 곧바로 한다.
     // 키보드를 따라 다른 작업으로 가는 중이면(followTo) 그 작업이 맞다. 공유 선택은 타이머가 곧 바꾼다
-    const target = this.followTo ?? want;
+    // 보는 중이 바뀌었거나(목록·다른 칸·보관으로) 다른 칸에서 작업을 골랐으면 이 칸에서 큰 그래프를 눌러 고른 것은 풀린다.
+    // 무엇을 읽을지 정하기 전에 푼다 (그래야 바뀐 작업을 바로 읽는다)
+    if (this.picked && (want !== this.lastWant || (shared(PICKED) ?? 0) !== this.pickedAt)) this.picked = null;
+    this.lastWant = want;
+    const target = this.followTo ?? this.picked ?? want;
     if (!checking() && target && loaded && loaded.work !== target && !this.loading) {
       this.stale = true;
       this.showCached(target);
@@ -656,7 +789,28 @@ export default class Muwi extends View {
     if (this.planless && (shared(PICKED) ?? 0) !== this.planlessSince) this.planless = false;
     // 키보드가 있는 세션이 계획 없이 일한다: 다른 작업의 그래프를 띄우면 그 세션이 그 일을 하는 것처럼 보이므로 비워서 보여 준다.
     // 목록에서 작업을 고르면 다시 그 작업을 보여 준다
-    const view = this.planless || !loaded ? null : this.shownView(loaded, links, live);
+    // 기록 칸과 머리줄에 나올 작업: 큰 그래프를 눌러 고른 작업, 없으면 보는 중 (읽어 둔 그래프).
+    // 키보드가 있는 세션이 계획 없이 일하면 보는 중이 없다: 다른 작업을 띄우면 그 세션이 그 일을 하는 것처럼 보이므로
+    // 지금 볼 작업이 여럿이면 칸을 나눠 그린다 (보는 중, 고정, 진행 중인 작업)
+    const plan = this.lanePlan(works, want, variant);
+    this.lanesOn = Boolean(plan);
+    const pickedView = this.picked ? this.views.get(this.picked) : null;
+    // 나눠 그릴 때 보는 중이 없으면(아직 아무도 고르지 않음, 보는 중을 보관함) 첫 작업을 고른 것처럼 그리지 않는다
+    // 읽어 둔 그래프가 보관한 작업인데 보는 중도 고른 작업도 아니면(방금 보관함) 그리지 않고, 기억해 둔 보는 중의 그래프를 그린다. 다음 읽기가 곧 바꾼다
+    const fresh = loaded && (!loaded.archived || [want, this.picked, this.followTo].includes(loaded.work));
+    const usable = fresh ? loaded : (want ? this.views.get(want) ?? null : null);
+    const main = pickedView ?? (this.planless || (plan && !plan.viewing) ? null : usable);
+    const view = main ? this.shownView(main, links, live) : null;
+    this.mainWork = view?.work ?? null;
+    // 목록에서 고른 표시: 보는 중인 작업. 보는 중을 일부러 비웠으면(보는 중인 작업을 보관함) 아무것도 칠하지 않는다
+    const listed = this.planless || (!this.pinned() && shared(SELECTED) === null) ? null : (want ?? usable?.work ?? null);
+    // 점검(herdr-app check)에서는 화면은 그래프 하나 그대로 두고, 나눠 그리는 코드(큰 그래프·지도 줄·고정 단추)도 한 번 만들어 본다. 그리지는 않는다
+    if (checking() && view && variant !== "list") {
+      // 고정 셋에 자리는 둘이라 넘친 고정이 지도 줄로 간다 (지도 줄과 작은 지도까지 만든다)
+      const sample = works.filter((w) => !w.archived && !w.past).map((w) => w.work);
+      this.lanesBox(t, { targets: sample, viewing: view.work, pins: sample.filter((w) => w !== view.work).slice(0, 3) }, links, live, now, works);
+      this.modeControl(t);
+    }
     const root = v_flex().id("root").size_full().min_h(0).text_color(t.foreground).text_size(12)
       .on_size_change((size, cx) => {
         if (Math.abs(size.width - this.sizePx.width) > 1 || Math.abs(size.height - this.sizePx.height) > 1) {
@@ -679,7 +833,7 @@ export default class Muwi extends View {
 
     // 그래프만 그리는 칸은 목록이 필요 없다
     const groups = this.data && variant !== "graph" ? this.groups(t, works, links) : [];
-    const listed = groups.length > 0 || works.length > 0;
+    const hasRows = groups.length > 0 || works.length > 0;
 
     if (variant === "list") {
       // 사이드바를 좁혀 아이콘만 보이게 했을 때 (Herdr의 Agents 칸과 같은 기준)
@@ -687,11 +841,11 @@ export default class Muwi extends View {
       return root.bg(t.chrome).border_t(1).border_color(t.border)
         .when(!compact, (el) => el.child(this.listHead(t, works, true)))
         .when(Boolean(this.error), (el) => el.child(this.problem(t)))
-        .when(!this.error && this.data !== null && !listed, (el) => el.child(this.empty(t)))
-        .when(listed, (el) => el.child(this.list(t, works, groups, view?.work, now, true, compact)));
+        .when(!this.error && this.data !== null && !hasRows, (el) => el.child(this.empty(t)))
+        .when(hasRows, (el) => el.child(this.list(t, works, groups, listed, now, true, compact)));
     }
 
-    // 기록 칸 자리: 칸이 넓거나 가로로 길면 그래프 오른쪽, 좁고 세로로 길면(그래프 칸을 오른쪽에 뒀을 때) 그래프 아래
+    // 기록 칸 자리: 칸이 넓거나 가로로 길면 그래프 오른쪽, 좁고 세로로 길면 그래프 아래
     const wide = this.size.width >= 1040 || (this.size.width >= 640 && this.size.width >= this.size.height * 1.3);
     // 그래프가 너무 좁아지지 않게 칸 크기에 맞춰 줄여 그린다 (기억한 너비는 그대로)
     const detailW = Math.max(DETAIL_MIN, Math.min(this.detailW, this.size.width - 360));
@@ -701,10 +855,11 @@ export default class Muwi extends View {
       .when(showList, (el) => el.child(
         v_flex().w(236).flex_none().h_full().min_h(0).bg(t.chrome).border_r(1).border_color(t.border)
           .child(this.listHead(t, works, false))
-          .child(this.list(t, works, groups, view?.work, now, true, false))))
+          .child(this.list(t, works, groups, listed, now, true, false))))
       .child(v_flex().flex_1().min_w(0).h_full().min_h(0)
-        .when(!showList && variant === "full" && works.length > 1 && !this.pinned(), (el) => el.child(this.chips(t, works, view?.work, links)))
-        .child(view ? this.canvas(t, view, now) : this.planless && works.length > 0 ? this.planlessNote(t) : div().flex_1())
+        .when(!showList && variant === "full" && works.length > 1 && !this.pinned(), (el) => el.child(this.chips(t, works, listed, links)))
+        .child(plan ? this.lanesBox(t, plan, links, live, now, works)
+          : view ? this.canvas(t, view, now) : this.planless && works.length > 0 ? this.planlessNote(t) : div().flex_1())
         .when(Boolean(view) && !wide, (el) => el.child(
           div().flex_none().h(this.drawer ? 36 + drawerH : 36).border_t(1).border_color(t.border).bg(t.surface)
             .child(this.detailPane(t, view, now, true)))))
@@ -722,7 +877,7 @@ export default class Muwi extends View {
 
     const banner = this.banner(t, variant);
     return root.bg(t.canvas)
-      .child(this.head(t, view, works, now))
+      .child(this.head(t, view, works, now, plan ? this.modeControl(t) : null))
       .when(Boolean(banner), (el) => el.child(banner))
       .when(Boolean(this.error), (el) => el.child(this.problem(t)))
       .when(!this.error && this.data !== null && works.length === 0, (el) => el.child(this.empty(t)))
@@ -730,12 +885,197 @@ export default class Muwi extends View {
       .when(works.length > 0, (el) => el.child(body));
   }
 
+  /**
+   * 그래프 칸에 나눠 그릴 작업들 (lanes.js의 laneTargets). 둘 이상일 때만 나눠 그린다.
+   * 목록 칸, 작업을 정해 연 칸, 점검(herdr-app check)에서는 나누지 않는다
+   */
+  lanePlan(works, want, variant) {
+    if (variant === "list" || this.pinned() || checking()) {
+      this.laneTargets = [];
+      return null;
+    }
+    const wanted = want ? works.find((w) => w.work === want) : null;
+    const pins = this.pinList();
+    const viewing = !this.planless && wanted ? want : null;
+    const targets = laneTargets(works, { pins, viewing, picked: this.picked, auto: this.autoSlots });
+    this.laneTargets = targets;
+    // 그래프를 아직 읽지 않은 작업이 있으면 곧 읽는다 (읽어 달라고 했는데 못 읽은 작업은 다시 조르지 않는다)
+    if (!this.error && targets.some((w) => !this.views.has(w) && !this.asked.has(w))) this.stale = true;
+    // 계획 없는 세션에 있으면 볼 작업이 하나여도 큰 그래프로 그린다: 그래프 하나로 그리면 그 세션이 그 일을 하는 것처럼 보인다
+    return targets.length > 1 || (this.planless && targets.length === 1) ? { targets, viewing, pins } : null;
+  }
+
+  /** 보는 방식 고르기: 나눠 보기 · 크게 보기 (아이콘, 마우스를 올리면 이름) */
+  modeControl(t) {
+    const opt = (mode, tip) => {
+      const on = this.laneMode === mode;
+      return div().id(`mode-${mode}`).h(20).w(26).flex().items_center().justify_center().rounded(5)
+        .bg(on ? t.selected : t.chrome).tooltip(tip)
+        .when(!on, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.setLaneMode(mode, cx)))
+        .child(svg(`mods/muwi/${mode}.svg`).size(14).text_color(on ? t.foreground : t.dim));
+    };
+    return h_flex().id("lane-mode").flex_none().gap(2).p(2).items_center().rounded(7).border_1().border_color(t.border).bg(t.chrome)
+      .child(opt("split", "나눠 보기")).child(opt("focus", "크게 보기"));
+  }
+
+  /** 고정 단추 (📌). 누르면 고정하거나 푼다. 그 줄·지도를 누른 것으로 치지 않는다 */
+  pinButton(t, work, pinned, id, size = 16) {
+    return div().id(id).flex_none().size(size).flex().items_center().justify_center().rounded(4).cursor_pointer()
+      .hover((s) => s.bg(t.hover)).tooltip(pinned ? "고정 풀기" : "고정: 그래프 칸에 크게 둬요")
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => { cx.stop_propagation(); this.togglePinOf(work, cx); })
+      .child(svg(`mods/muwi/${pinned ? "pin-on" : "pin"}.svg`).size(size - 5).text_color(pinned ? t.accent : t.dim));
+  }
+
+  /**
+   * 나눠 그린 그래프 칸: 위는 큰 그래프들, 맨 아래는 지도 줄.
+   *   나눠 보기: 칸 너비로 한 줄의 수, 높이로 줄 수를 정해 그만큼 큰 그래프로 (고정 → 보는 중 → 자동, lanes.js의 arrange)
+   *   크게 보기: 기록 칸에 나오는 작업 하나만 크게. 자동 자리는 다시 정하지 않는다 (나눠 보기로 돌아오면 전과 같다)
+   * 큰 그래프에 못 들어간 작업은 지도 줄에 (lanes.js의 stripOrder)
+   */
+  lanesBox(t, plan, links, live, now, works) {
+    const c = this.colors(t);
+    const rowOf = (id) => works.find((w) => w.work === id);
+    const area = this.lanesPx ? unzoom(this.lanesPx) : this.size;
+    const focus = this.laneMode === "focus";
+    const lead = plan.targets.includes(this.mainWork) ? this.mainWork : plan.viewing ?? plan.targets[0];
+    const { grid, shown, auto, below } = layoutLanes({
+      area, targets: plan.targets, rowOf, pins: plan.pins, viewing: plan.viewing, picked: this.picked, auto: this.autoSlots,
+      focus, lead, strip: this.stripFolded ? STRIP_FOLDED : STRIP_OPEN,
+    });
+    this.autoSlots = auto;
+    // 큰 그래프: 한 줄에 cols개씩. 마지막 줄이 덜 차도 그래프 너비는 같다
+    const per = Math.max(1, Math.min(grid.cols, shown.length));
+    const lines = [];
+    for (let i = 0; i < shown.length; i += per) lines.push(shown.slice(i, i + per));
+    const head = { viewing: plan.viewing, pins: plan.pins, split: !focus };
+    const big = v_flex().id("lanes").flex_1().min_w(0).min_h(0).gap(LANE.gap).p(LANE.pad)
+      .children(lines.map((line, n) => h_flex().id(`lane-line-${n}`).flex_1().min_w(0).min_h(0).items_stretch().gap(LANE.gap)
+        .children(line.map((work) => this.laneBox(t, work, links, live, now, head, rowOf(work))))
+        .children(Array.from({ length: per - line.length }, (_, k) => div().id(`lane-pad-${n}-${k}`).flex_1()))));
+    return v_flex().id("lanes-area").flex_1().min_w(0).min_h(0)
+      .on_size_change((px, cx) => {
+        const old = this.lanesPx;
+        if (!old || Math.abs(old.width - px.width) > 1 || Math.abs(old.height - px.height) > 1) {
+          this.lanesPx = { width: px.width, height: px.height };
+          cx.notify();
+        }
+      })
+      .child(big)
+      .when(below.length > 0, (el) => el.child(this.strip(t, below, rowOf, links, live, area, plan.pins, c)));
+  }
+
+  /** 큰 그래프 하나: 머리줄과 그래프. 고른 그래프는 테두리가 굵고, 지금·전체·확대 단추가 그 그래프에만 있다 */
+  laneBox(t, work, links, live, now, head, row) {
+    const raw = this.views.get(work);
+    const v = raw ? this.shownView(raw, links, live) : null;
+    const on = work === this.mainWork;
+    return v_flex().id(`lane-${work}`).flex_1().min_w(0).min_h(0).rounded(8).overflow_hidden()
+      .border(on ? 2 : 1).border_color(on ? t.accent : t.border)
+      // 그래프를 아직 읽지 않았으면 머리줄은 목록의 줄로 그린다
+      .child(this.laneHead(t, work, v ?? row, on, now, head))
+      .child(v ? this.canvas(t, v, now, on) : div().flex_1().p(12).text_size(11).text_color(t.dim)
+        .child(this.asked.has(work) && !this.loading ? "그래프를 읽지 못했어요" : "불러오는 중…"));
+  }
+
+  /**
+   * 큰 그래프의 머리줄: 상태 점, 제목, 단계·시간, 보는 중, 고정, 보기 바꾸기.
+   * 누르면 그 작업을 고른다 (자리는 그대로). 두 번 누르면 그 작업으로 크게 보기 ↔ 나눠 보기
+   */
+  laneHead(t, work, v, on, now, head) {
+    const c = this.colors(t);
+    const color = v ? (c[v.state] ?? t.muted) : t.muted;
+    const viewing = work === head.viewing;
+    const pinned = head.pins.includes(work);
+    const flip = (cx) => {
+      this.pick(work);
+      this.setLaneMode(head.split ? "focus" : "split", cx);
+    };
+    return h_flex().id(`lane-head-${work}`).flex_none().h(28).px(10).gap(6).items_center()
+      .border_b(1).border_color(t.border).bg(on ? tint(t.accent, 0.1) : t.chrome).cursor_pointer()
+      .on_click((e, cx) => ((e?.click_count ?? 1) >= 2 ? flip(cx) : this.pick(work, cx)))
+      .child(div().flex_none().size(8).rounded_full().bg(color))
+      .child(div().flex_1().min_w(0).truncate().text_size(11.5).font_semibold().text_color(on ? t.foreground : t.muted).child(v?.title ?? work))
+      .child(div().flex_none().text_size(10.5).text_color(t.dim).child(v ? this.rowMeta(v, now) : ""))
+      // 보는 중인 작업은 늘 크게 보이므로 고정 단추 대신 "보는 중"을 붙인다 (이미 고정한 작업이면 풀 수 있게 남긴다)
+      .when(viewing, (el) => el.child(div().flex_none().h(18).px(6).flex().items_center().rounded(5).text_size(10)
+        .bg(tint(t.accent, 0.14)).text_color(t.accent).child("보는 중")))
+      .when(!viewing || pinned, (el) => el.child(this.pinButton(t, work, pinned, `lane-pin-${work}`, 20)))
+      .child(div().id(`lane-flip-${work}`).flex_none().size(20).flex().items_center().justify_center().rounded(5)
+        .hover((s) => s.bg(t.hover)).tooltip(head.split ? "크게 보기" : "나눠 보기")
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => { cx.stop_propagation(); flip(cx); })
+        .child(svg(`mods/muwi/${head.split ? "focus" : "split"}.svg`).size(13).text_color(t.muted)));
+  }
+
+  /** 지도 줄: 큰 그래프에 못 들어간 작업의 작은 지도들. 머리를 누르면 접는다 (접으면 상태 색 점만) */
+  strip(t, below, rowOf, links, live, area, pins, c) {
+    const n = below.length;
+    const W = Math.max(140, Math.min(200, Math.floor((area.width - LANE.pad * 2 - LANE.gap * n) / n)));
+    const H = Math.round(W * 0.32);
+    const urgent = below.filter((id) => rowOf(id)?.state === "waiting" || rowOf(id)?.state === "blocked").length;
+    return v_flex().id("strip").flex_none().border_t(1).border_color(t.border).bg(t.chrome)
+      .child(h_flex().id("strip-head").flex_none().h(24).px(8).gap(8).items_center().cursor_pointer()
+        .hover((s) => s.bg(t.hover))
+        .on_click((_e, cx) => {
+          this.stripFolded = !this.stripFolded;
+          remember("stripFolded", this.stripFolded ? "1" : "0");
+          cx.notify();
+        })
+        .child(div().flex_none().w(10).text_size(10.5).text_color(t.muted).child(this.stripFolded ? "▸" : "▾"))
+        .child(div().flex_none().text_size(10.5).text_color(t.muted).child(`나머지 ${n}`))
+        .when(urgent > 0, (el) => el.child(div().flex_none().text_size(10.5).text_color(c.waiting).child(`· 응답 대기·막힘 ${urgent}`)))
+        .when(this.stripFolded, (el) => el.child(h_flex().flex_1().min_w(0).gap(4).items_center().overflow_hidden()
+          .children(below.map((id) => div().flex_none().size(8).rounded_full().bg(c[rowOf(id)?.state] ?? t.muted))))))
+      .when(!this.stripFolded, (el) => el.child(h_flex().id("minimaps").flex_none().px(LANE.pad).pb(LANE.pad).gap(LANE.gap).items_start()
+        .overflow_x_scrollbar()
+        .children(below.map((id) => this.minimap(t, id, rowOf, links, live, pins, W, H, c)))));
+  }
+
+  /** 작은 지도: 그래프 모양을 줄여 노드를 상태 색으로 그린다. 누르면 그 작업을 본다 (큰 그래프로 올라온다. 터미널로는 가지 않는다) */
+  minimap(t, id, rowOf, links, live, pins, W, H, c) {
+    const raw = this.views.get(id);
+    const v = raw ? this.shownView(raw, links, live) : rowOf(id);
+    const color = v ? (c[v.state] ?? t.muted) : t.muted;
+    const hot = v?.state === "waiting" || v?.state === "blocked";
+    const pinned = pins.includes(id);
+    const L = raw?.layout;
+    const parts = [];
+    if (L?.width) {
+      const z = Math.min((W - 14) / L.width, (H - 12) / L.height);
+      const ox = (W - L.width * z) / 2, oy = (H - L.height * z) / 2;
+      const byId = Object.fromEntries(raw.nodes.map((n) => [n.id, n]));
+      for (const e of L.edges) {
+        const path = roundPath(PathBuilder.stroke(1), e.points.map(([x, y]) => [ox + x * z, oy + y * z]), 3).build();
+        parts.push(window.paint_path(path, t.input).absolute().left(0).top(0).w(W).h(H));
+      }
+      for (const q of L.nodes) {
+        const n = byId[q.id];
+        const going = n && !n.closed && (n.status === "doing" || n.status === "waiting" || n.status === "blocked");
+        const col = !n ? t.border : n.closed ? t.muted : (c[n.status] ?? t.border);
+        parts.push(div().absolute().left(ox + q.x * z).top(oy + q.y * z).w(Math.max(4, q.w * z)).h(Math.max(3, q.h * z)).rounded(2)
+          .bg(n?.status === "todo" ? t.raised : tint(col, going ? 0.95 : 0.5)).border(going ? 1 : 0.5).border_color(going ? col : t.border));
+      }
+    }
+    return v_flex().id(`mini-${id}`).flex_none().w(W + 2).rounded(6).overflow_hidden().bg(t.surface)
+      .border(hot || pinned ? 1.5 : 1).border_color(hot ? tint(color, 0.85) : pinned ? tint(t.accent, 0.7) : t.border)
+      .cursor_pointer().hover((s) => s.border_color(t.accent))
+      .on_click((_e, cx) => this.select(id, cx))
+      .child(h_flex().flex_none().h(22).px(7).gap(5).items_center().border_b(1).border_color(t.border)
+        .child(div().flex_none().size(7).rounded_full().bg(color))
+        .child(div().flex_1().min_w(0).truncate().text_size(10.5).text_color(hot ? t.foreground : t.muted).child(v?.title ?? id))
+        .child(div().flex_none().text_size(10).text_color(hot ? color : t.dim)
+          .child(v ? [hot ? STATE_NAME[v.state] : null, `${v.counts.done}/${v.counts.total}`].filter(Boolean).join(" · ") : ""))
+        .child(this.pinButton(t, id, pinned, `mini-pin-${id}`)))
+      .child(div().relative().w(W).h(H).bg(t.canvas).children(parts));
+  }
+
   pill(t, text, color) {
     return h_flex().h(18).px(7).flex_none().items_center().rounded(9).bg(tint(color, 0.16)).border_1().border_color(tint(color, 0.55))
       .text_size(10.5).font_medium().text_color(color).child(text);
   }
 
-  head(t, view, works, now) {
+  head(t, view, works, now, toggle = null) {
     const c = this.colors(t);
     // 이 작업을 한 대화가 열려 있는가. 열려 있으면 목록에서 누를 때 그리로 가고, 닫혔으면 새 대화로 이어 갈 수 있다
     const talk = view ? this.talkOf(view, this.links()) : null;
@@ -767,6 +1107,7 @@ export default class Muwi extends View {
             .child("새 대화로 이어 가기 ›")))))
       .when(Boolean(view) && this.size.width >= 860, (el) => el.child(h_flex().flex_none().gap(12)
         .child(legend("작업 중", c.doing)).child(legend("응답 대기", c.waiting)).child(legend("막힘", c.blocked)).child(legend("끝", c.done))))
+      .when(Boolean(toggle), (el) => el.child(toggle))
       .when(Boolean(place), (el) => el.child(place));
   }
 
@@ -775,11 +1116,12 @@ export default class Muwi extends View {
     if (checking() || this.variant() !== "graph") return null;
     const split = findNode(shownLayout(), "muwi-split");
     if (!split) return null;
+    // 0.10까지 고를 수 있던 오른쪽(가로 묶음)이면 어느 쪽도 고르지 않은 것으로 보인다. 누르면 그 자리로 옮긴다
     return split.type === "row" ? "right" : split.children?.[0]?.id === "muwi-graph" ? "top" : "bottom";
   }
 
   /**
-   * 그래프 칸의 자리 고르기: 위 · 아래 · 오른쪽. muwi layout이 만든 화면의 그래프 칸에만 둔다.
+   * 그래프 칸의 자리 고르기: 위 · 아래. muwi layout이 만든 화면의 그래프 칸에만 둔다.
    * 누르면 지금 레이아웃에서 그래프 칸만 그 자리로 옮긴다 (muwi layout --graph, 레이아웃은 그대로라 번쩍이지 않는다)
    */
   placeControl(t) {
@@ -795,7 +1137,7 @@ export default class Muwi extends View {
     };
     return h_flex().id("place").flex_none().gap(2).p(2).items_center().rounded(7).border_1().border_color(t.border).bg(t.chrome)
       .when(this.moving, (el) => el.child(div().px(5).text_size(10.5).text_color(t.dim).child("옮기는 중…")))
-      .child(opt("top")).child(opt("bottom")).child(opt("right"));
+      .child(opt("top")).child(opt("bottom"));
   }
 
   /** 경계 끌기를 끝내고 너비를 기억한다 */
@@ -1199,21 +1541,25 @@ export default class Muwi extends View {
       : first ? `${first.title}${w.active.length > 1 ? ` 외 ${w.active.length - 1}` : ""}${first.closed ? " · 세션이 닫힘" : w.quiet ? ` · ${QUIET_NAME[w.quiet]}` : first.note ? ` · ${first.note}` : ""}`
       // 하는 노드가 없다 (몇 단계째인지는 오른쪽에 나온다)
       : (w.between && BETWEEN_NAME[w.between]) || "다음 노드 전";
-    // 끝났거나 멈춘 작업(과 보관한 작업)은 마우스를 올리면 보관(꺼내기) 버튼이 나온다
+    // 끝났거나 멈춘 작업(과 보관한 작업)은 마우스를 올리면 보관(꺼내기) 버튼이 나온다.
+    // 고정한 작업은 📌가 붙고, 마우스를 올리면 어느 작업이든 고정 단추가 나온다 (그래프 칸에서 큰 그래프로 먼저 보인다)
     const shelvable = w.archived || w.state === "done" || w.state === "stalled";
-    const button = shelvable && (this.hoverRow === w.work || on);
+    const hovered = this.hoverRow === w.work;
+    const button = shelvable && (hovered || on);
+    const pinned = this.pinList().includes(w.work);
     return h_flex().id(`work-${w.work}`).px(8).py(6).gap(8).items_center().rounded(7)
       .bg(on ? t.selected : t.chrome).hover((s) => s.bg(on ? t.selected : t.hover)).cursor_pointer()
       .on_click(click)
-      .when(shelvable, (el) => el.on_hover((hovered, cx) => {
-        const next = hovered ? w.work : this.hoverRow === w.work ? null : this.hoverRow;
+      .on_hover((over, cx) => {
+        const next = over ? w.work : this.hoverRow === w.work ? null : this.hoverRow;
         if (next !== this.hoverRow) { this.hoverRow = next; cx.notify(); }
-      }))
+      })
       .child(this.workMark(t, w, c, item.ask))
       .child(v_flex().flex_1().min_w(0).gap(1)
         .child(div().truncate().text_size(12).text_color(on || w.unread ? t.foreground : t.muted).when(on || w.unread, (el) => el.font_medium()).child(w.title ?? w.work))
         .child(h_flex().gap(6).items_center().text_size(10.5)
           .child(div().flex_1().min_w(0).truncate().text_color(item.ask ? c.waiting : c[w.state] ?? t.dim).child(line))
+          .when(pinned || hovered, (el) => el.child(this.pinButton(t, w.work, pinned, `row-pin-${w.work}`)))
           // 오른쪽: 몇 단계째인지와 작업 시간 (노드들이 작업한 시간의 합. 작업 중이면 초마다 늘어난다). 끝난 작업은 작업 시간과 끝난 때.
           // 마우스를 올린 줄과 고른 줄에서는 그 자리에 보관 버튼
           .child(button ? this.shelveButton(t, w, on) : div().flex_none().text_color(t.dim).child(this.rowMeta(w, now)))));
@@ -1264,7 +1610,7 @@ export default class Muwi extends View {
 
   /**
    * 그래프 칸 위쪽의 한 줄 안내.
-   *   터미널 옆에 따로 연 칸(full)인데 화면에 muwi 칸이 없으면: 사이드바와 터미널 아래에 고정하자고 (muwi config layout off면 묻지 않는다)
+   *   터미널 아래에 따로 연 칸(full)인데 화면에 muwi 칸이 없으면: 사이드바와 터미널 아래에 고정하자고 (muwi config layout off면 묻지 않는다)
    *   muwi layout으로 만든 화면인데 Herdr가 업데이트됐으면: 새 모양에 맞추자고
    */
   banner(t, variant) {
@@ -1317,7 +1663,7 @@ export default class Muwi extends View {
         .child(button("banner-later", later, false)));
   }
 
-  /** muwi layout을 실행한다. 터미널 옆에 따로 연 칸이면 바꾼 뒤 그 칸을 닫는다 (같은 그래프가 두 번 보이지 않게) */
+  /** muwi layout을 실행한다. 터미널 아래에 따로 연 칸이면 바꾼 뒤 그 칸을 닫는다 (같은 그래프가 두 번 보이지 않게) */
   applyLayout(cx, closeMe) {
     if (this.applying) return;
     this.applying = true;
@@ -1459,28 +1805,28 @@ export default class Muwi extends View {
     });
   }
 
-  centerOn(view) {
-    const s = this.canvasSize;
+  centerOn(view, lane) {
+    const s = laneSize(lane);
     const L = view.layout;
     if (!s || !L.width) return;
     // 그래프가 칸에 다 들어오면 가운데에. 터미널 아래처럼 낮은 칸은 글자가 읽히는 만큼(0.7배)까지 줄여서 담는다
     const floor = this.variant() === "graph" ? 0.7 : 0.9;
     const fit = Math.min(1, s.width / L.width, s.height / L.height);
     if (fit >= floor) {
-      this.zoom = fit;
-      this.pan = { x: (s.width - L.width * fit) / 2, y: Math.max(0, (s.height - L.height * fit) / 2) };
+      lane.zoom = fit;
+      lane.pan = { x: (s.width - L.width * fit) / 2, y: Math.max(0, (s.height - L.height * fit) / 2) };
       return;
     }
     // 다 담기지 않으면 높이를 읽히는 만큼만 줄이고, 볼 노드를 가운데에 둔다
     const z = Math.max(floor, Math.min(1, s.height / L.height));
-    this.zoom = z;
+    lane.zoom = z;
     const ids = this.focusIds(view);
     const boxes = L.nodes.filter((p) => ids.includes(p.id));
     if (!boxes.length) return;
     const x1 = Math.min(...boxes.map((p) => p.x)), x2 = Math.max(...boxes.map((p) => p.x + p.w));
     const y1 = Math.min(...boxes.map((p) => p.y)), y2 = Math.max(...boxes.map((p) => p.y + p.h));
     const clamp = (v, size, full) => (full <= size ? (size - full) / 2 : Math.min(0, Math.max(size - full, v)));
-    this.pan = {
+    lane.pan = {
       x: clamp(s.width / 2 - ((x1 + x2) / 2) * z, s.width, L.width * z),
       y: clamp(s.height / 2 - ((y1 + y2) / 2) * z, s.height, L.height * z),
     };
@@ -1504,20 +1850,20 @@ export default class Muwi extends View {
     return next.length ? next : view.nodes.map((n) => n.id);
   }
 
-  fit(view) {
-    const s = this.canvasSize;
+  fit(view, lane) {
+    const s = laneSize(lane);
     const L = view.layout;
     if (!s || !L.width) return;
-    this.zoom = Math.max(0.3, Math.min(1.2, s.width / L.width, s.height / L.height));
-    this.pan = { x: (s.width - L.width * this.zoom) / 2, y: Math.max(0, (s.height - L.height * this.zoom) / 2) };
+    lane.zoom = Math.max(0.3, Math.min(1.2, s.width / L.width, s.height / L.height));
+    lane.pan = { x: (s.width - L.width * lane.zoom) / 2, y: Math.max(0, (s.height - L.height * lane.zoom) / 2) };
   }
 
-  zoomBy(f, point, L) {
-    const next = Math.max(0.3, Math.min(1.6, this.zoom * f));
-    const wx = (point.x - this.pan.x) / this.zoom, wy = (point.y - this.pan.y) / this.zoom;
-    this.zoom = next;
-    this.pan = { x: point.x - wx * next, y: point.y - wy * next };
-    this.clampPan(L);
+  zoomBy(f, point, L, lane) {
+    const next = Math.max(0.3, Math.min(1.6, lane.zoom * f));
+    const wx = (point.x - lane.pan.x) / lane.zoom, wy = (point.y - lane.pan.y) / lane.zoom;
+    lane.zoom = next;
+    lane.pan = { x: point.x - wx * next, y: point.y - wy * next };
+    this.clampPan(L, lane);
   }
 
   /**
@@ -1525,20 +1871,23 @@ export default class Muwi extends View {
    * 그래프가 칸보다 작은 쪽은 칸 안에서 옮기고 가장자리에 닿으면 멈춘다(끌면 움직인다).
    * 큰 쪽은 그래프 끝이 칸 끝에 닿을 때까지만 옮긴다. 처음 보여 줄 때 가운데에 두는 것은 centerOn이 한다
    */
-  clampPan(L) {
-    const s = this.canvasSize;
+  clampPan(L, lane) {
+    const s = laneSize(lane);
     if (!s || !L?.width) return;
-    const z = this.zoom;
+    const z = lane.zoom;
     const edge = 12;
     // a: 그래프 왼쪽(위쪽) 끝이 칸 가장자리에 닿는 곳, b: 오른쪽(아래쪽) 끝이 닿는 곳. 작은 그래프는 a < b, 큰 그래프는 b < a
     const axis = (v, size, full) => {
       const a = edge, b = size - full - edge;
       return Math.min(Math.max(a, b), Math.max(Math.min(a, b), v));
     };
-    this.pan = { x: axis(this.pan.x, s.width, L.width * z), y: axis(this.pan.y, s.height, L.height * z) };
+    lane.pan = { x: axis(lane.pan.x, s.width, L.width * z), y: axis(lane.pan.y, s.height, L.height * z) };
   }
 
-  canvas(t, view, now) {
+  canvas(t, view, now, withControls = true) {
+    const lane = this.laneOf(view.work);
+    // 그래프 하나일 때 처음 그리는 작업은 같은 자리에서 잰 크기로 바로 맞춘다 (다음 프레임까지 왼쪽 위에 붙어 나오지 않게)
+    const size = laneSize(lane) ?? (this.lanesOn ? null : this.canvasSize);
     const L = view.layout;
     const c = this.colors(t);
     const byId = Object.fromEntries(view.nodes.map((n) => [n.id, n]));
@@ -1547,13 +1896,13 @@ export default class Muwi extends View {
     const live = view.nodes.filter((n) => n.status === "doing" || n.status === "waiting" || n.status === "blocked").map((n) => n.id).join(",");
     // Herdr 배율을 바꿔도 다시 맞춘다 (칸 크기를 재는 단위가 바뀐다)
     const focus = `${view.work}|${live}|${L.width}x${L.height}|${L.nodes.length}|${uiZoom()}`;
-    if (this.canvasSize && this.focusKey !== focus) {
-      this.focusKey = focus;
-      this.centerOn(view);
+    if (size && lane.focusKey !== focus) {
+      lane.focusKey = focus;
+      this.centerOn(view, lane);
     }
-    const z = this.zoom;
-    const X = (x) => this.pan.x + x * z, Y = (y) => this.pan.y + y * z;
-    const cw = this.canvasSize?.width ?? 900, ch = this.canvasSize?.height ?? 300;
+    const z = lane.zoom;
+    const X = (x) => lane.pan.x + x * z, Y = (y) => lane.pan.y + y * z;
+    const cw = size?.width ?? 900, ch = size?.height ?? 300;
 
     // 선: 끝난 노드에서 나가는 선은 진하게, 나머지는 옅게. 끝에 화살촉
     const paths = [], dots = [];
@@ -1591,7 +1940,7 @@ export default class Muwi extends View {
       const quiet = this.nodeQuiet(view, n);
       const color = n.closed ? t.muted : quiet ? c.waiting : c[n.status];
       const active = !n.closed && (n.status === "doing" || n.status === "waiting" || n.status === "blocked");
-      const picked = this.node === n.id;
+      const picked = this.node === n.id && view.work === this.mainWork;
       if (active) {
         const moving = n.status === "doing" && !quiet;
         glows.push(div().absolute().left(x - 6 * z).top(y - 6 * z).w(w + 12 * z).h(h + 12 * z).rounded(12 * z).bg(color)
@@ -1611,6 +1960,7 @@ export default class Muwi extends View {
         // 누르면 그 노드의 기록을 본다. 두 번 누르면 그 노드를 하는 세션의 터미널로 간다.
         // 작업의 기록은 위의 "작업" 탭이나 그래프의 빈 곳을 눌러서 본다 (다시 눌러 고르기를 풀지 않는다: 두 번 누르기와 겹친다)
         .on_click((e, cx) => {
+          this.pick(view.work);
           this.node = n.id;
           this.tab = "node";
           this.drawer = true;
@@ -1644,18 +1994,23 @@ export default class Muwi extends View {
       .on_click((_e, cx) => { act(); cx.notify(); })
       .child(label);
     const controls = h_flex().absolute().right(12).bottom(12).gap(6)
-      .child(button("c-now", "◎ 지금", () => { this.centerOn(view); }))
-      .child(button("c-fit", "⤢ 전체", () => { this.fit(view); }))
-      .child(button("c-out", "−", () => { this.zoomBy(1 / 1.2, { x: cw / 2, y: ch / 2 }, L); }))
-      .child(button("c-in", "+", () => { this.zoomBy(1.2, { x: cw / 2, y: ch / 2 }, L); }));
+      .child(button("c-now", "◎ 지금", () => { this.centerOn(view, lane); }))
+      .child(button("c-fit", "⤢ 전체", () => { this.fit(view, lane); }))
+      .child(button("c-out", "−", () => { this.zoomBy(1 / 1.2, { x: cw / 2, y: ch / 2 }, L, lane); }))
+      .child(button("c-in", "+", () => { this.zoomBy(1.2, { x: cw / 2, y: ch / 2 }, L, lane); }));
 
     const layer = paths.map((q) => window.paint_path(q.path, q.color).absolute().left(0).top(0).w(cw).h(ch));
-    return div().id("canvas").relative().flex_1().min_h(0).overflow_hidden().bg(t.canvas)
-      .on_size_change((size, cx) => {
-        const old = this.canvasPx;
-        if (!old || Math.abs(old.width - size.width) > 1 || Math.abs(old.height - size.height) > 1) {
-          this.canvasPx = { width: size.width, height: size.height };
-          this.focusKey = null; // 크기가 바뀌면 다시 맞춘다
+    // 작업마다 다른 요소로 그린다: 그래프 하나인 채로 다른 작업으로 바꿔도 그 작업의 그리는 곳 크기를 처음부터 받는다
+    return div().id(`canvas-${view.work}`).relative().flex_1().min_h(0).overflow_hidden().bg(t.canvas)
+      .on_size_change((px, cx) => {
+        const old = lane.px;
+        const differs = (a) => !a || Math.abs(a.width - px.width) > 1 || Math.abs(a.height - px.height) > 1;
+        // 이 그래프의 크기가 그대로여도 배치에 넘긴 크기와 다르면 맞춘다 (나눠 그리다 그래프 하나로 돌아왔을 때)
+        if (differs(old) || differs(this.fitPx)) {
+          lane.px = { width: px.width, height: px.height };
+          // 배치에 넘기는 크기: 그래프 하나를 그리는 곳 (나눠 그린 큰 그래프는 크기가 같다)
+          this.fitPx = lane.px;
+          lane.focusKey = null; // 크기가 바뀌면 다시 맞춘다
           // 칸이 가로로 길다가 세로로 길어졌으면(또는 반대) 흐름 방향을 바꿔 다시 읽는다
           if (this.loadedDown !== null && this.wantsDown() !== this.loadedDown) this.stale = true;
           // 칸 크기를 모른 채 읽었거나 크기가 크게 바뀌었으면, 그 크기에 맞춰 다시 배치한다 (긴 그래프를 접는 줄 수가 달라진다)
@@ -1664,47 +2019,50 @@ export default class Muwi extends View {
           cx.notify();
         }
       })
-      .when(Boolean(this.press), (el) => el.cursor_grabbing())
-      .when(!this.press, (el) => el.cursor_grab())
-      .on_mouse_down("left", (e, cx) => { this.press = { x: e.position.x, y: e.position.y, px: this.pan.x, py: this.pan.y, moved: false }; cx.notify(); })
+      .when(Boolean(lane.press), (el) => el.cursor_grabbing())
+      .when(!lane.press, (el) => el.cursor_grab())
+      .on_mouse_down("left", (e, cx) => { lane.press = { x: e.position.x, y: e.position.y, px: lane.pan.x, py: lane.pan.y, moved: false }; cx.notify(); })
       .on_mouse_move((e, cx) => {
-        if (!this.press) return;
-        if (Math.abs(e.position.x - this.press.x) + Math.abs(e.position.y - this.press.y) > 3) this.press.moved = true;
+        if (!lane.press) return;
+        if (Math.abs(e.position.x - lane.press.x) + Math.abs(e.position.y - lane.press.y) > 3) lane.press.moved = true;
         // 마우스는 보이는 픽셀로 온다. 배율로 나눠야 그래프가 커서를 그대로 따라온다
         const k = uiZoom();
-        this.pan = { x: this.press.px + (e.position.x - this.press.x) / k, y: this.press.py + (e.position.y - this.press.y) / k };
-        this.clampPan(L);
+        lane.pan = { x: lane.press.px + (e.position.x - lane.press.x) / k, y: lane.press.py + (e.position.y - lane.press.y) / k };
+        this.clampPan(L, lane);
         cx.notify();
       })
       .on_mouse_up("left", (_e, cx) => {
-        // 끌지 않고 빈 곳을 눌렀다: 고른 노드를 풀고 작업 기록을 보여 준다
-        if (this.press && !this.press.moved && (this.node || this.tab !== "work")) {
-          this.node = null;
-          this.tab = "work";
+        // 끌지 않고 빈 곳을 눌렀다: 다른 큰 그래프면 그 작업을 고르고, 고른 그래프면 고른 노드를 풀고 작업 기록을 보여 준다
+        if (lane.press && !lane.press.moved) {
+          if (view.work !== this.mainWork) this.pick(view.work);
+          else if (this.node || this.tab !== "work") {
+            this.node = null;
+            this.tab = "work";
+          }
         }
-        this.press = null;
+        lane.press = null;
         cx.notify();
       })
-      .on_hover((hovered, cx) => { if (!hovered && this.press) { this.press = null; cx.notify(); } })
+      .on_hover((hovered, cx) => { if (!hovered && lane.press) { lane.press = null; cx.notify(); } })
       .on_scroll_wheel((e, cx) => {
         if (e.modifiers.platform || e.modifiers.control) {
           const k = uiZoom();
           const local = e.local_position ? { x: e.local_position.x / k, y: e.local_position.y / k } : { x: cw / 2, y: ch / 2 };
           // 휠을 위로 굴리면 확대, 아래로 굴리면 축소 (브라우저·지도와 같은 방향)
-          this.zoomBy(Math.exp(Math.max(-60, Math.min(60, e.delta.y)) * 0.004), local, L);
+          this.zoomBy(Math.exp(Math.max(-60, Math.min(60, e.delta.y)) * 0.004), local, L, lane);
         } else {
           const k = uiZoom();
-          this.pan = { x: this.pan.x + e.delta.x / k, y: this.pan.y + e.delta.y / k };
-          this.clampPan(L);
+          lane.pan = { x: lane.pan.x + e.delta.x / k, y: lane.pan.y + e.delta.y / k };
+          this.clampPan(L, lane);
         }
         cx.notify();
       })
-      .children([...layer, ...glows, ...cards, ...ports, controls]);
+      .children([...layer, ...glows, ...cards, ...ports, ...(withControls ? [controls] : [])]);
   }
 
   /**
    * 기록 칸: 위에 "작업 · 노드" 탭, 그 아래에 고른 탭의 기록.
-   * 넓은 칸은 그래프 오른쪽에 늘 펴 두고, 좁은 칸(그래프 칸을 오른쪽에 뒀을 때)은 그래프 아래에 탭만 두었다가 누르면 편다
+   * 넓은 칸은 그래프 오른쪽에 늘 펴 두고, 좁거나 세로로 긴 칸은 그래프 아래에 탭만 두었다가 누르면 편다
    */
   detailPane(t, view, now, foldable) {
     const open = !foldable || this.drawer;

@@ -6,10 +6,10 @@ import { CONFIG, config, layout, open } from './commands.ts';
 import { removeHerdr, setupHerdr } from './install.ts';
 
 const HELP = `  Herdr 앱 화면
-  muwi open [--right]                  Herdr 앱에서 그래프 칸을 이 터미널 아래(--right면 오른쪽)에 연다
+  muwi open                            Herdr 앱에서 그래프 칸을 이 터미널 아래에 연다
   muwi layout                          지금 레이아웃을 복제해 사이드바 Agents 자리에 작업 목록을, 터미널 아래에
                                        그래프를 넣고 그 레이아웃으로 바꾼다. 원래 레이아웃은 그대로 남는다
-  muwi layout --graph bottom|top|right 그래프 칸을 터미널 아래·위·오른쪽에 둔다 (전에 고른 자리를 기억한다)
+  muwi layout --graph bottom|top       그래프 칸을 터미널 아래·위에 둔다 (전에 고른 자리를 기억한다)
   muwi layout --status [--json]        지금 화면에 muwi 칸이 있는지, 넣을 자리가 있는지 본다
   muwi layout --remove                 원래 레이아웃으로 돌아가고 muwi가 만든 복제본을 지운다`;
 

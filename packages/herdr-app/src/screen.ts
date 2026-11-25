@@ -22,11 +22,15 @@ export const SPLIT_ID = 'muwi-split';
  */
 export const PLACE_VERSION = 2;
 const GRAPH_PX = 300;
-const GRAPH_SIDE_PX = 480;
 
-/** 그래프 칸의 자리: 터미널 영역의 아래, 위, 오른쪽 */
-export type GraphAt = 'bottom' | 'top' | 'right';
-export const GRAPH_AT: GraphAt[] = ['bottom', 'top', 'right'];
+/**
+ * 그래프 칸의 자리: 터미널 영역의 아래, 위. 그래프 칸은 여러 작업을 가로로 나눠 그리고 지도 줄을 가로로 깔아서 너비가 필요하다.
+ * 0.10까지 고를 수 있던 오른쪽은 없앴다 (기록에 남은 'right'는 다음 muwi setup·muwi layout 때 아래로 옮긴다)
+ */
+export type GraphAt = 'bottom' | 'top';
+export const GRAPH_AT: GraphAt[] = ['bottom', 'top'];
+/** 기록에 적힌 자리를 지금 고를 수 있는 자리로 (없거나 0.10까지의 오른쪽이면 아래) */
+export const placeOf = (record: { graphAt?: string } | null | undefined): GraphAt => (record?.graphAt === 'top' ? 'top' : 'bottom');
 /** Herdr가 직접 내는 레이아웃. 업데이트되면 그 모양을 따라 다시 복제할 수 있다 */
 const SHIPPED = new Set(['main', 'terminals', 'win98']);
 
@@ -56,8 +60,8 @@ export type LayoutRecord = {
   shape?: number;
   list: boolean;
   graph: boolean;
-  /** 그래프 칸을 둔 자리. 없으면 아래 */
-  graphAt?: GraphAt;
+  /** 그래프 칸을 둔 자리. 없으면 아래. 'right'는 0.10까지 고를 수 있던 자리 (placeOf로 읽는다) */
+  graphAt?: GraphAt | 'right';
   at: string;
 };
 
@@ -148,13 +152,12 @@ export function placeMuwi(tree: LayoutNode, where: GraphAt = 'bottom'): { tree: 
   const trail = trailTo(root, n => n.type === 'block' && n.content?.tab === 'active');
   let graph = false;
   if (trail && trail.length > 1) {
-    const side = where === 'right';
     const block: LayoutNode = {
       id: GRAPH_ID,
       type: 'block',
-      size: { px: side ? GRAPH_SIDE_PX : GRAPH_PX },
-      min: side ? 280 : 140,
-      max: side ? 1400 : 900,
+      size: { px: GRAPH_PX },
+      min: 140,
+      max: 900,
       content: { mod: 'muwi', props: { variant: list ? 'graph' : 'full' } },
     };
     // 터미널 영역을 담은 가장 가까운 세로 묶음에서 터미널 영역 쪽 칸을 고른다 (오른쪽 패널이 있으면 그것까지).
@@ -167,14 +170,14 @@ export function placeMuwi(tree: LayoutNode, where: GraphAt = 'bottom'): { tree: 
       target = trail[i + 1];
       break;
     }
-    // 고른 칸과 그래프를 끌 수 있는 경계로 나눈 묶음으로 감싼다 (아래·위는 세로, 오른쪽은 가로).
+    // 고른 칸과 그래프를 끌 수 있는 경계로 나눈 세로 묶음으로 감싼다.
     // 묶음은 고른 칸의 자리와 크기를 물려받는다
     const at = parent.children!.indexOf(target);
     const { size, min, max, ...rest } = target;
-    const main = { ...rest, size: { weight: 1 }, min: side ? 320 : 120 };
+    const main = { ...rest, size: { weight: 1 }, min: 120 };
     parent.children![at] = {
       id: SPLIT_ID,
-      type: side ? 'row' : 'column',
+      type: 'column',
       resizable: true,
       divider: { width: 1, color: 'border' },
       ...(size !== undefined ? { size } : {}),
@@ -309,10 +312,10 @@ function writeLayout(env: NodeJS.ProcessEnv, name: string, tree: LayoutNode, bef
   return problem;
 }
 
-/** 그래프 칸이 가로·세로를 바꿨으면 그 방향의 기본 크기로 맞춘다 */
-function fitGraph(env: NodeJS.ProcessEnv, was: GraphAt, where: GraphAt) {
-  if ((was === 'right') === (where === 'right')) return;
-  herdrApp(['do', 'layout.resize', JSON.stringify({ id: GRAPH_ID, px: where === 'right' ? GRAPH_SIDE_PX : GRAPH_PX })], env);
+/** 0.10까지의 오른쪽(가로로 둔 그래프 칸)에서 옮겼으면 위·아래의 기본 높이로 맞춘다 */
+function fitGraph(env: NodeJS.ProcessEnv, was: GraphAt | 'right', where: GraphAt) {
+  if (was !== 'right' || was === where) return;
+  herdrApp(['do', 'layout.resize', JSON.stringify({ id: GRAPH_ID, px: GRAPH_PX })], env);
 }
 
 function freeName(env: NodeJS.ProcessEnv, record: LayoutRecord | null): string {
@@ -340,8 +343,8 @@ export function applyLayout(dir: string, env: NodeJS.ProcessEnv = process.env, o
   if (!state.app || !state.shown) throw new ScreenError('Herdr 앱이 열려 있지 않거나 herdr-app 명령이 없어요. Herdr 앱을 켠 뒤에 다시 실행해요.');
   const ours = Boolean(state.record && state.record.name === state.shown);
   const was = state.record?.graphAt ?? 'bottom';
-  // 자리를 말하지 않으면 전에 고른 자리를 쓴다
-  const where = o.graphAt ?? state.record?.graphAt ?? 'bottom';
+  // 자리를 말하지 않으면 전에 고른 자리를 쓴다 (0.10까지의 오른쪽이면 아래로 옮긴다)
+  const where = o.graphAt ?? placeOf(state.record);
   const base = state.shown;
   // 그래프 자리만 바꾸는 것이면 지금 레이아웃에서 그 칸만 옮긴다. 레이아웃을 바꾸지 않으니 화면이 번쩍이지 않는다
   if (state.muwi && ours && where !== was && !state.outdated && !state.edited) return moveGraph(dir, env, state.record!, where);
@@ -349,7 +352,7 @@ export function applyLayout(dir: string, env: NodeJS.ProcessEnv = process.env, o
     const moved = ours && where !== was;
     if (!state.outdated && !moved) {
       if (o.graphAt && !ours) throw new ScreenError(`${state.shown} 레이아웃은 muwi layout이 만든 것이 아니라 그래프 자리를 바꾸지 못해요. 레이아웃 파일에서 muwi 칸을 옮기거나, muwi 칸이 없는 레이아웃에서 muwi layout --graph ${where}을 실행해요.`);
-      return { name: state.shown, base: state.record?.base ?? state.shown, list: true, graph: true, graphAt: was, already: true };
+      return { name: state.shown, base: state.record?.base ?? state.shown, list: true, graph: true, graphAt: placeOf(state.record), already: true };
     }
     // Herdr가 업데이트됐거나 muwi의 배치가 바뀌었다. 우리 복제본을 그 자리에서 새 모양으로 고친다 (사람이 손으로 고쳤으면 그대로 둔다)
     if (state.edited) {
@@ -362,7 +365,7 @@ export function applyLayout(dir: string, env: NodeJS.ProcessEnv = process.env, o
   if (!from) throw new ScreenError(`${base} 레이아웃 파일을 읽지 못했어요.`);
   const check = placeMuwi(from.tree, where);
   if (!check.list && !check.graph) {
-    throw new ScreenError(`${base} 레이아웃에는 Agents 칸도 터미널 영역도 없어서 muwi 칸을 넣을 자리를 못 찾았어요. 그래프는 muwi open으로 터미널 옆에 열어요.`);
+    throw new ScreenError(`${base} 레이아웃에는 Agents 칸도 터미널 영역도 없어서 muwi 칸을 넣을 자리를 못 찾았어요. 그래프는 muwi open으로 터미널 아래에 열어요.`);
   }
 
   const name = freeName(env, readLayoutRecord(dir));
@@ -415,7 +418,7 @@ function rebuild(dir: string, env: NodeJS.ProcessEnv, state: Screen, where: Grap
   if (!from) throw new ScreenError(`${record.base} 레이아웃 파일을 읽지 못했어요.`);
   const placed = placeMuwi(from.tree, where);
   if (!placed.list && !placed.graph) {
-    throw new ScreenError(`${record.base} 레이아웃에 muwi 칸을 넣을 자리가 없어졌어요. muwi layout --remove 뒤에 muwi open으로 터미널 옆에 열어요.`);
+    throw new ScreenError(`${record.base} 레이아웃에 muwi 칸을 넣을 자리가 없어졌어요. muwi layout --remove 뒤에 muwi open으로 터미널 아래에 열어요.`);
   }
   const before = readTree(env, record.name);
   const version = state.version ?? before?.tree.cloned_from?.version ?? record.version;
@@ -477,7 +480,7 @@ function moveGraph(dir: string, env: NodeJS.ProcessEnv, record: LayoutRecord, wh
   const tree = withPreview(env, record.name, placed.tree, where);
   const problem = writeLayout(env, record.name, tree, file.text);
   if (problem) {
-    drawPreview(env, record.name, record.graphAt ?? 'bottom');
+    drawPreview(env, record.name, placeOf(record));
     throw new ScreenError(`Herdr 앱이 옮긴 레이아웃을 받아들이지 않아 원래대로 돌렸어요: ${problem}`);
   }
   fitGraph(env, record.graphAt ?? 'bottom', where);
@@ -526,13 +529,15 @@ export function ensurePreview(dir: string, env: NodeJS.ProcessEnv = process.env)
   if (!record) return false;
   const file = readTree(env, record.name);
   if (!file || !untouched(record, file)) return false;
+  // 0.10까지의 오른쪽 자리에 그대로 있는 레이아웃은 옮길 때 그림도 새로 그린다 (그 전에 아래 그림으로 바꾸지 않는다)
+  if (record.graphAt === 'right') return false;
   if (file.tree.preview && fs.existsSync(previewPath(env, record.name))) {
     // 그림이 이미 있으면 그림 파일만 지금 판의 그림으로 맞춘다 (색 같은 것이 바뀌었을 때). 레이아웃 파일은 건드리지 않는다
-    const want = layoutPreview(record.graphAt ?? 'bottom');
+    const want = layoutPreview(placeOf(record));
     if (fs.readFileSync(previewPath(env, record.name), 'utf8') === want) return false;
-    return drawPreview(env, record.name, record.graphAt ?? 'bottom');
+    return drawPreview(env, record.name, placeOf(record));
   }
-  const tree = withPreview(env, record.name, file.tree, record.graphAt ?? 'bottom');
+  const tree = withPreview(env, record.name, file.tree, placeOf(record));
   if (!tree.preview || writeLayout(env, record.name, tree, file.text)) return false;
   writeJson(recordFile(dir), { ...record, hash: treeHash(tree), hashKind: 'tree' });
   return true;

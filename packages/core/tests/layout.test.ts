@@ -83,7 +83,7 @@ test('긴 그래프는 칸 비율에 맞춰 여러 줄로 접는다. 칸에 잘 
   assert.ok(new Set(wrapped.nodes.map(n => n.y)).size > 1);
   assert.ok(zoom(wrapped) > zoom(flat) + 0.3, `${zoom(flat)} → ${zoom(wrapped)}`);
   assert.deepEqual(layoutProblems(wrapped), []);
-  // 위→아래로 흐르는 좁고 긴 칸(오른쪽에 둔 그래프 칸)에서도
+  // 위→아래로 흐르는 좁고 긴 칸에서도
   const tall = { w: 480, h: 900 };
   const down = await layoutGraph(chain, SIZE, 'down', tall);
   assert.equal(down.wrapped, true);

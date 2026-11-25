@@ -1,5 +1,6 @@
 // muwi board: 보기(그래프 칸 등)가 읽는 기록 한 벌 (JSON).
 //   작업 목록, 고른 작업의 노드와 기록, 그래프 좌표, 이어 하기에 쓸 사실, 최근 세션과 그 터미널, 보기가 더한 값.
+//   --work를 여러 번 주면 그 작업들의 그래프를 모두 준다 (graphs. 한 칸에 여러 작업을 나눠 그리는 보기가 쓴다).
 //   새 판이 나왔으면 그것도 (update. 보기가 배너로 알린다. 업데이트는 muwi update가 한다).
 // 보기는 이것만 읽고 그린다. 기록을 바꾸지 않는다.
 import path from 'node:path';
@@ -29,16 +30,24 @@ export async function cmdBoard(a: Args, dir: string) {
   // 작업 시간을 센 때. 보기는 진행 중인 노드에 이 뒤로 흐른 시간을 더해 초마다 늘린다
   const now = clock.now().getTime();
   const board = loadBoard(dir);
-  // 고른 작업이 없으면 맨 위 작업을 보여 준다. 접어 둔 지난 작업보다 지금 작업이 먼저다
-  const pick = str(a, 'work') ?? (board.works.find(w => !w.past) ?? board.works[0])?.work;
-  let selected = null;
-  if (pick) {
-    const v = loadView(dir, pick);
-    // --down: 칸이 세로로 길면 위→아래로 그린다. --fit WxH: 칸의 크기. 반대 방향이 칸에 훨씬 크게 들어가면 그 방향으로 그린다
-    // 닫힌 세션을 이어 하는 데 쓸 것(폴더가 있는가, 대화를 다시 열 수 있는가)도 함께 넘긴다
-    const m = /^(\d+)x(\d+)$/.exec(str(a, 'fit') ?? '');
-    const fit = m ? { w: Number(m[1]), h: Number(m[2]) } : undefined;
-    if (v) selected = { ...(await withLayout(v, a.flags.down ? 'down' : 'right', fit)), ...resumeFacts(v) };
+  // --work를 여러 번 주면 그 작업들을 모두 그린다. 첫 작업이 고른 작업이다.
+  // 고른 작업이 없으면 맨 위 작업을 보여 준다. 접어 둔 지난 작업보다 지금 작업이 먼저이고, 보관한 작업은 고르지 않는다 (모두 보관했으면 고른 작업이 없다)
+  const asked = [...new Set(a.multi.work ?? [])];
+  const pick = asked[0] ?? (board.works.find(w => !w.past && !w.archived) ?? board.works.find(w => !w.archived))?.work;
+  // --down: 칸이 세로로 길면 위→아래로 그린다. --fit WxH: 칸의 크기. 반대 방향이 칸에 훨씬 크게 들어가면 그 방향으로 그린다.
+  // 여러 작업을 그릴 때는 모두 같은 칸 크기로 배치한다 (나눠 그리는 칸은 크기가 같다)
+  const m = /^(\d+)x(\d+)$/.exec(str(a, 'fit') ?? '');
+  const fit = m ? { w: Number(m[1]), h: Number(m[2]) } : undefined;
+  // 닫힌 세션을 이어 하는 데 쓸 것(폴더가 있는가, 대화를 다시 열 수 있는가)도 함께 넘긴다
+  const drawn = async (work: string) => {
+    const v = loadView(dir, work);
+    return v ? { ...(await withLayout(v, a.flags.down ? 'down' : 'right', fit)), ...resumeFacts(v) } : null;
+  };
+  const selected = pick ? await drawn(pick) : null;
+  const graphs = selected ? [selected] : [];
+  for (const work of asked.slice(1)) {
+    const g = await drawn(work);
+    if (g) graphs.push(g);
   }
   // 보기가 터미널과 작업을 잇는 데 쓴다 (지금 보는 터미널의 작업 따라가기, 계획 없는 세션 가려내기)
   const sessions = recentSessions(dir, Date.now() - PAST_DAYS * 86_400_000);
@@ -50,5 +59,5 @@ export async function cmdBoard(a: Args, dir: string) {
   const current = readJson<{ version?: string }>(path.join(ROOT, 'package.json'))?.version ?? '';
   const newer = newerKnown({ current, root: ROOT, plugins: [...views().map(v => v.package), terminals().package] });
   const update = newer ? { current: newer.current, latest: newer.latest, url: releaseUrl(newer.latest) } : undefined;
-  out(JSON.stringify({ version: BOARD_VERSION, dir, now, ...board, sessions, owners, ...extra, ...(update ? { update } : {}), selected }));
+  out(JSON.stringify({ version: BOARD_VERSION, dir, now, ...board, sessions, owners, ...extra, ...(update ? { update } : {}), selected, ...(asked.length > 1 ? { graphs } : {}) }));
 }
