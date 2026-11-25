@@ -791,7 +791,7 @@ export default class Muwi extends View {
     // 목록에서 작업을 고르면 다시 그 작업을 보여 준다
     // 기록 칸과 머리줄에 나올 작업: 큰 그래프를 눌러 고른 작업, 없으면 보는 중 (읽어 둔 그래프).
     // 키보드가 있는 세션이 계획 없이 일하면 보는 중이 없다: 다른 작업을 띄우면 그 세션이 그 일을 하는 것처럼 보이므로
-    // 지금 볼 작업이 여럿이면 칸을 나눠 그린다 (보는 중, 고정, 진행 중인 작업)
+    // 그래프 칸은 관제탑: 끝나지 않은 작업·고정·보는 중을 늘 나눠 그리는 화면으로 그린다 (하나이거나 없어도)
     const plan = this.lanePlan(works, want, variant);
     this.lanesOn = Boolean(plan);
     const pickedView = this.picked ? this.views.get(this.picked) : null;
@@ -810,6 +810,7 @@ export default class Muwi extends View {
       const sample = works.filter((w) => !w.archived && !w.past).map((w) => w.work);
       this.lanesBox(t, { targets: sample, viewing: view.work, pins: sample.filter((w) => w !== view.work).slice(0, 3) }, links, live, now, works);
       this.modeControl(t);
+      this.idleNote(t);
     }
     const root = v_flex().id("root").size_full().min_h(0).text_color(t.foreground).text_size(12)
       .on_size_change((size, cx) => {
@@ -886,7 +887,8 @@ export default class Muwi extends View {
   }
 
   /**
-   * 그래프 칸에 나눠 그릴 작업들 (lanes.js의 laneTargets). 둘 이상일 때만 나눠 그린다.
+   * 그래프 칸(관제탑)에 그릴 작업들 (lanes.js의 laneTargets). 작업이 하나이거나 없어도 같은 화면으로 그린다:
+   * 끝나지 않은 작업은 어느 탭에 있든 늘 나오고, 키보드를 옮기면 보는 중과 자리 순서만 바뀐다.
    * 목록 칸, 작업을 정해 연 칸, 점검(herdr-app check)에서는 나누지 않는다
    */
   lanePlan(works, want, variant) {
@@ -901,8 +903,7 @@ export default class Muwi extends View {
     this.laneTargets = targets;
     // 그래프를 아직 읽지 않은 작업이 있으면 곧 읽는다 (읽어 달라고 했는데 못 읽은 작업은 다시 조르지 않는다)
     if (!this.error && targets.some((w) => !this.views.has(w) && !this.asked.has(w))) this.stale = true;
-    // 계획 없는 세션에 있으면 볼 작업이 하나여도 큰 그래프로 그린다: 그래프 하나로 그리면 그 세션이 그 일을 하는 것처럼 보인다
-    return targets.length > 1 || (this.planless && targets.length === 1) ? { targets, viewing, pins } : null;
+    return { targets, viewing, pins };
   }
 
   /** 보는 방식 고르기: 나눠 보기 · 크게 보기 (아이콘, 마우스를 올리면 이름) */
@@ -934,6 +935,8 @@ export default class Muwi extends View {
    * 큰 그래프에 못 들어간 작업은 지도 줄에 (lanes.js의 stripOrder)
    */
   lanesBox(t, plan, links, live, now, works) {
+    // 나올 작업이 없다: 계획 없는 세션에 있으면 그 안내를, 아니면 끝나지 않은 작업이 없다고 알린다
+    if (plan.targets.length === 0) return this.planless ? this.planlessNote(t) : this.idleNote(t);
     const c = this.colors(t);
     const rowOf = (id) => works.find((w) => w.work === id);
     const area = this.lanesPx ? unzoom(this.lanesPx) : this.size;
@@ -973,16 +976,18 @@ export default class Muwi extends View {
     return v_flex().id(`lane-${work}`).flex_1().min_w(0).min_h(0).rounded(8).overflow_hidden()
       .border(on ? 2 : 1).border_color(on ? t.accent : t.border)
       // 그래프를 아직 읽지 않았으면 머리줄은 목록의 줄로 그린다
-      .child(this.laneHead(t, work, v ?? row, on, now, head))
+      // 점검(herdr-app check)에서는 터미널로 이동 단추도 견본으로 그려 본다
+      .child(this.laneHead(t, work, v ?? row, on, now, head, checking() ? { terminal: "check", name: "견본" } : row ? this.talkOf(row, links) : null))
       .child(v ? this.canvas(t, v, now, on) : div().flex_1().p(12).text_size(11).text_color(t.dim)
         .child(this.asked.has(work) && !this.loading ? "그래프를 읽지 못했어요" : "불러오는 중…"));
   }
 
   /**
-   * 큰 그래프의 머리줄: 상태 점, 제목, 단계·시간, 보는 중, 고정, 보기 바꾸기.
-   * 누르면 그 작업을 고른다 (자리는 그대로). 두 번 누르면 그 작업으로 크게 보기 ↔ 나눠 보기
+   * 큰 그래프의 머리줄: 상태 점, 제목, 단계·시간, 보는 중, 터미널로 이동, 고정, 보기 바꾸기.
+   * 누르면 그 작업을 고른다 (자리는 그대로). 두 번 누르면 그 작업으로 크게 보기 ↔ 나눠 보기.
+   * talk: 그 작업을 한 대화가 열려 있는 터미널 (talkOf). 있으면 터미널로 이동 단추를 둔다
    */
-  laneHead(t, work, v, on, now, head) {
+  laneHead(t, work, v, on, now, head, talk) {
     const c = this.colors(t);
     const color = v ? (c[v.state] ?? t.muted) : t.muted;
     const viewing = work === head.viewing;
@@ -1000,6 +1005,16 @@ export default class Muwi extends View {
       // 보는 중인 작업은 늘 크게 보이므로 고정 단추 대신 "보는 중"을 붙인다 (이미 고정한 작업이면 풀 수 있게 남긴다)
       .when(viewing, (el) => el.child(div().flex_none().h(18).px(6).flex().items_center().rounded(5).text_size(10)
         .bg(tint(t.accent, 0.14)).text_color(t.accent).child("보는 중")))
+      // 터미널로 이동: 목록의 줄을 누를 때와 같다 (그 작업이 보는 중이 되고, 그 대화의 터미널로 간다. 다른 탭이어도)
+      .when(Boolean(talk), (el) => el.child(div().id(`lane-go-${work}`).flex_none().size(20).flex().items_center().justify_center().rounded(5)
+        .cursor_pointer().hover((s) => s.bg(t.hover)).tooltip(`터미널로 이동 (${talk.name})`)
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => {
+          cx.stop_propagation();
+          this.select(work, cx);
+          this.jump(talk.terminal);
+        })
+        .child(svg("mods/muwi/terminal.svg").size(13).text_color(t.muted))))
       .when(!viewing || pinned, (el) => el.child(this.pinButton(t, work, pinned, `lane-pin-${work}`, 20)))
       .child(div().id(`lane-flip-${work}`).flex_none().size(20).flex().items_center().justify_center().rounded(5)
         .hover((s) => s.bg(t.hover)).tooltip(head.split ? "크게 보기" : "나눠 보기")
@@ -1269,6 +1284,13 @@ export default class Muwi extends View {
       .child(div().text_size(13).text_color(t.muted).child("그래프 없음"))
       .child(div().text_size(11).text_color(t.dim).child("지금 칸의 세션은 계획 없이 일하고 있어요. 질문에 답하거나 한 번에 끝나는 일이에요."))
       .child(div().text_size(11).text_color(t.dim).child("여러 단계로 하는 일을 시키면 계획이 여기에 그려져요. 다른 작업은 목록에서 고르세요."));
+  }
+
+  /** 그래프 칸에 나올 작업이 없을 때 (끝나지 않은 작업도, 고정한 작업도, 보는 중도 없다) */
+  idleNote(t) {
+    return v_flex().flex_1().min_h(0).items_center().justify_center().gap(6).p(16)
+      .child(div().text_size(13).text_color(t.muted).child("끝나지 않은 작업이 없어요"))
+      .child(div().text_size(11).text_color(t.dim).child("작업이 시작되면 어느 탭에서든 여기에 그려져요. 끝난 작업은 목록에서 눌러 볼 수 있어요."));
   }
 
   empty(t) {

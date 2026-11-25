@@ -13,17 +13,37 @@ const table = (rows: Row[]) => {
   return (id: string) => by.get(id);
 };
 
-test('대상: 진행 중인 작업과 고정·보는 중·고른 작업·자동 자리에 있던 작업. 보관한 작업은 고정돼 있어도 빼고, 순서는 목록과 같다', () => {
+test('대상: 끝나지 않은 작업(멈춤, 지난 작업으로 접힌 멈춤도)과 고정·보는 중·고른 작업·자동 자리에 있던 작업. 보관한 작업은 고정돼 있어도 빼고, 순서는 목록과 같다', () => {
   const rows = [
-    row('wait', 'waiting'), row('doing', 'doing'), row('done', 'done'), row('pinned-done', 'done'),
-    row('archived', 'doing', 0, 0, { archived: true }), row('old', 'doing', 0, 0, { past: true }), row('seen', 'done'), row('kept', 'stalled'),
+    row('wait', 'waiting'), row('doing', 'doing'), row('stalled', 'stalled'), row('old-stalled', 'stalled', 0, 0, { past: true }),
+    row('done', 'done'), row('pinned-done', 'done'), row('archived', 'doing', 0, 0, { archived: true }), row('seen', 'done'), row('kept', 'done'),
   ];
   assert.deepEqual(laneTargets(rows, { pins: ['pinned-done', 'archived'], viewing: 'seen', auto: ['kept'] }),
-    ['wait', 'doing', 'pinned-done', 'seen', 'kept']);
+    ['wait', 'doing', 'stalled', 'old-stalled', 'pinned-done', 'seen', 'kept']);
   // 큰 그래프를 눌러 고른 작업도 끝났어도 남는다
-  assert.deepEqual(laneTargets(rows, { picked: 'done' }), ['wait', 'doing', 'done']);
+  assert.deepEqual(laneTargets(rows, { picked: 'done' }), ['wait', 'doing', 'stalled', 'old-stalled', 'done']);
   // 보관한 작업도 보는 중이면 넣는다 (보관함에서 일부러 눌렀거나 그 작업의 터미널로 갔다)
-  assert.deepEqual(laneTargets(rows, { viewing: 'archived' }), ['wait', 'doing', 'archived']);
+  assert.deepEqual(laneTargets(rows, { viewing: 'archived' }), ['wait', 'doing', 'stalled', 'old-stalled', 'archived']);
+});
+
+test('관제탑: 보는 중이 어느 작업으로 가든(다른 탭·계획 없는 세션) 끝나지 않은 작업은 늘 대상이고, 끝난 작업은 보는 중일 때만 더해진다', () => {
+  const rows = [row('a', 'doing'), row('b', 'waiting'), row('s', 'stalled'), row('d1', 'done'), row('d2', 'done')];
+  const always = ['a', 'b', 's'];
+  for (const viewing of [null, 'a', 'b', 's', 'd1', 'd2']) {
+    const got = laneTargets(rows, { viewing });
+    assert.deepEqual(got.filter(w => always.includes(w)), always, `보는 중 ${viewing}`);
+    assert.deepEqual(got.filter(w => !always.includes(w)), viewing?.startsWith('d') ? [viewing] : [], `보는 중 ${viewing}`);
+  }
+  // 칸에 놓아도 마찬가지: 보는 중만 앞으로 오고, 끝나지 않은 작업은 큰 그래프나 작은 지도 어딘가에 늘 있다
+  const area = { width: 800, height: 300 };
+  let auto: string[] = [];
+  for (const viewing of ['a', 'd1', 'b', null, 's']) {
+    const targets = laneTargets(rows, { viewing, auto });
+    const r = layoutLanes({ area, strip: 120, targets, rowOf: table(rows), viewing, auto });
+    auto = r.auto;
+    for (const w of always) assert.ok(r.shown.includes(w) || r.below.includes(w), `보는 중 ${viewing}: ${w}`);
+    if (viewing) assert.ok(r.shown.includes(viewing), `보는 중 ${viewing}는 크게`);
+  }
 });
 
 test('자리 수: 너비로 한 줄의 수, 높이로 줄 수. 지도 줄 높이를 빼고 센다. 아무리 좁아도 하나', () => {
@@ -81,6 +101,20 @@ test('자동 자리: 끝난 작업은 자리를 비킬 때까지 남고, 진행 
   assert.deepEqual(r.shown, ['b']);
 });
 
+test('자동 자리: 멈춘 작업은 빈자리를 채우고 끝난 작업의 자리를 밀어낸다. 작업 중·응답 대기는 멈춘 작업의 자리를 밀어낸다', () => {
+  let rows = [row('s', 'stalled', 0, 10)];
+  let r = arrange({ targets: ['s'], rowOf: table(rows), cap: 2, pins: [], viewing: null, auto: [] });
+  assert.deepEqual(r.shown, ['s']);
+  // 끝난 작업이 자리에 남아 있고 자리가 다 찼으면, 새로 멈춘 작업이 그 자리를 그 자리에서 받는다
+  rows = [row('s', 'stalled', 0, 10), row('d', 'done', 1, 50), row('s2', 'stalled', 2, 5)];
+  r = arrange({ targets: ['s', 'd', 's2'], rowOf: table(rows), cap: 2, pins: [], viewing: null, auto: ['d', 's'] });
+  assert.deepEqual(r.shown, ['s2', 's']);
+  // 작업 중인 작업은 멈춘 작업 중 오래 안 움직인 쪽의 자리를 받는다
+  rows = [...rows, row('w', 'doing', 3, 60)];
+  r = arrange({ targets: ['s', 's2', 'w'], rowOf: table(rows), cap: 2, pins: [], viewing: null, auto: r.auto });
+  assert.deepEqual(r.shown, ['w', 's']);
+});
+
 test('칸이 줄면 자동 자리 중 가장 덜 중요한 것부터, 그다음 보는 중이 아닌 고정의 뒤쪽부터 빠진다', () => {
   const rows = [row('p1', 'doing', 0, 0), row('p2', 'doing', 1, 1), row('v', 'doing', 2, 2), row('u', 'waiting', 3, 3), row('d', 'doing', 4, 9)];
   const rowOf = table(rows);
@@ -94,12 +128,12 @@ test('칸이 줄면 자동 자리 중 가장 덜 중요한 것부터, 그다음 
   assert.deepEqual(r.shown, ['p1', 'v']);
 });
 
-test('지도 줄: 넘친 고정(고정한 순서) → 응답 대기·막힘 → 작업 중 → 끝·멈춤, 묶음 안은 만든 순', () => {
+test('지도 줄: 넘친 고정(고정한 순서) → 응답 대기·막힘 → 작업 중 → 멈춤 → 끝, 묶음 안은 만든 순', () => {
   const rows = [
     row('d-late', 'doing', 5, 50), row('d-early', 'doing', 1, 99), row('w', 'waiting', 9), row('b', 'blocked', 2),
-    row('done', 'done', 0), row('p2', 'done', 7), row('p1', 'doing', 8),
+    row('done', 'done', 0), row('p2', 'done', 7), row('p1', 'doing', 8), row('s', 'stalled', 3),
   ];
-  assert.deepEqual(stripOrder(rows.map(r => r.work), table(rows), ['p1', 'p2']), ['p1', 'p2', 'b', 'w', 'd-early', 'd-late', 'done']);
+  assert.deepEqual(stripOrder(rows.map(r => r.work), table(rows), ['p1', 'p2']), ['p1', 'p2', 'b', 'w', 'd-early', 'd-late', 's', 'done']);
 });
 
 test('고정: 새로 고정하면 고정 묶음의 맨 뒤, 다시 누르면 푼다', () => {
@@ -122,6 +156,18 @@ test('칸에 놓기: 끝난 작업이 자동 자리를 내줄 때 지도 줄이 
   rows = [...rows, row('G', 'doing', 6, 11)];
   r = layoutLanes({ area, strip, targets: rows.map(x => x.work), rowOf: table(rows), viewing: 'A', auto: r.auto });
   assert.deepEqual([r.grid, r.shown, r.below], [{ cols: 3, rows: 2 }, ['A', 'B', 'C', 'D', 'E', 'G'], []]);
+});
+
+test('칸에 놓기: 멈춘 작업이 자리를 내주면 끝난 작업과 달리 지도 줄로 간다', () => {
+  const area = { width: 1170, height: 560 };
+  const strip = 120;
+  let rows = [row('A', 'doing', 0, 10), row('B', 'doing', 1, 9), row('C', 'doing', 2, 8), row('D', 'doing', 3, 7), row('E', 'doing', 4, 6), row('F', 'stalled', 5, 5)];
+  let r = layoutLanes({ area, strip, targets: rows.map(x => x.work), rowOf: table(rows), viewing: 'A', auto: [] });
+  assert.deepEqual(r.shown, ['A', 'B', 'C', 'D', 'E', 'F']);
+  rows = [...rows, row('G', 'doing', 6, 11)];
+  r = layoutLanes({ area, strip, targets: rows.map(x => x.work), rowOf: table(rows), viewing: 'A', auto: r.auto });
+  // 지도 줄이 생겨 한 줄로 줄어도 F는 빠지지 않고 지도 줄에 있다
+  assert.ok(!r.shown.includes('F') && r.below.includes('F'));
 });
 
 test('칸에 놓기: 넘치면 지도 줄 높이를 빼고 다시 센다. 크게 보기는 고른 작업 하나만 크게 두고 자동 자리를 그대로 둔다', () => {
