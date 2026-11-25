@@ -148,6 +148,8 @@ export type WorkView = {
   between?: Between;
   /** 새 결과: 모두 끝났는데 사람이 아직 보지 않았다 (끝난 뒤에 viewed 기록이 없다) */
   unread?: boolean;
+  /** 보관: 사람이 목록에서 치웠다 (muwi archive). 그 뒤에 작업에 무슨 일이 생기면(다시 시작) 목록으로 돌아온다 */
+  archived?: boolean;
   /**
    * 이 작업에 든 작업 시간 (ms): 노드들이 작업 중이던 시간을 더한 것. 나란히 한 노드는 겹친 시간을 한 번만 센다.
    * 노드의 시간과 같은 기준이라 사람을 기다린 시간과 세션이 닫힌 뒤의 시간은 들어가지 않는다
@@ -415,8 +417,14 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
     unread = Boolean(finishedAt && finishedAt >= resultsFrom && (!viewedAt || viewedAt < finishedAt));
   }
 
+  // 보관: 마지막 보관·꺼내기가 보관이고, 그 뒤로 작업에 일어난 일이 없다 (본 것과 문제 표시는 작업에 일어난 일이 아니다)
+  const shelf = events.filter(e => SHELF.has(e.type)).at(-1);
+  const archived = shelf?.type === 'archive' && !events.some(e => e.at > shelf.at && !SHELF.has(e.type) && !NOTES.has(e.type));
+
   const planEvents = events.filter((e): e is Event & { type: 'plan' } => e.type === 'plan');
-  const lastAt = events.length ? events[events.length - 1].at : plan.updatedAt;
+  // 보관하고 꺼낸 것은 작업이 바뀐 때로 치지 않는다 (끝난 때와 오래된 작업 접기가 그대로다)
+  const real = events.filter(e => !SHELF.has(e.type));
+  const lastAt = real.length ? real[real.length - 1].at : plan.updatedAt;
   return {
     work: plan.work,
     title: plan.title,
@@ -428,6 +436,7 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
     ...(between ? { between } : {}),
     ...(quiet ? { quiet } : {}),
     ...(unread ? { unread: true } : {}),
+    ...(archived ? { archived: true } : {}),
     spentMs: unionMs(spans),
     nodes,
     edges: plan.nodes.flatMap(n => n.after.filter(a => byId.has(a)).map(a => ({ from: a, to: n.id }))),
@@ -509,10 +518,15 @@ export function loadView(dir: string, work: string, env: NodeJS.ProcessEnv = pro
 }
 
 const ORDER: Record<WorkState, number> = { waiting: 0, blocked: 1, doing: 2, stalled: 3, done: 4 };
+/** 보관하고 꺼낸 사건 */
+const SHELF: ReadonlySet<string> = new Set(['archive', 'unarchive']);
+/** 사람이 남긴 표시: 작업에 일어난 일이 아니라서 보관한 작업을 목록으로 되돌리지 않는다 */
+const NOTES: ReadonlySet<string> = new Set(['viewed', 'flag']);
+
 /** 이만큼 지나도록 바뀐 것이 없으면 "지난 작업"으로 접는다. 지우지는 않는다 */
 export const PAST_DAYS = 7;
 
-export type WorkSummary = Pick<WorkView, 'work' | 'title' | 'request' | 'state' | 'between' | 'quiet' | 'unread' | 'updatedAt' | 'counts' | 'spentMs'> & {
+export type WorkSummary = Pick<WorkView, 'work' | 'title' | 'request' | 'state' | 'between' | 'quiet' | 'unread' | 'archived' | 'updatedAt' | 'counts' | 'spentMs'> & {
   /** 이 작업을 한 대화(세션)들: 계획을 낸 대화 먼저, 나머지는 최근에 본 순. 보기가 누를 때 그 대화로 간다 */
   talks?: string[];
   /**
@@ -569,6 +583,7 @@ export function loadBoard(dir: string, env: NodeJS.ProcessEnv = process.env): { 
         ...(v.quiet ? { quiet: v.quiet } : {}),
         talks: talksOf(v),
         ...(v.unread ? { unread: true } : {}),
+        ...(v.archived ? { archived: true } : {}),
         updatedAt: v.updatedAt,
         counts: v.counts,
         spentMs: v.spentMs,
@@ -582,7 +597,8 @@ export function loadBoard(dir: string, env: NodeJS.ProcessEnv = process.env): { 
             };
           }),
         // 아직 안 본 결과는 오래돼도 접지 않는다
-        past: still && !v.unread && now - Date.parse(v.updatedAt) > PAST_DAYS * 86_400_000,
+        // 보관한 작업은 지난 작업으로 접지 않고 보관함에 둔다
+        past: still && !v.unread && !v.archived && now - Date.parse(v.updatedAt) > PAST_DAYS * 86_400_000,
         ...(terminal ? { terminal } : {}),
       });
     } catch (e: any) {

@@ -364,9 +364,13 @@ test('계획은 선으로 이어진 그래프다: muwi add에 자리를 주지 �
   // 계획을 통째로 낼 때도 after를 빼먹은 노드를 알려 준다
   const lost = muwi(['plan', '--work', 'b', JSON.stringify({ title: 't', nodes: [{ id: 'x', title: 'X' }, { id: 'y', title: 'Y', after: ['x'] }, { id: 'z', title: 'Z' }] })]);
   assert.match(lost.out, /다른 노드와 이어지지 않은 노드가 있어요: z/);
-  // 선이 하나도 없는 계획(순서 없이 늘어놓은 할 일)은 그대로 둔다
+  // 선이 하나도 없는 계획도 알려 준다 (처음 계획에서 after를 빼먹은 것. 나란히 할 일일 수도 있어서 막지는 않는다)
   const flat = muwi(['plan', '--work', 'c', JSON.stringify({ title: 't', nodes: [{ id: 'x', title: 'X' }, { id: 'y', title: 'Y' }] })]);
+  assert.equal(flat.code, 0, flat.err);
+  assert.match(flat.out, /노드 사이에 선이 없어요: x, y/);
   assert.doesNotMatch(flat.out, /이어지지 않은 노드/);
+  // 노드가 하나인 계획은 선이 없어도 알리지 않는다
+  assert.doesNotMatch(muwi(['plan', '--work', 'd', JSON.stringify({ title: 't', nodes: [{ id: 'x', title: 'X' }] })]).out, /선이 없어요/);
 });
 
 test('터미널 연결과 보기 없이: 기록과 보기는 되고, 새 세션 명령은 무엇이 필요한지 알린다. 연결과 보기는 setup이 적어 둔 경로에서 불러오고, 불러오지 못해도 훅은 그대로 돈다', () => {
@@ -441,4 +445,41 @@ test('setup.json이 깨져도 명령과 훅은 돈다 (훅은 지침을 준다).
   assert.equal(setup.code, 0, setup.err);
   assert.match(setup.out, /새로 적어요/);
   assert.equal(JSON.parse(fs.readFileSync(setupFile, 'utf8')).root, path.resolve(import.meta.dirname, '..'));
+});
+
+test('보관: 끝났거나 멈춘 작업을 목록에서 치우고, 기록은 그대로 두고, 다시 시작하면 목록으로 돌아온다', () => {
+  const { muwi } = bench();
+  const one = JSON.stringify({ title: '끝낼 작업', nodes: [{ id: 'a', title: 'A' }] });
+  muwi(['plan', '--work', 'fin', '--request', '끝내 줘', one]);
+  muwi(['node', 'a', 'start', '--work', 'fin']);
+  muwi(['node', 'a', 'done', '--work', 'fin']);
+  muwi(['plan', '--work', 'busy', '--request', '하는 중', one]);
+  muwi(['node', 'a', 'start', '--work', 'busy']);
+  const summary = (work: string) => JSON.parse(muwi(['status', '--json']).out).works.find((w: any) => w.work === work);
+  // 하는 중인 작업은 보관하지 않는다. 하나라도 안 되면 아무것도 적지 않는다
+  const refused = muwi(['archive', 'fin', 'busy']);
+  assert.equal(refused.code, 1);
+  assert.match(refused.err, /아직 하는 중이라 보관하지 않아요: busy\(작업 중\)/);
+  assert.equal(summary('fin').archived, undefined);
+  // 보관하면 목록에서 빠진다. 끝난 때는 그대로다 (보관은 작업이 바뀐 것이 아니다)
+  const finishedAt = summary('fin').updatedAt;
+  assert.match(muwi(['archive', 'fin']).out, /fin: 보관했어요/);
+  assert.equal(summary('fin').archived, true);
+  assert.equal(summary('fin').updatedAt, finishedAt);
+  const listed = muwi(['status']).out;
+  assert.doesNotMatch(listed, / fin /);
+  assert.match(listed, /보관한 작업 1개는 뺐어요/);
+  assert.match(muwi(['status', '--all']).out, /보관 +fin /);
+  assert.match(muwi(['show', 'fin']).out, /끝낼 작업/);
+  assert.match(muwi(['archive', 'fin']).out, /fin: 이미 보관했어요/);
+  // 다시 시작하면 목록으로 돌아온다
+  muwi(['node', 'a', 'start', '--work', 'fin']);
+  assert.equal(summary('fin').archived, undefined);
+  muwi(['node', 'a', 'done', '--work', 'fin']);
+  // 끝난 작업을 모두 보관하고, 꺼낸다
+  assert.match(muwi(['archive', '--done']).out, /^fin: 보관했어요/);
+  assert.equal(summary('busy').archived, undefined);
+  assert.match(muwi(['unarchive', 'fin']).out, /fin: 목록으로 꺼냈어요/);
+  assert.equal(summary('fin').archived, undefined);
+  assert.match(muwi(['unarchive', 'fin']).out, /fin: 보관한 작업이 아니에요/);
 });

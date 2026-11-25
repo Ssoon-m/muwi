@@ -85,7 +85,10 @@ export type EventBody =
   | { type: 'flag'; node?: string; text: string }
   | { type: 'session'; what: 'compact' }
   /** 사람이 끝난 작업을 봤다 (그래프 칸이 사람이 고른 그 작업을 보여 줄 때 적는다). 끝난 뒤 처음 볼 때만 적는다 */
-  | { type: 'viewed' };
+  | { type: 'viewed' }
+  /** 사람이 끝났거나 멈춘 작업을 목록에서 치웠다(archive), 다시 꺼냈다(unarchive). 기록은 그대로 둔다 */
+  | { type: 'archive' }
+  | { type: 'unarchive' };
 
 export type Event = EventBody & { at: string; session: string | null };
 
