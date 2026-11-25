@@ -15,7 +15,8 @@ import path from 'node:path';
 import { appendEvent, nowIso, readEvents, readJson, readPlan } from './store.ts';
 import type { PlanNode } from './store.ts';
 import { attach, readSession, recordSkill, touchSession, whereNow, type Session } from './session.ts';
-import { terminals } from './plugins.ts';
+import { terminals, views } from './plugins.ts';
+import { newerKnown, updateLine } from './update.ts';
 import { markNode } from './node.ts';
 import { BLOCK_END, BLOCK_START, instructionText } from './connectors/files.ts';
 import { toolById, toolHome } from './connectors/tools.ts';
@@ -72,6 +73,17 @@ export function guideUpdate(dir: string, key: string, env: NodeJS.ProcessEnv = p
   touchSession(dir, key, { instructions: hash }, env);
   if (!seen) return null;
   return `muwi가 업데이트됐다${versionOf(root) ? ` (${versionOf(root)})` : ''}. 작업 진행 방식이 바뀌었으니 앞에서 받은 muwi 지침 대신 아래 지침을 따른다.\n\n${guide}`;
+}
+
+/**
+ * 새 판이 나왔으면 이 세션에 한 번 알릴 말 (세션이 시작될 때나 사람이 말할 때). 캐시만 보고 훅을 늦추지 않는다 (update.ts).
+ * 같은 판은 세션마다 한 번만 알린다
+ */
+function updateNotice(dir: string, key: string, root: string, env: NodeJS.ProcessEnv): string | undefined {
+  const newer = newerKnown({ current: versionOf(root), root, plugins: [...views().map(v => v.package), terminals().package], env });
+  if (!newer || readSession(dir, key)?.toldUpdate === newer.latest) return undefined;
+  touchSession(dir, key, { toldUpdate: newer.latest }, env);
+  return updateLine(newer);
 }
 
 const versionOf = (root: string) => readJson<{ version?: string }>(path.join(root, 'package.json'))?.version ?? '';
@@ -184,6 +196,11 @@ export type Happened = { tool: Session['tool']; session: string | null; agent?: 
 export type Reply = {
   /** AI에게 보여 줄 말 (지침, 맡은 노드) */
   say?: string;
+  /**
+   * 사람에게 보여 줄 말 (새 판 알림). 도구 화면에 바로 띄울 수 있는 커넥터(can.tell)는 그렇게 내고,
+   * 아니면 AI가 사람에게 전하게 say에 붙는다 (hook.ts)
+   */
+  notice?: string;
 };
 
 export function handleEvent(h: Happened, dir: string, env: NodeJS.ProcessEnv = process.env, root: string = ROOT): Reply {
@@ -224,7 +241,8 @@ export function handleEvent(h: Happened, dir: string, env: NodeJS.ProcessEnv = p
       appendEvent(dir, session.work, { type: 'session', what: 'compact' }, key);
     }
     const text = [inFile ? '' : guide, adoptSpawn(dir, key, env)].filter(Boolean).join('\n\n');
-    return text ? { say: text } : {};
+    const notice = agent ? undefined : updateNotice(dir, key, root, env);
+    return { ...(text ? { say: text } : {}), ...(notice ? { notice } : {}) };
   }
 
   if (h.kind === 'prompt' || h.kind === 'turn-end') {
@@ -233,7 +251,9 @@ export function handleEvent(h: Happened, dir: string, env: NodeJS.ProcessEnv = p
     // 서브에이전트가 끝난 것은 세션의 차례가 아니다
     if (agent) return {};
     touchSession(dir, key, { ...patch, turn: h.kind === 'prompt' ? 'working' : 'done' }, env);
-    return {};
+    // 세션 중에 새 판이 나왔으면 사람이 말할 때 한 번 알린다
+    const notice = h.kind === 'prompt' ? updateNotice(dir, key, root, env) : undefined;
+    return notice ? { notice } : {};
   }
 
   if (h.kind === 'session-end') {

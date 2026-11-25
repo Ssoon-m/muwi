@@ -33,6 +33,8 @@ export type Session = {
   hooked?: string;
   /** 이 세션에 마지막으로 넣은 muwi 지침의 해시. muwi가 업데이트돼 지침이 바뀌면 다시 넣는다 */
   instructions?: string;
+  /** 이 세션에 알린 새 판 (같은 판은 세션마다 한 번만 알린다) */
+  toldUpdate?: string;
   /**
    * 서브에이전트가 곧 시작할 노드. 명령만 봐서는 누가 실행하는지 알 수 없어서(세션 id가 같다)
    * 훅이 명령을 보고 적어 두고, muwi node … start가 읽어서 그 서브에이전트가 시작한 것으로 적는다
