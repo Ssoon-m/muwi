@@ -46,6 +46,31 @@ test('관제탑: 보는 중이 어느 작업으로 가든(다른 탭·계획 없
   }
 });
 
+test('상태: 값이 없거나 처음 보는 값이면 작업 중으로 보고 늘 나온다. 지난 작업으로 접힌 끝나지 않은 작업(상태를 모른 채 오래된 작업)은 나오되 멈춤과 같은 급이다', () => {
+  const rows = [
+    { work: 'none' } as unknown as Row, row('odd', 'later'),
+    row('stale', 'doing', 0, 0, { past: true }), row('s', 'stalled', 1, 100), row('d', 'doing', 2, 1),
+  ];
+  assert.deepEqual(laneTargets(rows, {}), ['none', 'odd', 'stale', 's', 'd']);
+  const rowOf = table(rows);
+  // 자리가 하나면 작업 중이 오래된 작업보다 앞선다
+  let r = arrange({ targets: ['stale', 'd'], rowOf, cap: 1, pins: [], viewing: null, auto: [] });
+  assert.deepEqual(r.shown, ['d']);
+  // 오래된 작업과 멈춤은 같은 급이라 최근에 움직인 멈춤이 자리를 받는다
+  r = arrange({ targets: ['stale', 's'], rowOf, cap: 1, pins: [], viewing: null, auto: [] });
+  assert.deepEqual(r.shown, ['s']);
+  // 작은 지도에서도 멈춤 묶음에 놓인다 (작업 중 뒤)
+  assert.deepEqual(stripOrder(['stale', 'd', 's'], rowOf), ['d', 'stale', 's']);
+});
+
+test('크게 보기: 고른 작업 하나만 크게 두어도 끝나지 않은 작업은 모두 작은 지도에 있다', () => {
+  const rows = [row('a', 'doing', 0), row('b', 'waiting', 1), row('s', 'stalled', 2), row('d', 'done', 3)];
+  const targets = laneTargets(rows, { viewing: 'd' });
+  const r = layoutLanes({ area: { width: 1200, height: 600 }, strip: 120, targets, rowOf: table(rows), viewing: 'd', auto: [], focus: true, lead: 'a' });
+  assert.deepEqual(r.shown, ['a']);
+  assert.deepEqual([...r.below].sort(), ['b', 'd', 's']);
+});
+
 test('자리 수: 너비로 한 줄의 수, 높이로 줄 수. 지도 줄 높이를 빼고 센다. 아무리 좁아도 하나', () => {
   assert.deepEqual(laneGrid({ width: 1200, height: 600 }), { cols: 3, rows: 2 });
   assert.deepEqual(laneGrid({ width: 1200, height: 600 }, 112), { cols: 3, rows: 1 });

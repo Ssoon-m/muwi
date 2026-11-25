@@ -2,10 +2,10 @@
 // AI가 적은 작업 계획과 진행 기록을 `muwi board`로 읽어 그린다. 기록도 세션도 바꾸지 않는다.
 //   작업 목록: 급한 순서로 묶는다 (응답 대기가 위, 끝났는데 아직 안 본 작업은 "새 결과"). 계획 없이 일하는 세션도 같이 보여서 Herdr의 Agents 칸을 대신한다
 //   그래프: 고른 작업의 계획. 카드와 선의 좌표는 `muwi board`가 ELK로 계산해서 준다. 기록이 바뀌면 전체를 다시 그린다.
-//     지금 볼 작업이 여럿이면(고정한 작업, 보는 중, 진행 중인 작업) 칸을 나눠 큰 그래프 여럿과 맨 아래 지도 줄로 그린다 (자리 규칙은 lanes.js)
+//     관제탑: 끝나지 않은 작업·고정한 작업·보는 중을 탭과 상관없이 늘 큰 그래프 여럿과 맨 아래 지도 줄로 그린다 (자리 규칙은 lanes.js)
 //   기록: 고른 노드의 기록 (맡은 세션, 걸린 시간, 읽은 skill, 문제 표시) 또는 작업의 기록 (계획이 바뀐 이유)
 // 끌어서 옮기고, cmd/ctrl+스크롤로 확대한다. 지금 일어나는 곳(작업 중, 응답 대기)이 보이게 따라간다.
-// 키보드가 있는 터미널이 바뀌면 그 터미널의 세션이 하는 작업으로 바꿔 보여 준다.
+// 키보드가 있는 터미널이 바뀌면 그 터미널의 세션이 하는 작업이 보는 중이 된다 (나오는 작업은 그대로, 자리 순서만 바뀐다).
 import { View, div, svg, image, PathBuilder } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { LANE, justShelved, laneTargets, layoutLanes, togglePin } from "./lanes.js";
@@ -878,7 +878,7 @@ export default class Muwi extends View {
 
     const banner = this.banner(t, variant);
     return root.bg(t.canvas)
-      .child(this.head(t, view, works, now, plan ? this.modeControl(t) : null))
+      .child(this.head(t, view, works, now, plan?.targets.length ? this.modeControl(t) : null))
       .when(Boolean(banner), (el) => el.child(banner))
       .when(Boolean(this.error), (el) => el.child(this.problem(t)))
       .when(!this.error && this.data !== null && works.length === 0, (el) => el.child(this.empty(t)))
@@ -935,8 +935,12 @@ export default class Muwi extends View {
    * 큰 그래프에 못 들어간 작업은 지도 줄에 (lanes.js의 stripOrder)
    */
   lanesBox(t, plan, links, live, now, works) {
-    // 나올 작업이 없다: 계획 없는 세션에 있으면 그 안내를, 아니면 끝나지 않은 작업이 없다고 알린다
-    if (plan.targets.length === 0) return this.planless ? this.planlessNote(t) : this.idleNote(t);
+    // 나올 작업이 없다: 계획 없는 세션에 있으면 그 안내를, 아니면 나올 작업이 없다고 알린다.
+    // 자동 자리도 비운다 (모두 보관했다가 되돌려도 끝난 작업이 큰 그래프로 돌아오지 않는다. 다른 작업이 있을 때와 같다)
+    if (plan.targets.length === 0) {
+      this.autoSlots = [];
+      return this.planless ? this.planlessNote(t) : this.idleNote(t);
+    }
     const c = this.colors(t);
     const rowOf = (id) => works.find((w) => w.work === id);
     const area = this.lanesPx ? unzoom(this.lanesPx) : this.size;
@@ -1289,8 +1293,8 @@ export default class Muwi extends View {
   /** 그래프 칸에 나올 작업이 없을 때 (끝나지 않은 작업도, 고정한 작업도, 보는 중도 없다) */
   idleNote(t) {
     return v_flex().flex_1().min_h(0).items_center().justify_center().gap(6).p(16)
-      .child(div().text_size(13).text_color(t.muted).child("끝나지 않은 작업이 없어요"))
-      .child(div().text_size(11).text_color(t.dim).child("작업이 시작되면 어느 탭에서든 여기에 그려져요. 끝난 작업은 목록에서 눌러 볼 수 있어요."));
+      .child(div().text_size(13).text_color(t.muted).child("그래프 칸에 나올 작업이 없어요"))
+      .child(div().text_size(11).text_color(t.dim).child("끝나지 않은 작업이 생기면 어느 탭에서든 여기에 그려져요. 끝난 작업과 보관한 작업은 목록에서 눌러 볼 수 있어요."));
   }
 
   empty(t) {

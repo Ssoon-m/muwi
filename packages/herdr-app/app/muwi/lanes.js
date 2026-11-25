@@ -9,14 +9,16 @@ export const LANE = { w: 380, h: 260, gap: 6, pad: 6 };
 
 /** 자리를 다툴 때의 등급: 낮을수록 급하다. 끝은 이미 자리에 있던 것만 남는다 */
 const GRADE = { waiting: 0, blocked: 0, doing: 1, stalled: 2, done: 3 };
-const grade = (row) => GRADE[row?.state] ?? 1;
+// 상태를 모르면(값이 없거나 처음 보는 값) 목록처럼 작업 중으로 본다.
+// 지난 작업으로 접힌 끝나지 않은 작업(세션 상태를 모른 채 오래 소식이 없는 작업 등)은 멈춤과 같은 급이다
+const grade = (row) => (row?.past && row.state !== "done" ? GRADE.stalled : GRADE[row?.state] ?? 1);
 const time = (iso) => Date.parse(iso ?? "") || 0;
 
 /** 끝나지 않은 작업인가 (응답 대기·막힘·작업 중·멈춤). 그래프 칸에 늘 나온다 */
 export const unfinished = (row) => grade(row) < GRADE.done;
 
 /**
- * 그래프 칸에 나올 작업: 끝나지 않은 작업(지난 작업으로 접힌 멈춤도), 고정한 작업, 보는 중, 고른 작업, 자동 자리에 이미 있던 작업.
+ * 그래프 칸에 나올 작업: 끝나지 않은 작업(지난 작업으로 접힌 것도), 고정한 작업, 보는 중, 고른 작업, 자동 자리에 이미 있던 작업.
  * 보관한 작업은 고정돼 있어도 뺀다. 다만 보는 중이면(보관함에서 일부러 눌렀거나 그 작업의 터미널로 갔으면) 넣는다.
  * 그래서 끝나지 않은 작업은 보는 중이 어디든(어느 탭이든) 늘 들어 있다. 순서는 목록(rows)과 같다
  */
