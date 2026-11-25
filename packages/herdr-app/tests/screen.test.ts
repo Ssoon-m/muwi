@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { layoutPreview } from '../src/preview.ts';
-import { moveOffRight } from '../src/install.ts';
+import { moveOffRight, setupHerdr } from '../src/install.ts';
 import { PLACE_VERSION, ScreenError, applyLayout, ensurePreview, hasMuwi, placeMuwi, readLayoutRecord, removeLayout, screenState, treeHash, type LayoutNode } from '../src/screen.ts';
 
 /** @muwi/herdr-app의 muwi 명령: Herdr 화면을 붙인 muwi */
@@ -334,6 +334,39 @@ test('0.10까지의 오른쪽 자리: muwi layout과 muwi setup이 그래프 칸
   edited.note = '손으로 고침';
   fs.writeFileSync(file, JSON.stringify(edited));
   assert.match(moveOffRight(h4.records, h4.env)!, /오른쪽 자리는 없어졌어요\. 그래프 자리를 바꾸려고 했지만[\s\S]*손으로 고친 것 같아/);
+  // 앱이 닫혀 있으면 건드리지 않고 다음에 옮긴다고 알린다
+  const h5 = fakeApp();
+  onRight(h5);
+  h5.set({ up: false });
+  assert.match(moveOffRight(h5.records, h5.env)!, /muwi layout을 실행하면 터미널 아래로 옮겨요/);
+  assert.equal(find(h5.layout('muwi')!, 'muwi-split')!.type, 'row');
+});
+
+test('0.10까지의 오른쪽 자리: Herdr가 업데이트돼 다시 만들 레이아웃이어도 아래로 옮기고 기본 높이로 맞춘다', () => {
+  const h = fakeApp();
+  onRight(h);
+  const file = path.join(h.records, 'layout.json');
+  const old = JSON.parse(fs.readFileSync(file, 'utf8'));
+  delete old.shape;
+  fs.writeFileSync(file, JSON.stringify(old));
+  assert.equal(screenState(h.records, h.env).outdated, true);
+  assert.match(moveOffRight(h.records, h.env)!, /터미널 아래로 옮겼어요/);
+  assert.equal(find(h.layout('muwi')!, 'muwi-split')!.type, 'column');
+  assert.deepEqual(h.state().resized, { id: 'muwi-graph', px: 300 });
+  assert.equal(readLayoutRecord(h.records)!.graphAt, 'bottom');
+});
+
+test('muwi setup: 0.10의 오른쪽 자리는 사람이 setup을 실행할 때 옮긴다 (업데이트 뒤 훅이 다시 맞출 때는 옮기지 않는다)', () => {
+  const h = fakeApp();
+  onRight(h);
+  const quiet: string[] = [];
+  setupHerdr({ dir: h.records, env: h.env, log: l => quiet.push(l) });
+  assert.equal(find(h.layout('muwi')!, 'muwi-split')!.type, 'row');
+  assert.doesNotMatch(quiet.join('\n'), /오른쪽 자리/);
+  const lines: string[] = [];
+  setupHerdr({ dir: h.records, env: h.env, log: l => lines.push(l), report: true });
+  assert.match(lines.join('\n'), /오른쪽 자리는 없어져서 터미널 아래로 옮겼어요/);
+  assert.equal(find(h.layout('muwi')!, 'muwi-split')!.type, 'column');
 });
 
 test('레이아웃 그림: 설정 화면에 보일 그림을 그래프 자리마다 다르게 그린다', () => {

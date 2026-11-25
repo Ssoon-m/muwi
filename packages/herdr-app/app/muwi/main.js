@@ -292,8 +292,10 @@ export default class Muwi extends View {
     /** 보는 방식(split 나눠 보기, focus 크게 보기)과 지도 줄을 접었는가. 칸마다 기억한다 */
     this.laneMode = remembered("laneMode") === "focus" ? "focus" : "split";
     this.stripFolded = remembered("stripFolded") === "1";
-    /** 머리줄에 둘 보기 바꾸기 (여러 작업을 나눠 그릴 때만) */
-    this.laneToggle = null;
+    /** 여러 작업을 나눠 그리는 중인가 (마지막으로 그린 것) */
+    this.lanesOn = false;
+    /** 마지막으로 그릴 때 보는 중이던 작업. 바뀌면 큰 그래프를 눌러 고른 것을 푼다 */
+    this.lastWant = undefined;
     this.stale = false;
     this.showPast = false;
     /** 보관한 작업 묶음을 펼쳤는가, 마우스가 올라간 작업 줄 (보관 버튼을 보여 준다), 보관하거나 꺼내는 중 */
@@ -340,6 +342,8 @@ export default class Muwi extends View {
     this.resizing = null;
     if (checking()) {
       this.data = SAMPLE;
+      // 나눠 그리는 코드를 점검할 때 큰 그래프와 작은 지도에 그릴 견본 그래프
+      for (const w of SAMPLE.works) this.views.set(w.work, { ...SAMPLE.selected, work: w.work, title: w.title, state: w.state });
       this.node = "impl";
       this.tab = "node";
       // herdr-app check는 견본으로 보관함과 알림 줄까지 그려 본다
@@ -430,8 +434,8 @@ export default class Muwi extends View {
 
   /** 큰 그래프를 눌렀다: 자리는 그대로 두고 기록 칸과 머리줄만 그 작업으로 */
   pick(work, cx) {
-    if (work === (this.picked ?? this.wanted())) return;
-    this.picked = work === this.wanted() ? null : work;
+    if (work === (this.picked ?? this.viewingNow())) return;
+    this.picked = work === this.viewingNow() ? null : work;
     this.pickedAt = shared(PICKED) ?? 0;
     this.node = null;
     this.tab = "work";
@@ -448,9 +452,18 @@ export default class Muwi extends View {
     return `${home()}/.muwi`;
   }
 
-  /** 지금 고른 작업: 고정된 작업 → 칸끼리 나눠 쓰는 선택 → 이 칸의 선택 */
+  /**
+   * 보는 중인 작업: 작업을 정해 연 칸 → 칸끼리 나눠 쓰는 선택 → 이 칸의 선택.
+   * 나눠 쓰는 선택을 일부러 비웠으면(보는 중인 작업을 보관함) 칸마다 예전 선택으로 돌아가지 않고 비운다
+   */
   wanted() {
-    return this.pinned() ?? shared(SELECTED) ?? this.selected ?? null;
+    const s = shared(SELECTED);
+    return this.pinned() ?? (s === null ? null : s ?? this.selected ?? null);
+  }
+
+  /** 지금 보는 중인 작업. 키보드가 있는 세션이 계획 없이 일하면 없다 */
+  viewingNow() {
+    return this.planless ? null : this.wanted();
   }
 
   watch(cx) {
@@ -511,6 +524,7 @@ export default class Muwi extends View {
         }
         if (!this.pinned() && shelved(want)) {
           this.selected = null;
+          this.picked = null;
           setShared(SELECTED, null);
           this.again = true;
         }
@@ -674,8 +688,9 @@ export default class Muwi extends View {
     if (known) {
       const showing = this.data?.selected?.work;
       if (showing !== work) {
-        // 다른 작업으로 간다: 고른 노드는 그 작업의 것이 아니다 (같은 id의 노드가 있어도 다른 노드다)
+        // 다른 작업으로 간다: 고른 노드는 그 작업의 것이 아니다 (같은 id의 노드가 있어도 다른 노드다). 지금 일어나는 곳으로 다시 맞춘다
         this.node = null;
+        this.laneOf(work).focusKey = null;
         this.tab = "work";
         // 전에 본 작업이면 기억해 둔 그래프를 바로 보여 준다. 새로 읽는 것은 타이머가 곧바로 한다
         this.showCached(work);
@@ -754,6 +769,10 @@ export default class Muwi extends View {
     let loaded = this.data?.selected ?? null;
     // 다른 칸에서 작업을 바꿨다: 기억해 둔 그 작업의 그래프를 바로 보여 주고, 새로 읽는 것은 타이머가 곧바로 한다.
     // 키보드를 따라 다른 작업으로 가는 중이면(followTo) 그 작업이 맞다. 공유 선택은 타이머가 곧 바꾼다
+    // 보는 중이 바뀌었거나(목록·다른 칸·보관으로) 다른 칸에서 작업을 골랐으면 이 칸에서 큰 그래프를 눌러 고른 것은 풀린다.
+    // 무엇을 읽을지 정하기 전에 푼다 (그래야 바뀐 작업을 바로 읽는다)
+    if (this.picked && (want !== this.lastWant || (shared(PICKED) ?? 0) !== this.pickedAt)) this.picked = null;
+    this.lastWant = want;
     const target = this.followTo ?? this.picked ?? want;
     if (!checking() && target && loaded && loaded.work !== target && !this.loading) {
       this.stale = true;
@@ -764,18 +783,18 @@ export default class Muwi extends View {
     if (this.planless && (shared(PICKED) ?? 0) !== this.planlessSince) this.planless = false;
     // 키보드가 있는 세션이 계획 없이 일한다: 다른 작업의 그래프를 띄우면 그 세션이 그 일을 하는 것처럼 보이므로 비워서 보여 준다.
     // 목록에서 작업을 고르면 다시 그 작업을 보여 준다
-    // 다른 칸(사이드바 목록, 다른 그래프 칸)에서 작업을 골랐으면 이 칸에서 큰 그래프를 눌러 고른 것은 풀린다
-    if (this.picked && (shared(PICKED) ?? 0) !== this.pickedAt) this.picked = null;
     // 기록 칸과 머리줄에 나올 작업: 큰 그래프를 눌러 고른 작업, 없으면 보는 중 (읽어 둔 그래프).
     // 키보드가 있는 세션이 계획 없이 일하면 보는 중이 없다: 다른 작업을 띄우면 그 세션이 그 일을 하는 것처럼 보이므로
+    // 지금 볼 작업이 여럿이면 칸을 나눠 그린다 (보는 중, 고정, 진행 중인 작업)
+    const plan = this.lanePlan(works, want, variant);
+    this.lanesOn = Boolean(plan);
     const pickedView = this.picked ? this.views.get(this.picked) : null;
-    const main = pickedView ?? (this.planless ? null : loaded);
+    // 나눠 그릴 때 보는 중이 없으면(아직 아무도 고르지 않음, 보는 중을 보관함) 첫 작업을 고른 것처럼 그리지 않는다
+    const main = pickedView ?? (this.planless || (plan && !plan.viewing) ? null : loaded);
     const view = main ? this.shownView(main, links, live) : null;
     this.mainWork = view?.work ?? null;
     // 목록에서 고른 표시: 보는 중인 작업
     const listed = this.planless ? null : (want ?? loaded?.work ?? null);
-    // 지금 볼 작업이 여럿이면 칸을 나눠 그린다 (보는 중, 고정, 진행 중인 작업)
-    const plan = this.lanePlan(works, want, variant);
     // 점검(herdr-app check)에서는 화면은 그래프 하나 그대로 두고, 나눠 그리는 코드(큰 그래프·지도 줄·고정 단추)도 한 번 만들어 본다. 그리지는 않는다
     if (checking() && view && variant !== "list") {
       // 고정 셋에 자리는 둘이라 넘친 고정이 지도 줄로 간다 (지도 줄과 작은 지도까지 만든다)
@@ -783,7 +802,6 @@ export default class Muwi extends View {
       this.lanesBox(t, { targets: sample, viewing: view.work, pins: sample.filter((w) => w !== view.work).slice(0, 3) }, links, live, now, works);
       this.modeControl(t);
     }
-    this.laneToggle = plan ? this.modeControl(t) : null;
     const root = v_flex().id("root").size_full().min_h(0).text_color(t.foreground).text_size(12)
       .on_size_change((size, cx) => {
         if (Math.abs(size.width - this.sizePx.width) > 1 || Math.abs(size.height - this.sizePx.height) > 1) {
@@ -850,7 +868,7 @@ export default class Muwi extends View {
 
     const banner = this.banner(t, variant);
     return root.bg(t.canvas)
-      .child(this.head(t, view, works, now))
+      .child(this.head(t, view, works, now, plan ? this.modeControl(t) : null))
       .when(Boolean(banner), (el) => el.child(banner))
       .when(Boolean(this.error), (el) => el.child(this.problem(t)))
       .when(!this.error && this.data !== null && works.length === 0, (el) => el.child(this.empty(t)))
@@ -867,18 +885,13 @@ export default class Muwi extends View {
       this.laneTargets = [];
       return null;
     }
-    // 보관한 작업을 목록에서 일부러 눌러 보는 중이면 그 그래프 하나만 (그래프 칸에 나누는 대상이 아니다)
     const wanted = want ? works.find((w) => w.work === want) : null;
-    if (wanted?.archived && !this.planless) {
-      this.laneTargets = [];
-      return null;
-    }
     const pins = this.pinList();
     const viewing = !this.planless && wanted ? want : null;
     const targets = laneTargets(works, { pins, viewing, picked: this.picked, auto: this.autoSlots });
     this.laneTargets = targets;
     // 그래프를 아직 읽지 않은 작업이 있으면 곧 읽는다 (읽어 달라고 했는데 못 읽은 작업은 다시 조르지 않는다)
-    if (targets.some((w) => !this.views.has(w) && !this.asked.has(w))) this.stale = true;
+    if (!this.error && targets.some((w) => !this.views.has(w) && !this.asked.has(w))) this.stale = true;
     // 계획 없는 세션에 있으면 볼 작업이 하나여도 큰 그래프로 그린다: 그래프 하나로 그리면 그 세션이 그 일을 하는 것처럼 보인다
     return targets.length > 1 || (this.planless && targets.length === 1) ? { targets, viewing, pins } : null;
   }
@@ -1053,7 +1066,7 @@ export default class Muwi extends View {
       .text_size(10.5).font_medium().text_color(color).child(text);
   }
 
-  head(t, view, works, now) {
+  head(t, view, works, now, toggle = null) {
     const c = this.colors(t);
     // 이 작업을 한 대화가 열려 있는가. 열려 있으면 목록에서 누를 때 그리로 가고, 닫혔으면 새 대화로 이어 갈 수 있다
     const talk = view ? this.talkOf(view, this.links()) : null;
@@ -1085,7 +1098,7 @@ export default class Muwi extends View {
             .child("새 대화로 이어 가기 ›")))))
       .when(Boolean(view) && this.size.width >= 860, (el) => el.child(h_flex().flex_none().gap(12)
         .child(legend("작업 중", c.doing)).child(legend("응답 대기", c.waiting)).child(legend("막힘", c.blocked)).child(legend("끝", c.done))))
-      .when(Boolean(this.laneToggle), (el) => el.child(this.laneToggle))
+      .when(Boolean(toggle), (el) => el.child(toggle))
       .when(Boolean(place), (el) => el.child(place));
   }
 
@@ -1864,7 +1877,8 @@ export default class Muwi extends View {
 
   canvas(t, view, now, withControls = true) {
     const lane = this.laneOf(view.work);
-    const size = laneSize(lane);
+    // 그래프 하나일 때 처음 그리는 작업은 같은 자리에서 잰 크기로 바로 맞춘다 (다음 프레임까지 왼쪽 위에 붙어 나오지 않게)
+    const size = laneSize(lane) ?? (this.lanesOn ? null : this.canvasSize);
     const L = view.layout;
     const c = this.colors(t);
     const byId = Object.fromEntries(view.nodes.map((n) => [n.id, n]));
@@ -1981,7 +1995,9 @@ export default class Muwi extends View {
     return div().id(`canvas-${view.work}`).relative().flex_1().min_h(0).overflow_hidden().bg(t.canvas)
       .on_size_change((px, cx) => {
         const old = lane.px;
-        if (!old || Math.abs(old.width - px.width) > 1 || Math.abs(old.height - px.height) > 1) {
+        const differs = (a) => !a || Math.abs(a.width - px.width) > 1 || Math.abs(a.height - px.height) > 1;
+        // 이 그래프의 크기가 그대로여도 배치에 넘긴 크기와 다르면 맞춘다 (나눠 그리다 그래프 하나로 돌아왔을 때)
+        if (differs(old) || differs(this.fitPx)) {
           lane.px = { width: px.width, height: px.height };
           // 배치에 넘기는 크기: 그래프 하나를 그리는 곳 (나눠 그린 큰 그래프는 크기가 같다)
           this.fitPx = lane.px;

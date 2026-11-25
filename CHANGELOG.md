@@ -19,7 +19,7 @@
 
 #### 뺌
 
-- 그래프 칸의 오른쪽 자리를 없앴습니다 (`muwi layout --graph right`, `muwi open --right`, 그래프 칸의 `오른쪽` 버튼). 여러 작업을 가로로 나눠 그리고 작은 지도를 가로로 깔아서 너비가 필요합니다. 오른쪽에 둔 그래프 칸은 `muwi setup`(업데이트 포함)이나 `muwi layout` 때 터미널 아래로 옮깁니다.
+- 그래프 칸의 오른쪽 자리를 없앴습니다 (`muwi layout --graph right`, `muwi open --right`, 그래프 칸의 `오른쪽` 버튼). 여러 작업을 가로로 나눠 그리고 작은 지도를 가로로 깔아서 너비가 필요합니다. 오른쪽에 둔 그래프 칸은 Herdr 앱에서 그 레이아웃을 보는 중에 `muwi setup`·`muwi update`나 `muwi layout`을 실행하면 터미널 아래로 옮깁니다 (손으로 고친 레이아웃은 옮기지 않고 까닭을 알립니다).
 
 ### @muwi/core
 

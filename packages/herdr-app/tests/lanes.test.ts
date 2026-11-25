@@ -22,6 +22,8 @@ test('대상: 진행 중인 작업과 고정·보는 중·고른 작업·자동 
     ['wait', 'doing', 'pinned-done', 'seen', 'kept']);
   // 큰 그래프를 눌러 고른 작업도 끝났어도 남는다
   assert.deepEqual(laneTargets(rows, { picked: 'done' }), ['wait', 'doing', 'done']);
+  // 보관한 작업도 보는 중이면 넣는다 (보관함에서 일부러 눌렀거나 그 작업의 터미널로 갔다)
+  assert.deepEqual(laneTargets(rows, { viewing: 'archived' }), ['wait', 'doing', 'archived']);
 });
 
 test('자리 수: 너비로 한 줄의 수, 높이로 줄 수. 지도 줄 높이를 빼고 센다. 아무리 좁아도 하나', () => {
@@ -133,4 +135,24 @@ test('칸에 놓기: 넘치면 지도 줄 높이를 빼고 다시 센다. 크게
   assert.deepEqual([folded.grid, folded.shown], [{ cols: 3, rows: 2 }, ['A', 'B', 'C', 'D', 'E', 'F']]);
   const focus = layoutLanes({ area, strip: 120, targets, rowOf: table(rows), viewing: 'A', auto: split.auto, focus: true, lead: 'C' });
   assert.deepEqual([focus.shown, focus.auto, focus.below], [['C'], split.auto, ['A', 'B', 'D', 'E', 'F', 'G']]);
+});
+
+test('큰 그래프: 보는 중이 자동 자리에 있던 작업으로 바뀌면 그 작업이 앞으로 오고, 전에 보던 작업은 남은 자리로 간다', () => {
+  const rows = ['V1', 'A', 'V2', 'B'].map((id, i) => row(id, 'doing', i, 10 - i));
+  const rowOf = table(rows);
+  const targets = rows.map(r => r.work);
+  let r = arrange({ targets, rowOf, cap: 4, pins: [], viewing: 'V1', auto: [] });
+  assert.deepEqual(r.shown, ['V1', 'A', 'V2', 'B']);
+  r = arrange({ targets, rowOf, cap: 4, pins: [], viewing: 'V2', auto: r.auto });
+  assert.deepEqual(r.shown, ['V2', 'A', 'B', 'V1']);
+});
+
+test('고정을 풀면 고정 묶음에서 빠져 남은 자리 규칙을 따른다 (자리가 있으면 크게 남는다)', () => {
+  const rows = ['P', 'V', 'A'].map((id, i) => row(id, 'doing', i, 10 - i));
+  const rowOf = table(rows);
+  const targets = rows.map(r => r.work);
+  let r = arrange({ targets, rowOf, cap: 3, pins: ['P'], viewing: 'V', auto: [] });
+  assert.deepEqual(r.shown, ['P', 'V', 'A']);
+  r = arrange({ targets, rowOf, cap: 3, pins: [], viewing: 'V', auto: r.auto });
+  assert.deepEqual(r.shown, ['V', 'A', 'P']);
 });

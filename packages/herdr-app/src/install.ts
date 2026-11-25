@@ -49,8 +49,8 @@ export function setupHerdr(o: { dir: string; env: NodeJS.ProcessEnv; log: (line:
     // 0.10까지의 오른쪽 자리를 먼저 아래로 옮긴다 (옮기면 그림도 새 자리대로 그린다)
     const moved = moveOffRight(o.dir, o.env);
     if (moved) o.log(moved);
-    if (ensurePreview(o.dir)) o.log('Herdr 설정 화면(Look > Layout)의 muwi 레이아웃 그림을 새로 그렸어요.');
-    const screen = screenState(o.dir);
+    if (ensurePreview(o.dir, o.env)) o.log('Herdr 설정 화면(Look > Layout)의 muwi 레이아웃 그림을 새로 그렸어요.');
+    const screen = screenState(o.dir, o.env);
     // 안내를 꺼 뒀으면 화면이 이미 muwi일 때만 알린다
     if (config(o.dir).layout || screen.muwi) o.log(describeScreen(screen));
   }

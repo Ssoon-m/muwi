@@ -16,11 +16,12 @@ export const going = (row) => grade(row) < 2;
 
 /**
  * 그래프 칸에 나올 작업: 진행 중인 작업, 고정한 작업, 보는 중, 고른 작업, 자동 자리에 이미 있던 작업.
- * 보관한 작업은 고정돼 있어도 빼고, 지난 작업은 고정·보는 중·고른 작업일 때만 넣는다. 순서는 목록(rows)과 같다
+ * 보관한 작업은 고정돼 있어도 뺀다. 다만 보는 중이면(보관함에서 일부러 눌렀거나 그 작업의 터미널로 갔으면) 넣는다.
+ * 지난 작업은 고정·보는 중·고른 작업일 때만 넣는다. 순서는 목록(rows)과 같다
  */
 export function laneTargets(rows, o) {
   const keep = new Set([...(o.pins ?? []), ...(o.auto ?? []), o.viewing, o.picked].filter(Boolean));
-  return rows.filter((r) => !r.archived && (keep.has(r.work) || (going(r) && !r.past))).map((r) => r.work);
+  return rows.filter((r) => r.work === o.viewing || (!r.archived && (keep.has(r.work) || (going(r) && !r.past)))).map((r) => r.work);
 }
 
 /** 칸 크기로 큰 그래프 자리 수: 한 줄의 수(cols) × 줄 수(rows). strip: 지도 줄이 차지할 높이 */
