@@ -37,7 +37,7 @@ export function fromSubagent(dir: string, work: string, id: string, key: string 
 /**
  * 앞 노드가 끝나기 전에 시작한 노드에 붙일 말 (막지는 않는다).
  * 앞 노드를 하고 있으면 그래프는 계획대로 그 노드 다음에 그리고 "순서 앞당김"으로 보이므로, 같이 하는 거면 계획에서 나란히 두라고 알린다
- * (나란히 = 안 끝난 앞 노드 대신 그 노드의 앞 노드들 뒤). 앞 노드를 아직 하고 있지 않으면(시작 전·응답 대기·막힘) 그래프는 이미
+ * (나란히 = 안 끝난 앞 노드 대신 그 노드의 앞 노드들 뒤). 앞 노드를 아직 하고 있지 않으면(시작 전·잠시 멈춤·응답 대기·막힘) 그래프는 이미
  * 그 노드를 건너뛰어 실제로 한 순서대로 그리므로(flow.ts) 계획을 고칠 필요는 없다
  */
 export function earlyStart(nodes: PlanNode[], id: string): string | null {
@@ -57,7 +57,7 @@ export function earlyStart(nodes: PlanNode[], id: string): string | null {
       `같이 하는 거면 계획에서 나란히 두세요: muwi show로 지금 계획을 보고 ${id}의 after를 ${side.length ? `[${side.map(s => `"${s}"`).join(', ')}]` : '빈 목록(맨 앞)'}으로 바꿔 muwi plan --why "<같이 하는 이유>" '<계획 JSON>'으로 다시 적어요.`,
     );
   }
-  if (idle.length) lines.push(`앞 노드 ${idle.join(', ')}를 아직 하고 있지 않아요(시작 전·응답 대기·막힘). 그래프에는 그 노드를 건너뛰어 실제로 한 순서대로 그려져요.`);
+  if (idle.length) lines.push(`앞 노드 ${idle.join(', ')}를 아직 하고 있지 않아요(시작 전·잠시 멈춤·응답 대기·막힘). 그래프에는 그 노드를 건너뛰어 실제로 한 순서대로 그려져요.`);
   lines.push(`순서대로 하려던 거면 muwi node ${id} pause로 멈추고 ${open.join(', ')}를 먼저 끝내요.`);
   return lines.join('\n');
 }

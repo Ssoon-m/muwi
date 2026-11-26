@@ -162,3 +162,40 @@ test('앞 노드 쪽으로 올라가도 끝났거나 하는 노드가 없으면 
   assert.deepEqual(lines(f), ['ask→impl', 'ask→x']);
   assert.deepEqual(loose(f), []);
 });
+
+test('다시 하는 중인 카드 뒤의 아직 시작하지 않은 일은 그 카드 뒤에 그린다 (끝나는 순간 자리가 옮겨지지 않게)', () => {
+  const p = plan([['fix', [], 'doing'], ['recheck', ['fix'], 'done'], ['screens', ['recheck'], 'todo']]);
+  const f = flowOf(p, events([
+    ['fix', 'doing', 1], ['fix', 'done', 1], ['recheck', 'doing', 1], ['recheck', 'done', 1], ['fix', 'doing', 2],
+  ]));
+  assert.deepEqual(lines(f), ['fix#2→screens', 'fix→recheck', 'recheck→fix#2']);
+});
+
+test('앞 노드를 하고 있을 때 시작한 노드는 그 앞의 끝난 노드가 아니라 하고 있던 앞 노드 뒤에 그린다', () => {
+  const p = plan([['r', [], 'done'], ['a', ['r'], 'doing'], ['b', ['a'], 'done']]);
+  const f = flowOf(p, events([['r', 'doing'], ['r', 'done'], ['a', 'doing'], ['b', 'doing'], ['b', 'done']]));
+  assert.deepEqual(lines(f), ['a→b', 'r→a']);
+});
+
+test('노드를 마지막으로 다시 움직인 때로 잰다: 앞당겨 시작했다가 기다리는 동안 앞 노드를 끝냈으면 그 뒤에 그린다', () => {
+  const p = plan([['r', [], 'done'], ['a', ['r'], 'done'], ['b', ['a'], 'done']]);
+  const f = flowOf(p, events([
+    ['r', 'doing'], ['r', 'done'], ['b', 'doing'], ['b', 'waiting'], ['a', 'doing'], ['a', 'done'], ['b', 'doing'], ['b', 'done'],
+  ]));
+  assert.deepEqual(lines(f), ['a→b', 'r→a']);
+});
+
+test('잠시 멈춘 노드도 시작한 적 있는 노드다: 맨 앞 노드를 멈추고 다음 노드를 하면 그 뒤에 그린다', () => {
+  const p = plan([['read', [], 'todo'], ['impl', ['read'], 'done']]);
+  const f = flowOf(p, events([['read', 'doing'], ['read', 'todo'], ['impl', 'doing'], ['impl', 'done']]));
+  assert.deepEqual(lines(f), ['read→impl']);
+});
+
+test('잠시 멈춘 노드(카드 하나)는 계획의 앞 노드들 뒤에만 그린다: 앞당겨 시작했던 때의 선을 더하지 않는다', () => {
+  // pr을 앞당겨 시작했다가(prbody 시작 전) 멈추고 video, prbody를 하는 중이다
+  const p = plan([['rename', [], 'done'], ['video', ['rename'], 'done'], ['prbody', ['video'], 'doing'], ['pr', ['prbody'], 'todo']]);
+  const f = flowOf(p, events([
+    ['rename', 'doing'], ['rename', 'done'], ['pr', 'doing'], ['pr', 'todo'], ['video', 'doing'], ['video', 'done'], ['prbody', 'doing'],
+  ]));
+  assert.deepEqual(lines(f), ['prbody→pr', 'rename→video', 'video→prbody']);
+});

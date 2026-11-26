@@ -8,10 +8,11 @@
 //  2. 손대기 전 노드 뒤에 그려지는 노드: B를 (마지막으로) 시작할 때 계획상 앞 노드 A가 끝나지도 하고 있지도 않았으면,
 //     A 대신 A의 앞 노드 쪽으로 올라가 그때 끝났거나 하고 있던 노드 뒤에 잇는다. 그 앞 노드들은 옆 가지로 남는다.
 //     예: review → apply-review(응답 대기) → review2(시작 전) 뒤에 넣은 reorg(끝)는 review 뒤에 그린다.
-//     끝까지 올라가도 없으면 시작한 적 있는 노드(응답 대기·막힘)에서 멈춘다. 그것도 없으면(아무것도 하기 전에 시작했다) 잇지 않는다.
+//     끝까지 올라가도 없으면 시작한 적 있는 노드(응답 대기·막힘·잠시 멈춤)에서 멈춘다. 그것도 없으면(아무것도 하기 전에 시작했다) 잇지 않는다.
 //     시작 전이거나 잠시 멈춘 노드(앞에 끼어든 노드에 자리를 내줬다)는 계획대로 잇는다. 그 노드는 앞 노드 뒤에 할 일이다.
-//  3. 다시 한 카드 뒤에 시작한 일: 계획상 앞 노드가 다시 한 카드 바로 앞의 카드여도, 그 다시 한 카드가 끝난 뒤 시작했으면 그 카드 뒤에 그린다.
-//     예: recheck → fix(2회차) → screens (계획은 recheck → screens)
+//  3. 다시 한 카드 뒤에 한 일: 계획상 앞 노드가 다시 한 카드 바로 앞의 카드여도, 그 다시 한 카드가 끝난 뒤 시작했거나 아직 시작하지 않은 일은
+//     그 카드 뒤에 그린다. 예: recheck → fix(2회차) → screens (계획은 recheck → screens)
+//  아무것도 진행되기 전에 시작한 노드는 맨 앞에 그리고, 그 노드에 밀려 나중에 한 앞 노드는 선 없이 따로 남는다 (실제로 그 순서로 이어지지 않았다).
 //
 // 때는 시각이 아니라 기록의 줄 순서로 잰다. 같은 시각에 적힌 줄(끝내면서 다음 노드를 시작)도 앞뒤가 갈린다.
 import type { Event, NodeStatus, Plan } from './store.ts';
@@ -132,12 +133,13 @@ export function flowOf(plan: Plan, events: Event[]): Drawn {
   }
   /**
    * 카드 from 뒤에 노드 node를 그리려는데, from 뒤에 다른 노드를 다시 한 카드가 그려졌고 그 카드가 at 전에 끝났으면 그 카드 뒤에 잇는다.
+   * 아직 시작하지 않은 노드(at = Infinity)는 다시 하는 중인 카드 뒤에도 잇는다. 그 카드를 끝낸 뒤에 할 일이다 (끝나는 순간 자리가 옮겨지지 않게).
    * 예: recheck → fix(2회차)를 끝낸 뒤 시작한 screens는 계획상 recheck 다음이지만 fix(2회차) 뒤에 그린다 (위에서 아래로 읽으면 한 순서)
    */
   const gate = (from: string, node: string, at: number) => {
     let cur = from;
     for (let guard = 0; guard < byCard.size; guard++) {
-      const z = (reruns.get(cur) ?? []).find(c => c.node !== node && (endOf(c) ?? Infinity) < at);
+      const z = (reruns.get(cur) ?? []).find(c => c.node !== node && (at === Infinity || (endOf(c) ?? Infinity) < at));
       if (!z) break;
       cur = z.id;
     }
@@ -145,20 +147,21 @@ export function flowOf(plan: Plan, events: Event[]): Drawn {
   };
   /**
    * 앞 노드 p가 그때(at) 손대기 전이었다: 그때 끝났거나 하고 있던 노드를 만날 때까지 앞 노드 쪽으로 올라간다.
-   * 끝까지 없으면 시작한 적 있는 노드(응답 대기·막힘)에서 멈춘다. 그것도 없으면(아무것도 하기 전에 시작했다) 잇지 않는다
+   * 끝까지 없으면 시작한 적 있는 노드(응답 대기·막힘·잠시 멈춤)에서 멈춘다. 그것도 없으면(아무것도 하기 전에 시작했다) 잇지 않는다
    */
   const climb = (p: string, at: number): string[] => {
-    const walk = (ok: (s: NodeStatus) => boolean) => {
+    const walk = (ok: (q: string) => boolean) => {
       const seen = new Set<string>();
       const up = (q: string): string[] => {
         if (seen.has(q)) return [];
         seen.add(q);
-        return ok(statusAt(q, at)) ? [cardAt(q, at)] : before(q).flatMap(up);
+        return ok(q) ? [cardAt(q, at)] : before(q).flatMap(up);
       };
       return up(p);
     };
-    const found = walk(progressed);
-    return found.length ? found : walk(s => s !== 'todo');
+    const found = walk(q => progressed(statusAt(q, at)));
+    // 시작한 적 있다: 그때까지 기록이 있다 (잠시 멈춘 노드는 상태가 시작 전과 같은 todo라 기록으로 본다)
+    return found.length ? found : walk(q => (timeline.get(q) ?? []).some(([i]) => i <= at));
   };
 
   // 2. 계획의 선 p → n을 그때 p가 어땠는지에 맞춰 n의 카드에 잇는다
@@ -167,6 +170,11 @@ export function flowOf(plan: Plan, events: Event[]): Drawn {
     // 시작 전: 계획대로 앞 노드(의 마지막 카드) 뒤에 할 일이다
     if (!mine.length) {
       for (const p of before(n.id)) edges.push([gate(latest(p), n.id, Infinity), n.id]);
+      continue;
+    }
+    // 잠시 멈췄다(다시 시작 전, 카드 하나): 앞에 끼어든 노드가 끝나면 다시 움직인다. 계획대로 앞 노드들 뒤에 할 일이다
+    if (mine.length === 1 && n.status === 'todo') {
+      for (const p of before(n.id)) edges.push([latest(p), n.id]);
       continue;
     }
     const first = mine[0];
@@ -179,7 +187,7 @@ export function flowOf(plan: Plan, events: Event[]): Drawn {
       // 첫 카드를 시작할 때 p는 손대기 전이었다: 그때 진행된 노드 뒤에 그린다
       for (const from of climb(p, at)) edges.push([gate(from, n.id, at), first.id]);
       // p는 나중에 끼워 넣은 노드일 수 있다 (다시 하던 회차 앞에 --before). 뒤 카드를 시작할 때 진행돼 있었으면 그 카드에 잇고,
-      // 지금 잠시 멈춰 있으면(다시 시작 전) p가 끝난 뒤 이어 할 마지막 카드에 잇는다
+      // 다시 하던 회차가 지금 잠시 멈춰 있으면 p가 끝난 뒤 이어 할 마지막 카드에 잇는다
       const later = mine.slice(1).find(c => progressed(statusAt(p, anchor(c))));
       if (later) edges.push([gate(cardAt(p, anchor(later)), n.id, anchor(later)), later.id]);
       else if (n.status === 'todo') edges.push([latest(p), mine[mine.length - 1].id]);

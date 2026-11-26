@@ -253,7 +253,8 @@ const SAMPLE = (() => {
       changes: [{ at: "2026-01-01T00:00:00.000Z", by: "human", why: "견본", first: false, added: ["pr"], removed: [], changed: [] }],
       sessions: { s1: { label: "t1", tool: "claude", terminal: "t1" }, [SAMPLE_CLOSED]: { label: "t2", tool: "claude", terminal: "t2", cwd: "/tmp/sample repo" } },
       resumable: [SAMPLE_CLOSED], exists: { "/tmp/sample repo": true },
-      // 다시 한 노드가 두 카드로 나뉜 그림 (막힘으로 끝난 지난 회차 카드와 지금 회차 카드. cards.js)
+      // 다시 한 노드가 두 카드로 나뉜 그림 (막힘으로 끝난 지난 회차 카드와 지금 회차 카드. cards.js).
+      // 그리는 코드를 지나가게 하는 견본이라 선은 flowOf가 만드는 모양이 아니다 (실제로는 다시 한 카드 앞에 다른 노드의 카드가 온다)
       drawn: { cards, edges: [{ from: "read", to: "impl" }, { from: "impl", to: "impl#3" }, { from: "impl#3", to: "pr" }] },
       layout: {
         width: 1120, height: 118,

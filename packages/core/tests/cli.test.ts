@@ -401,6 +401,10 @@ test('시작을 적지 않고 끝낸 노드를 다시 시작하면 2회차다', 
   const read = JSON.parse(fs.readFileSync(path.join(dir, 'w', 'plan.json'), 'utf8')).nodes.find((n: any) => n.id === 'read');
   assert.equal(read.attempt, 2);
   assert.match(muwi(['show', 'w']).out, /read[\s\S]*2회차/);
+  // 시작을 적지 않고 막혔던 노드도 한 번 한 것이다
+  muwi(['node', 'impl', 'block', '권한이 없음']);
+  muwi(['node', 'impl', 'start']);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'w', 'plan.json'), 'utf8')).nodes.find((n: any) => n.id === 'impl').attempt, 2);
 });
 
 test('자리를 주지 않은 노드는 진행된 끝(끝났거나 하고 있는 맨 뒤 노드) 뒤에 잇는다: 손대지 않았거나 기다리는 노드 밑에 붙지 않는다', () => {
