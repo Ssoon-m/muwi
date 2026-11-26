@@ -24,6 +24,8 @@ const PICKED = "muwi.picked";
 const JUMP = "muwi.jump";
 /** 고정한 작업들 (고정한 순서). 모든 칸이 같이 쓰고 앱을 다시 켜도 남는다 */
 const PINS = "muwi.pins";
+/** 새 결과를 본 것으로 적기 시작한 칸이 있다 { work, at }. 칸이 여럿이어도(사이드바 목록, 그래프 칸) 한 칸만 적는다 */
+const SEEN = "muwi.seen";
 const PLACE_NAME = { bottom: "아래", top: "위" };
 /** 지도 줄의 높이: 펼쳤을 때(지도 한 줄)와 접었을 때. 큰 그래프 줄 수를 셀 때 뺀다 */
 const STRIP_OPEN = 120, STRIP_FOLDED = 25;
@@ -356,6 +358,7 @@ export default class Muwi extends View {
     // 다른 칸에서 작업을 바꿨으면 바로, 아니면 15초마다 다시 읽는다 (걸린 시간 갱신, 폴더 감시가 안 될 때 대비).
     // 다시 읽을 때만 화면을 다시 그린다
     cx.timer.every(1000, (cx) => {
+      this.seenHere(cx);
       if (this.stale || Date.now() - this.lastLoad > 15000) {
         this.stale = false;
         this.load(cx);
@@ -556,6 +559,8 @@ export default class Muwi extends View {
         const sel = data.selected;
         const chosen = this.picked ?? want;
         if (sel?.unread && chosen && sel.work === chosen && this.variant() !== "list" && !checking()) this.markViewed(sel.work, cx);
+        // 그 작업의 터미널에 키보드가 있으면 그래프 칸이 무엇을 보여 주든 본 것으로 적는다 (목록 칸도)
+        this.seenHere(cx);
         if (this.node && !data.selected?.nodes.some((n) => n.id === this.node)) {
           this.node = null;
           this.tab = "work";
@@ -1818,9 +1823,28 @@ export default class Muwi extends View {
     return "";
   }
 
+  /**
+   * 새 결과를 그 작업의 터미널에서 봤으면 본 것으로 적는다: Herdr 창이 앞에 있고, 키보드가 그 작업을 한 대화가 열려 있는
+   * 터미널(talkOf, 터미널로 이동 단추가 가는 곳)에 있다. 한 터미널에서 지켜보는 동안 작업이 끝나면 새 결과로 올라오지 않고 바로 "끝"으로 간다.
+   * 다른 창에 가 있는 동안 끝났으면 Herdr 창으로 돌아와 그 터미널에 있을 때 적는다. 그래프 칸이 무엇을 보여 주는지와 상관없다 (목록 칸도 한다)
+   */
+  seenHere(cx) {
+    if (checking() || !this.data) return;
+    const unread = (this.data.works ?? []).filter((w) => w.unread && !w.archived);
+    if (!unread.length || appWindow()?.active === false) return;
+    const term = focused()?.terminal ?? null;
+    if (!term) return;
+    const links = this.links();
+    for (const w of unread) if (this.talkOf(w, links)?.terminal === term) this.markViewed(w.work, cx);
+  }
+
   /** 새 결과를 본 것으로 적는다. 적고 나면 다시 읽어 목록에서 "끝"으로 내린다 */
   markViewed(work, cx) {
     if (this.viewing.has(work)) return;
+    // 다른 칸이 방금 적기 시작했으면 그 칸에 맡긴다 (같은 기록을 두 번 남기지 않게)
+    const claim = shared(SEEN);
+    if (claim?.work === work && Date.now() - (claim.at ?? 0) < 10000) return;
+    setShared(SEEN, { work, at: Date.now() });
     this.viewing.add(work);
     cx.spawn(async (cx) => {
       const r = await runMuwi(["viewed", "--work", work], { timeout: 10000 }).catch(() => null);
