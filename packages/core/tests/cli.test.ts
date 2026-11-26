@@ -355,12 +355,22 @@ test('계획은 선으로 이어진 그래프다: muwi add는 자리를 꼭 받�
   const ids = () => JSON.parse(fs.readFileSync(path.join(dir, 'a', 'plan.json'), 'utf8')).nodes.map((n: any) => n.id);
   const after = (id: string) => JSON.parse(fs.readFileSync(path.join(dir, 'a', 'plan.json'), 'utf8')).nodes.find((n: any) => n.id === id).after;
   // 자리를 주지 않았다: 짐작해서 잇지 않는다. 어느 노드 다음인지 적거나, 이 작업의 흐름에 없는 일이면 새 작업으로 적으라고 한다
+  const events = () => fs.readFileSync(path.join(dir, 'a', 'events.jsonl'), 'utf8');
+  const before = events();
   const guess = muwi(['add', 'pr', 'PR 올리기', '--why', '리뷰 받기']);
   assert.equal(guess.code, 2);
-  assert.match(guess.err, /어느 노드 다음인지 적어요: muwi add pr "PR 올리기" --after <노드>/);
-  assert.match(guess.err, /새 작업으로 적어요: muwi plan --work <새 이름>/);
+  assert.match(guess.err, /같은 작업: 이 작업에서 시킨 일을 이루는 일[\s\S]*새 작업: 새로 시킨 일/);
+  assert.match(guess.err, /새 작업이면 이 작업에 넣지 말고 새로 적어요: muwi plan --work <새 이름>/);
+  assert.match(guess.err, /같은 작업이면 어느 노드 다음인지 적어요: muwi add pr "PR 올리기" --after <노드>/);
   assert.match(guess.err, /○ check/);
+  // 계획도 기록도 그대로다
   assert.deepEqual(ids(), ['read', 'impl', 'check']);
+  assert.equal(events(), before);
+  // 하던 노드 앞에 끼우는 것(--before만)은 자리를 준 것이다
+  const ahead = muwi(['add', 'ask', '먼저 물어보기', '--before', 'impl', '--why', '먼저 확인']);
+  assert.equal(ahead.code, 0, ahead.err);
+  assert.ok(after('impl').includes('ask'));
+  muwi(['remove', 'ask', '--why', '시험']);
   // 자리를 주면 그대로
   const added = muwi(['add', 'pr', 'PR 올리기', '--after', 'check', '--why', '리뷰 받기']);
   assert.equal(added.code, 0, added.err);

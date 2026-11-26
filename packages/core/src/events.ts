@@ -115,7 +115,7 @@ export function childNote(work: string, node: Pick<PlanNode, 'id' | 'title'>): s
     '',
     `이 세션은 작업 \`${work}\`의 노드 \`${node.id}\`(${node.title})를 맡아서 떴다. 이 작업에는 이미 붙어 있고, 노드의 시작도 적혀 있다.`,
     '',
-    '- 계획을 새로 만들지 않는다. 맡은 일을 쪼개야 하면 `muwi add`로 같은 계획에 노드를 넣는다.',
+    '- 계획을 새로 만들지 않는다. 맡은 일을 쪼개야 하면 `muwi add <id> "<제목>" --after <앞 노드>`로 같은 계획에 노드를 넣는다.',
     `- 끝나면 \`muwi node ${node.id} done "<결과 한 줄>"\`을 적는다.`,
     `- 사람의 결정이 필요하면 \`muwi node ${node.id} wait "<물어볼 것>"\`, 스스로 풀 수 없으면 \`muwi node ${node.id} block "<이유>"\`을 적는다.`,
     '- 끝났거나 막혔으면 `muwi tell "<결과나 막힌 점>"`으로 맡긴 세션에 알린다.',

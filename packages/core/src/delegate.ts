@@ -127,7 +127,7 @@ export function cmdRun(a: Args, dir: string) {
   const work = resolveWork(a, dir);
   const plan = needPlan(dir, work);
   const node = plan.nodes.find(n => n.id === id);
-  if (!node) throw new Fail(`없는 노드예요: ${id}. 있는 노드: ${plan.nodes.map(n => n.id).join(', ')}. 새 노드면 muwi add로 먼저 넣어요.`);
+  if (!node) throw new Fail(`없는 노드예요: ${id}. 있는 노드: ${plan.nodes.map(n => n.id).join(', ')}. 새 노드면 muwi add <id> "<제목>" --after <앞 노드> --why "<이유>"로 먼저 넣어요 (이 작업의 흐름에 없는 일이면 새 작업으로).`);
   const show = (str(a, 'show') ?? node.show) as ShowIn | undefined;
   if (show !== undefined && !SHOW_IN.includes(show)) throw new Fail(`--show는 ${SHOW_IN.join(' 또는 ')}이에요`);
   const cwd = path.resolve(str(a, 'cwd') ?? process.cwd());
