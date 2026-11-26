@@ -5,6 +5,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { clock, workDir } from './store.ts';
 
+/** 작업 폴더가 있는데 계획이 없다 (지운 뒤에 남은 찌꺼기 등). 비었으면 'empty' */
+function leftover(dir: string, work: string): 'none' | 'empty' | 'plan' | 'other' {
+  let names: string[];
+  try {
+    names = fs.readdirSync(workDir(dir, work));
+  } catch (e: any) {
+    if (e.code === 'ENOENT') return 'none';
+    throw e;
+  }
+  if (names.includes('plan.json')) return 'plan';
+  return names.length ? 'other' : 'empty';
+}
+
 export const TRASH_DAYS = 30;
 const DAY = 86_400_000;
 
@@ -36,18 +49,25 @@ export function trashWork(dir: string, work: string): number {
   fs.mkdirSync(trashDir(dir), { recursive: true });
   // 같은 작업을 같은 밀리초에 두 번 지우는 일은 없지만, 이름이 겹치면 한 칸 뒤로 민다
   while (fs.existsSync(path.join(trashDir(dir), `${at}-${work}`))) at += 1;
-  fs.renameSync(workDir(dir, work), path.join(trashDir(dir), `${at}-${work}`));
+  const to = path.join(trashDir(dir), `${at}-${work}`);
+  fs.renameSync(workDir(dir, work), to);
+  // 잠금을 잡은 채로 옮겼으면 잠금도 같이 왔다. 되살렸을 때 남아 있지 않게 지운다
+  fs.rmSync(path.join(to, '.lock'), { recursive: true, force: true });
   return at;
 }
 
 /**
  * 휴지통에서 가장 최근에 지운 그 작업을 되살린다. 휴지통에 없으면 null.
- * 같은 이름의 작업이 지금 있으면 덮어쓰지 않고 'taken'을 돌려준다
+ * 같은 이름의 작업이 지금 있으면 덮어쓰지 않고 'taken', 계획 없는 폴더가 남아 있으면 'leftover'.
+ * 빈 폴더만 남아 있으면 치우고 되살린다
  */
-export function restoreWork(dir: string, work: string): Trashed | 'taken' | null {
+export function restoreWork(dir: string, work: string): Trashed | 'taken' | 'leftover' | null {
   const t = listTrash(dir).find(x => x.work === work);
   if (!t) return null;
-  if (fs.existsSync(workDir(dir, work))) return 'taken';
+  const now = leftover(dir, work);
+  if (now === 'plan') return 'taken';
+  if (now === 'other') return 'leftover';
+  if (now === 'empty') fs.rmdirSync(workDir(dir, work));
   fs.renameSync(path.join(trashDir(dir), t.name), workDir(dir, work));
   return t;
 }

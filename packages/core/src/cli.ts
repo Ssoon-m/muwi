@@ -17,7 +17,7 @@ import { adapterOf } from './connectors/index.ts';
 import { gaps } from './connectors/types.ts';
 import { TOOLS, toolById } from './connectors/tools.ts';
 import {
-  SCHEMA, appendEvent, listWorks, nowIso, readConfig, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
+  SCHEMA, appendEvent, checkWorkName, listWorks, nowIso, readConfig, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
   type NodeStatus, type Plan, type RunBy, type ShowIn,
 } from './store.ts';
 import { TRASH_DAYS, daysLeft, listTrash, purgeTrash, restoreWork, trashWork } from './trash.ts';
@@ -165,6 +165,11 @@ function savePlan(dir: string, work: string, make: (old: Plan | null) => PlanInp
   const why = str(a, 'why')?.trim() || undefined;
   return withLock(workDir(dir, work), () => {
     const old = readPlan(dir, work);
+    // 지운 작업을 하던 세션이 계획을 고치려 하거나(--why), 그 작업에 붙어 있던 세션이 다시 적으면 같은 이름의 빈 새 작업을 만들지 않는다.
+    // 만들면 휴지통의 그 작업을 되살릴 수 없게 된다. 다른 세션이 지운 이름으로 새로 시작하는 것은 막지 않는다
+    if (!old && listTrash(dir).some(t => t.work === work) && (why || (key && readSession(dir, key)?.work === work))) {
+      throw new Fail(`${work}: 지운 작업이에요 (휴지통에 있어요). 이어서 하려면 사람이 muwi restore ${work}로 되살려야 해요. 새로 시작하려면 다른 이름으로 계획을 적어요`);
+    }
     const input = make(old);
     const at = nowIso();
     if (!old) {
@@ -426,10 +431,16 @@ function cmdArchive(a: Args, dir: string, on: boolean) {
  */
 function cmdDelete(a: Args, dir: string) {
   purgeTrash(dir);
+  if (a.flags.archived && a.pos.length) throw new Fail('--archived와 작업 이름을 같이 주지 않아요 (--archived는 보관한 작업을 모두 지워요)');
   const names = a.flags.archived ? loadBoard(dir).works.filter(w => w.archived).map(w => w.work) : a.pos;
   if (!names.length) {
     if (a.flags.archived) return out('지울 보관한 작업이 없어요');
     throw new Fail('지울 작업을 적어요: muwi delete <작업>… (보관한 작업을 모두 지우려면 --archived)');
+  }
+  // 작업 이름만 받는다 (경로를 주면 다른 폴더를 옮길 수 있다)
+  for (const work of names) {
+    const bad = checkWorkName(work);
+    if (bad) throw new Fail(bad);
   }
   const views = names.map(work => {
     const v = loadView(dir, work);
@@ -439,10 +450,20 @@ function cmdDelete(a: Args, dir: string) {
   // 하나라도 받을 수 없으면 아무것도 지우지 않는다
   const kept = views.filter(v => !v.archived);
   if (kept.length) throw new Fail(`보관한 작업만 지워요 (끝 → 보관 → 삭제): ${kept.map(v => v.work).join(', ')}. 먼저 muwi archive로 보관해요`);
-  for (const v of views) {
-    trashWork(dir, v.work);
-    out(`${v.work}: 지웠어요. ${TRASH_DAYS}일 동안 휴지통에 있어요 (되살리려면 muwi restore ${v.work})`);
+  // 작업마다 잠그고 다시 확인한 뒤 옮긴다 (그 사이에 다시 시작한 작업은 지우지 않는다). 하나가 안 돼도 나머지는 지운다
+  const failed: string[] = [];
+  for (const work of names) {
+    try {
+      withLock(workDir(dir, work), () => {
+        if (!loadView(dir, work)?.archived) throw new Fail('지우는 사이에 다시 시작했어요');
+        trashWork(dir, work);
+      });
+      out(`${work}: 지웠어요. ${TRASH_DAYS}일 동안 휴지통에 있어요 (되살리려면 muwi restore ${work})`);
+    } catch (e: any) {
+      failed.push(`${work}(${e?.message ?? e})`);
+    }
   }
+  if (failed.length) throw new Fail(`지우지 못했어요: ${failed.join(', ')}`);
 }
 
 /** 지운 작업을 휴지통에서 되살린다 (가장 최근에 지운 것). 보관한 채로 돌아오므로 보관함에 있다. 작업 없이 부르면 휴지통 목록 */
@@ -452,14 +473,20 @@ function cmdRestore(a: Args, dir: string) {
     const list = listTrash(dir);
     if (!list.length) return out('휴지통이 비어 있어요');
     for (const t of list) out(`${t.work}  ${new Date(t.at).toLocaleString()}에 지움 · ${daysLeft(t)}일 남음`);
-    return out('되살리려면 muwi restore <작업>');
+    return out('되살리려면 muwi restore <작업> (같은 작업이 여럿이면 가장 최근에 지운 것)');
   }
+  // 하나가 안 돼도 나머지는 되살린다
+  const failed: string[] = [];
   for (const work of a.pos) {
-    const r = restoreWork(dir, work);
-    if (r === null) throw new Fail(`휴지통에 없는 작업이에요: ${work} (muwi restore로 목록을 봐요)`);
-    if (r === 'taken') throw new Fail(`같은 이름의 작업이 있어서 되살리지 않았어요: ${work}`);
-    out(`${work}: 되살렸어요. 보관함에 있어요 (목록으로 꺼내려면 muwi unarchive ${work})`);
+    const bad = checkWorkName(work);
+    const r = bad ? null : restoreWork(dir, work);
+    if (bad) failed.push(bad);
+    else if (r === null) failed.push(`휴지통에 없는 작업이에요: ${work} (muwi restore로 목록을 봐요)`);
+    else if (r === 'taken') failed.push(`같은 이름의 작업이 있어서 되살리지 않았어요: ${work}`);
+    else if (r === 'leftover') failed.push(`${workDir(dir, work)} 폴더가 남아 있어서 되살리지 않았어요 (계획이 없는 폴더예요. 치우고 다시 해요)`);
+    else out(`${work}: 되살렸어요. 보관함에 있어요 (목록으로 꺼내려면 muwi unarchive ${work})`);
   }
+  if (failed.length) throw new Fail(failed.join('\n'));
 }
 
 function cmdViewed(a: Args, dir: string) {

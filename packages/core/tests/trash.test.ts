@@ -35,7 +35,9 @@ test('휴지통: 30일이 지난 것만 비우고, 남은 날을 센다. 같은 
     assert.equal(listTrash(dir).length, 2);
     // 같은 이름이 있으면 되살리지 않고, 없으면 가장 최근 것을 되살린다
     make(dir, 'a', '새 작업');
-    assert.equal(restoreWork(dir, 'a'), 'taken');
+    assert.equal(restoreWork(dir, 'a'), 'leftover'); // 계획 없는 폴더에 파일이 있다
+    fs.writeFileSync(path.join(dir, 'a', 'plan.json'), '{}');
+    assert.equal(restoreWork(dir, 'a'), 'taken'); // 같은 이름의 작업이 있다
     fs.rmSync(path.join(dir, 'a'), { recursive: true });
     assert.equal((restoreWork(dir, 'a') as { work: string }).work, 'a');
     assert.equal(fs.readFileSync(path.join(dir, 'a', 'note.md'), 'utf8'), '둘째');

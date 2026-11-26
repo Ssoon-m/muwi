@@ -1402,7 +1402,7 @@ export default class Muwi extends View {
 
   /**
    * 작업 목록: 묶음 머리와 줄들. 끝났거나 멈춘 채로 오래된 작업(past)은 맨 아래에 "지난 작업 N개"로 접어 둔다.
-   * 사람이 보관한 작업(muwi archive)은 그 아래 "보관 N개"로 접어 둔다. 둘 다 지우지는 않는다.
+   * 사람이 보관한 작업(muwi archive)은 그 아래 "보관 N개"로 접어 둔다. 보관한 작업만 지울 수 있다 (끝 → 보관 → 삭제, 휴지통 30일).
    * compact: 사이드바를 좁혀 아이콘만 보일 때
    */
   list(t, works, groups, selected, now, fill, compact) {
@@ -1482,20 +1482,20 @@ export default class Muwi extends View {
       const r = await runMuwi([action, ...args], { timeout: 10000 }).catch((e) => ({ code: 1, stderr: String(e?.message ?? e) }));
       this.shelving = null;
       this.stale = true;
+      // muwi가 실제로 바꾼 작업들. 되돌리기는 이 작업들만 되돌린다 (여럿 중 일부가 안 됐어도 된 것은 되돌릴 수 있다)
+      const moved = (r?.stdout ?? "").split("\n").map((l) => l.startsWith(" ") ? null : l.match(new RegExp(`^(.+?): ${a.done}`))?.[1]).filter(Boolean);
+      const undo = moved.length ? { undo: { works: moved, action: a.undo } } : {};
       let toast;
-      if (r?.code !== 0) toast = { text: `${a.fail}: ${(r?.stderr || r?.stdout || "").trim().split("\n")[0]}`, error: true };
-      else {
-        // muwi가 실제로 바꾼 작업들. 되돌리기는 이 작업들만 되돌린다
-        const moved = (r.stdout ?? "").split("\n").map((l) => l.startsWith(" ") ? null : l.match(new RegExp(`^(.+?): ${a.done}`))?.[1]).filter(Boolean);
-        toast = moved.length
-          ? { text: a.text(moved.length), undo: { works: moved, action: a.undo } }
-          : { text: (r.stdout ?? "").trim().split("\n")[0] || "바뀐 것이 없어요" };
-      }
+      if (r?.code !== 0) {
+        const why = `${a.fail}: ${(r?.stderr || r?.stdout || "").trim().split("\n")[0]}`;
+        toast = { text: moved.length ? `${a.text(moved.length)}. ${why}` : why, error: true, ...undo };
+      } else toast = moved.length ? { text: a.text(moved.length), ...undo } : { text: (r.stdout ?? "").trim().split("\n")[0] || "바뀐 것이 없어요" };
       const id = ++this.toastSeq;
       this.shelfToast = { ...toast, id };
       cx.notify();
       // 잠시 뒤에 사라진다. 그 사이에 다른 알림이 떴으면 그대로 둔다
-      await cx.sleep(toast.error ? 10000 : 6000);
+      // 지운 것은 되돌릴 틈을 더 준다 (그 뒤에도 30일 동안 muwi restore로 되살린다)
+      await cx.sleep(toast.error ? 10000 : action === "delete" ? 15000 : 6000);
       if (this.shelfToast?.id === id) {
         this.shelfToast = null;
         cx.notify();
