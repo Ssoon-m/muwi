@@ -10,7 +10,7 @@ import { cmdPeek, cmdResume, cmdRun, cmdTell, cmdTidy, cmdWait } from './delegat
 import { Fail, dur, join, needPlan, out, parseArgs, resolveWork, str, type Args } from './kit.ts';
 import { hasTerminals, loadPlugins, pluginFailures, terminals, views } from './plugins.ts';
 import { earlyStart, fromSubagent, markNode } from './node.ts';
-import { addNode, carryStatus, diffPlan, isEmptyDiff, joinPoint, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
+import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
 import { readSession, sessionKey, sessionLabel } from './session.ts';
 import { installedTools, newerElsewhere, olderThan, readInstall, refreshSetup, removeSetup, runSetup } from './setup.ts';
 import { adapterOf } from './connectors/index.ts';
@@ -30,7 +30,8 @@ const HELP = `사용법: muwi <명령>
   muwi plan --work <이름> --request "<시킨 말>" '<계획 JSON>'    새 작업의 계획을 적는다
   muwi plan --why "<바꾼 이유>" '<계획 JSON>'                    계획을 바꾼다 (같은 id의 노드는 상태를 잇는다)
   muwi add <id> "<제목>" [--after a,b] [--before c] --why "…"   노드 하나를 끼워 넣는다 (--run, --show도 받는다)
-                                       자리를 주지 않으면 진행된 끝(끝났거나 하고 있는 맨 뒤 노드) 뒤에 잇는다. 어느 노드와도 잇지 않으려면 --alone
+                                       자리(--after 또는 --before)를 꼭 준다. 순서와 상관없는 일이면 --alone.
+                                       이 작업의 흐름에 없는 일(새로 시킨 일)은 노드로 넣지 말고 새 작업으로 적는다
   muwi remove <id> --why "…"                                   노드 하나를 뺀다
       계획 JSON: {"title": "한 줄 설명", "nodes": [{"id": "read", "title": "티켓 읽기"},
                                                   {"id": "impl", "title": "구현", "after": ["read"]}]}
@@ -313,26 +314,33 @@ function cmdAdd(a: Args, dir: string) {
   const after = (str(a, 'after') ?? '').split(',').map(s => s.trim()).filter(Boolean);
   const before = str(a, 'before');
   const fresh = { id, title, after, ...(str(a, 'run') ? { run: str(a, 'run') } : {}), ...(str(a, 'show') ? { show: str(a, 'show') } : {}) } as NodeInput;
-  /** 자리를 주지 않아서 알아서 이었으면 그 노드들 */
-  let tail: string[] = [];
   const { plan, paused } = savePlan(dir, work, old => {
     if (!old) throw new Fail(`작업이 없어요: ${work} (muwi status로 목록을 봐요)`);
     if (old.nodes.some(n => n.id === id)) throw new Fail(`이미 있는 노드예요: ${id}`);
     if (before && !old.nodes.some(n => n.id === before)) throw new Fail(`--before의 ${before}는 없는 노드예요. 있는 노드: ${old.nodes.map(n => n.id).join(', ')}`);
-    // 자리를 주지 않은 노드는 진행된 끝 뒤에 잇는다 (joinPoint). 나중에 넣는 노드는 대개 하던 일 다음에 할 일이다.
-    // 잇지 않으면 그래프에 선 없이 따로 떨어진 노드가 된다. 일부러 그렇게 두려면 --alone
-    if (!after.length && !before && !a.flags.alone) {
-      tail = joinPoint(old);
-      fresh.after = tail;
-    }
+    // 자리를 짐작하지 않는다. 앞 노드를 고르지 못하는 일은 이 작업의 흐름에 없는 일(새로 시킨 일)일 수 있다. 그런 일은 새 작업으로 적는다.
+    // 예전에는 맨 끝 노드 뒤에 알아서 이었다. 그래서 새로 시킨 일이 줄줄이 하던 작업의 그래프에, 손대지 않은 노드 밑에 붙었다
+    if (!after.length && !before && !a.flags.alone) throw new Fail(missingPlace(old, id, title), 2);
     const { plan: input, problems } = parsePlan(addNode(old, fresh, before));
     if (!input) throw new Fail(`노드를 넣지 못했어요:\n${problems.map(p => `  - ${p}`).join('\n')}`, 2);
     return input;
   }, a);
   join(dir, work);
-  out(`노드를 넣었어요: ${id} (${work}, 노드 ${plan.nodes.length}개)${tail.length ? `. 자리를 주지 않아 ${tail.join(', ')} 뒤에 이었어요 (따로 두려면 --alone)` : ''}`);
+  out(`노드를 넣었어요: ${id} (${work}, 노드 ${plan.nodes.length}개)`);
   pausePlanned(dir, work, paused);
   printPlan(readPlan(dir, work) ?? plan);
+}
+
+/** muwi add에 자리를 주지 않았을 때: 어느 노드 다음인지 적거나, 이 작업의 흐름에 없는 일이면 새 작업으로 적으라고 알린다 */
+function missingPlace(plan: Plan, id: string, title: string): string {
+  const width = Math.max(...plan.nodes.map(n => n.id.length));
+  return [
+    `어느 노드 다음인지 적어요: muwi add ${id} "${title}" --after <노드> --why "<이유>" (하던 노드 앞에 끼우려면 --before <노드>, 순서와 상관없는 일이면 --alone)`,
+    `이 작업의 흐름에 없는 일(새로 시킨 일)이면 이 작업에 넣지 말고 새 작업으로 적어요: muwi plan --work <새 이름> --request "<시킨 말>" '<계획 JSON>'`,
+    `  같은 작업: 이 작업에서 시킨 일을 이루는 일 (리뷰 반영, 다시 확인, 빠뜨린 단계). 새 작업: 새로 시킨 일 (같은 대화·같은 저장소여도)`,
+    `지금 노드 (${plan.work}):`,
+    ...plan.nodes.map(n => `  ${n.status === 'todo' && (n.attempt ?? 0) > 0 ? '⏸' : MARK[n.status]} ${n.id.padEnd(width)}  ${n.title}`),
+  ].join('\n');
 }
 
 function cmdRemove(a: Args, dir: string) {

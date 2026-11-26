@@ -349,22 +349,25 @@ test('지침: muwi guide가 원본을 보여 주고, muwi가 업데이트되면 
   assert.doesNotMatch(muwi(['node', 'check', 'start']).out, /업데이트됐다/);
 });
 
-test('계획은 선으로 이어진 그래프다: muwi add에 자리를 주지 않으면 (아직 진행된 노드가 없으면) 맨 끝 노드 뒤에 잇고, 계획에 끊긴 노드가 있으면 알려 준다', () => {
+test('계획은 선으로 이어진 그래프다: muwi add는 자리를 꼭 받고(없으면 새 작업으로 적으라고 알린다), 계획에 끊긴 노드가 있으면 알려 준다', () => {
   const { dir, muwi } = bench();
   muwi(['plan', '--work', 'a', PLAN]);
+  const ids = () => JSON.parse(fs.readFileSync(path.join(dir, 'a', 'plan.json'), 'utf8')).nodes.map((n: any) => n.id);
   const after = (id: string) => JSON.parse(fs.readFileSync(path.join(dir, 'a', 'plan.json'), 'utf8')).nodes.find((n: any) => n.id === id).after;
-  // 자리를 주지 않았다: 뒤에 아무것도 없는 노드(check) 뒤에 잇는다. 따로 떨어진 노드가 되지 않는다
-  const added = muwi(['add', 'pr', 'PR 올리기', '--why', '리뷰 받기']);
+  // 자리를 주지 않았다: 짐작해서 잇지 않는다. 어느 노드 다음인지 적거나, 이 작업의 흐름에 없는 일이면 새 작업으로 적으라고 한다
+  const guess = muwi(['add', 'pr', 'PR 올리기', '--why', '리뷰 받기']);
+  assert.equal(guess.code, 2);
+  assert.match(guess.err, /어느 노드 다음인지 적어요: muwi add pr "PR 올리기" --after <노드>/);
+  assert.match(guess.err, /새 작업으로 적어요: muwi plan --work <새 이름>/);
+  assert.match(guess.err, /○ check/);
+  assert.deepEqual(ids(), ['read', 'impl', 'check']);
+  // 자리를 주면 그대로
+  const added = muwi(['add', 'pr', 'PR 올리기', '--after', 'check', '--why', '리뷰 받기']);
   assert.equal(added.code, 0, added.err);
   assert.deepEqual(after('pr'), ['check']);
-  assert.match(added.out, /자리를 주지 않아 check 뒤에 이었어요/);
   assert.doesNotMatch(added.out, /이어지지 않은 노드/);
-  // 자리를 주면 그대로
   muwi(['add', 'lint', 'lint', '--after', 'impl', '--why', '먼저 확인']);
   assert.deepEqual(after('lint'), ['impl']);
-  // 끝이 둘이면(pr, lint) 둘 다의 뒤에 잇는다
-  muwi(['add', 'wrap', '정리', '--why', '마무리']);
-  assert.deepEqual(after('wrap').sort(), ['lint', 'pr']);
   // 일부러 따로 두는 노드: --alone. 그래도 끊겨 있다고 알려 준다 (막지는 않는다)
   const alone = muwi(['add', 'memo', '따로 할 일', '--alone', '--why', '순서 없음']);
   assert.equal(alone.code, 0, alone.err);
@@ -405,46 +408,6 @@ test('시작을 적지 않고 끝낸 노드를 다시 시작하면 2회차다', 
   muwi(['node', 'impl', 'block', '권한이 없음']);
   muwi(['node', 'impl', 'start']);
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'w', 'plan.json'), 'utf8')).nodes.find((n: any) => n.id === 'impl').attempt, 2);
-});
-
-test('자리를 주지 않은 노드는 진행된 끝(끝났거나 하고 있는 맨 뒤 노드) 뒤에 잇는다: 손대지 않았거나 기다리는 노드 밑에 붙지 않는다', () => {
-  const { dir, muwi } = bench();
-  muwi(['plan', '--work', 'a', PLAN]);
-  const after = (id: string) => JSON.parse(fs.readFileSync(path.join(dir, 'a', 'plan.json'), 'utf8')).nodes.find((n: any) => n.id === id).after;
-  muwi(['node', 'read', 'start']);
-  muwi(['node', 'read', 'done', '읽음']);
-  // impl은 사람의 답을 기다리고, check는 시작 전이다. 새 요청은 read 다음에 한 일이다
-  muwi(['node', 'impl', 'start']);
-  muwi(['node', 'impl', 'wait', 'A안과 B안 중 어느 쪽?']);
-  const added = muwi(['add', 'docs', '문서 고치기', '--why', '새 요청']);
-  assert.equal(added.code, 0, added.err);
-  assert.deepEqual(after('docs'), ['read']);
-  assert.match(added.out, /자리를 주지 않아 read 뒤에 이었어요/);
-  // 하고 있는 노드는 진행된 끝이다: 그 다음 일로 잇는다
-  muwi(['node', 'docs', 'start']);
-  muwi(['add', 'docs2', '문서 더', '--why', '이어서']);
-  assert.deepEqual(after('docs2'), ['docs']);
-  // 갈래 둘이 모두 진행됐으면 둘 다의 뒤에 (read는 뒤에 진행된 노드가 있어서 끝이 아니다)
-  muwi(['node', 'docs', 'done', '고침']);
-  muwi(['node', 'impl', 'start']);
-  muwi(['add', 'wrap', '정리', '--why', '마무리']);
-  assert.deepEqual(after('wrap').sort(), ['docs', 'impl']);
-  // 잠시 멈춘 노드(시작했다가 앞에 끼어든 노드에 자리를 내준 노드)는 진행된 끝이 아니다
-  const b = bench();
-  b.muwi(['plan', '--work', 'b', PLAN]);
-  b.muwi(['node', 'read', 'start']);
-  b.muwi(['node', 'read', 'done', '읽음']);
-  b.muwi(['node', 'impl', 'start']);
-  b.muwi(['node', 'impl', 'pause']);
-  b.muwi(['add', 'note', '메모', '--why', '먼저']);
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(b.dir, 'b', 'plan.json'), 'utf8')).nodes.find((n: any) => n.id === 'note').after, ['read']);
-  // 끝났거나 하는 노드가 없으면 시작한 적 있는 노드(응답 대기·막힘) 뒤에. 시작 전 노드 밑에 붙지 않는다
-  const c = bench();
-  c.muwi(['plan', '--work', 'c', PLAN]);
-  c.muwi(['node', 'read', 'start']);
-  c.muwi(['node', 'read', 'wait', '어느 티켓?']);
-  const asked = c.muwi(['add', 'x', '먼저 할 일', '--why', '새 요청']);
-  assert.match(asked.out, /자리를 주지 않아 read 뒤에 이었어요/);
 });
 
 test('터미널 연결과 보기 없이: 기록과 보기는 되고, 새 세션 명령은 무엇이 필요한지 알린다. 연결과 보기는 setup이 적어 둔 경로에서 불러오고, 불러오지 못해도 훅은 그대로 돈다', () => {
