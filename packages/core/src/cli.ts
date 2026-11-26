@@ -7,7 +7,7 @@ import path from 'node:path';
 import { ROOT, adoptSpawn, guideUpdate, handleHook, sessionInstructions } from './hook.ts';
 import { cmdBoard } from './board.ts';
 import { cmdPeek, cmdResume, cmdRun, cmdTell, cmdTidy, cmdWait } from './delegate.ts';
-import { Fail, dur, join, needPlan, out, parseArgs, resolveWork, str, type Args } from './kit.ts';
+import { Fail, dur, join, joinToClose, needPlan, out, parseArgs, resolveWork, str, type Args } from './kit.ts';
 import { hasTerminals, loadPlugins, pluginFailures, terminals, views } from './plugins.ts';
 import { earlyStart, fromSubagent, markNode } from './node.ts';
 import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
@@ -360,7 +360,8 @@ function cmdRemove(a: Args, dir: string) {
     if (!input) throw new Fail(`노드를 빼지 못했어요:\n${problems.map(p => `  - ${p}`).join('\n')}`, 2);
     return input;
   }, a);
-  join(dir, work);
+  // 넘어간 뒤 하던 작업을 정리하는 것일 수 있다: 붙어 있는 작업을 바꾸지 않는다
+  joinToClose(dir, work);
   out(`노드를 뺐어요: ${id} (${work}, 노드 ${plan.nodes.length}개)`);
   // 하던 노드를 뺀 것이면 알려 둔다. 그 노드의 기록은 muwi show의 "빠진 노드"에 남는다
   if (was !== 'todo') out(`${id}는 ${{ doing: '하는 중', waiting: '사람을 기다리는 중', blocked: '막힌 상태', done: '끝난 상태', todo: '' }[was]}였어요. 기록은 남아 있어요 (muwi show ${work}의 빠진 노드).`);
@@ -385,6 +386,8 @@ function cmdNode(id: string | undefined, action: string | undefined, text: strin
     throw new Fail(`없는 노드예요: ${id}. 있는 노드: ${plan.nodes.map(n => n.id).join(', ')}. 새 노드면 muwi add <id> "<제목>" --after <앞 노드> --why "<이유>"로 먼저 넣어요 (이 작업의 흐름에 없는 일이면 새 작업으로).`);
   }
   if (sub) bySubagent = true;
+  // 끝내는 것은 넘어간 뒤 하던 작업을 정리하는 것일 수 있다: 붙어 있는 작업을 바꾸지 않는다
+  else if (status === 'done') joinToClose(dir, work);
   else join(dir, work);
   const done = result.nodes.filter(n => n.status === 'done').length;
   const label = { doing: '시작', done: '끝', waiting: '응답 대기', blocked: '막힘', todo: '잠시 멈춤 (다시 start하면 같은 회차로 이어져요)' }[status];

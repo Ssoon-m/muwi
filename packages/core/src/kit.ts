@@ -111,25 +111,40 @@ export function join(dir: string, work: string) {
   const prev = readSession(dir, key)?.work;
   attach(dir, key, work);
   if (prev && prev !== work) {
-    const note = leftBehind(dir, prev);
-    if (note) out(note);
+    const note = leftBehind(dir, prev, key);
+    // 명령의 출력(--json 등)과 섞이지 않게 표준 오류로 낸다. AI는 둘 다 본다
+    if (note) process.stderr.write(`${note}\n`);
   }
 }
 
-const LEFT_NAME: Record<string, string> = { todo: '시작 전', doing: '작업 중', waiting: '응답 대기', blocked: '막힘' };
+/**
+ * 노드를 끝내거나 빼는 명령: 세션이 다른 작업에 붙어 있으면 붙는 작업을 바꾸지 않는다.
+ * 넘어간 뒤 하던 작업을 정리하는 것이다 (muwi node <id> done --work <하던 작업>). 붙는 작업을 바꾸면 지금 작업을 떠난 것이 되어 거꾸로 된 안내가 나온다
+ */
+export function joinToClose(dir: string, work: string) {
+  const key = sessionKey();
+  if (!key) return;
+  const now = readSession(dir, key)?.work;
+  if (now && now !== work) return;
+  join(dir, work);
+}
 
 /**
- * 세션이 다른 작업으로 옮겨 붙었다. 그 때문에 하던 작업이 맡은 세션 없이 멈췄으면(다른 세션도 붙어 있지 않다) 남긴 노드를 정리하라고 알린다.
- * 같은 대화에서 새 일을 시키면 세션은 새 작업으로 넘어가고, 하던 작업의 남은 노드(커밋·보고 등)는 그래프에 "멈춤"으로 계속 남는다
+ * 세션이 다른 작업으로 옮겨 붙었다. 하던 작업에 끝나지 않은 노드가 남았고 그 작업에 붙은 다른 세션이 없으면, 남은 노드를 정리하라고 알린다.
+ * 같은 대화에서 새 일을 시키면 세션은 새 작업으로 넘어가고, 하던 작업의 남은 노드(커밋·보고 등)를 적어 줄 쪽이 없어 그래프에 그대로 남는다
+ * (시작 전 노드만 남으면 "멈춤", 하던 노드나 묻던 노드를 남기면 "작업 중"·"응답 대기")
  */
-function leftBehind(dir: string, work: string): string | null {
+function leftBehind(dir: string, work: string, key: string): string | null {
   const v = loadView(dir, work);
-  if (!v || v.state !== 'stalled' || v.between !== 'gone') return null;
+  if (!v || v.state === 'done') return null;
+  if (Object.entries(v.sessions).some(([k, s]) => k !== key && s.work === work)) return null;
   const left = v.nodes.filter(n => n.status !== 'done');
   if (!left.length) return null;
+  const name = (n: (typeof left)[number]) =>
+    n.status === 'todo' ? ((n.attempts ?? 0) > 0 ? '잠시 멈춤' : '시작 전') : ({ doing: '작업 중', waiting: '응답 대기', blocked: '막힘' } as Record<string, string>)[n.status];
   return [
-    `※ 이 세션이 하던 작업 ${work}에 끝나지 않은 노드가 남았어요: ${left.map(n => `${n.id}(${LEFT_NAME[n.status] ?? n.status})`).join(', ')}. 맡은 세션이 없어 그래프에 "멈춤"으로 남아요.`,
-    `  이미 끝낸 일이면 muwi node <id> done "<결과>" --work ${work}, 하지 않을 일이면 muwi remove <id> --why "<이유>" --work ${work}로 맞춘 뒤, 지금 작업에는 --work를 붙여 적어요. 나중에 이어 할 일이면 그대로 둬요.`,
+    `※ 이 세션이 하던 작업 ${work}에 끝나지 않은 노드가 남았어요: ${left.map(n => `${n.id}(${name(n)})`).join(', ')}. 이 작업을 맡은 세션이 없어 그래프에 그대로 남아요.`,
+    `  이미 끝낸 일이면 muwi node <id> done "<결과>" --work ${work}, 하지 않을 일이면 muwi remove <id> --why "<이유>" --work ${work}로 맞춰요 (이 두 명령은 지금 붙어 있는 작업을 바꾸지 않아요). 나중에 이어 할 일이면 그대로 둬요.`,
   ].join('\n');
 }
 

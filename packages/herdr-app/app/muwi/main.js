@@ -706,6 +706,8 @@ export default class Muwi extends View {
     if (this.pinned() || !this.data || checking()) return;
     const term = focused()?.terminal ?? null;
     if (!term) return; // 그래프 칸 같은 mod 칸에 키보드가 있다
+    // 보는 중을 정하는 터미널. 키보드가 그래프 칸으로 가도 보는 중이 남듯이 "같은 터미널"도 이 터미널로 정한다
+    this.lastTerm = term;
     const work = links.get(term);
     const known = Boolean(work) && (this.data.works ?? []).some((w) => w.work === work);
     // 에이전트가 떴는지도 함께 본다. 새 탭은 셸로 시작해서 그 뒤에 claude가 뜨므로, 뜨는 순간 다시 따져야
@@ -987,9 +989,9 @@ export default class Muwi extends View {
     const per = Math.max(1, Math.min(grid.cols, shown.length));
     const lines = [];
     for (let i = 0; i < shown.length; i += per) lines.push(shown.slice(i, i + per));
-    // 키보드가 있는 터미널의 지금 세션. 그 세션이 한 작업이 여럿이면 보는 중은 하나(지금 붙어 있는 작업)이고, 나머지에는 "같은 터미널"을 붙인다
-    const f = focused();
-    const here = f ? this.ownerOf(f.shown ?? f.terminal) : null;
+    // 보는 중을 정한 터미널(키보드가 마지막으로 있던 터미널)의 지금 세션. 그 세션이 한 작업이 여럿이면 보는 중은 하나(지금 붙어 있는 작업)이고,
+    // 나머지에는 "같은 터미널"을 붙인다
+    const here = this.lastTerm ? this.ownerOf(this.lastTerm) : null;
     const head = { viewing: plan.viewing, pins: plan.pins, split: !focus, here };
     const big = v_flex().id("lanes").flex_1().min_w(0).min_h(0).gap(LANE.gap).p(LANE.pad)
       .children(lines.map((line, n) => h_flex().id(`lane-line-${n}`).flex_1().min_w(0).min_h(0).items_stretch().gap(LANE.gap)

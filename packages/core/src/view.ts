@@ -417,11 +417,17 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
   // 하는 노드가 없다: 앞 노드를 끝내고 다음 노드를 아직 시작하지 않았다. 그 작업에 붙어 있는 세션이 지금 하는 일로 정한다
   const between = base ? undefined : betweenOf(plan.work, sessions, closed);
   const state: WorkState = base ?? BETWEEN_STATE[between!];
-  // 맡은 세션이 없다: 이 작업을 하던 세션 중 살아 있는 것이 다른 작업에 붙어 있으면 그리로 간 것이다 (가장 최근에 본 세션)
+  // 맡은 세션이 없다: 이 작업을 직접 한 세션(계획·노드를 서브에이전트 없이 적은 세션) 중 살아 있는 것이 다른 작업에 붙어 있으면 그리로 간 것이다.
+  // 이 작업에 가장 늦게 적은 세션을 따른다 (다른 작업의 세션이 서브에이전트로 노드 하나를 도운 것은 따르지 않는다)
+  const lastHere = new Map<string, number>();
+  events.forEach((e, i) => {
+    if (e.session && (e.type === 'plan' || (e.type === 'node' && !e.agent))) lastHere.set(e.session, i);
+  });
   const movedTo = between === 'gone'
-    ? Object.entries(sessions)
-      .filter(([key, s]) => !closed.has(key) && s.work && s.work !== plan.work)
-      .sort((a, b) => (b[1].seenAt ?? '').localeCompare(a[1].seenAt ?? ''))[0]?.[1].work
+    ? [...lastHere]
+      .filter(([key]) => !closed.has(key) && sessions[key]?.work && sessions[key].work !== plan.work)
+      .sort((a, b) => b[1] - a[1])
+      .map(([key]) => sessions[key].work)[0]
     : undefined;
 
   // 새 결과: 마지막 노드가 끝난 뒤로 사람이 보지 않았다. 이 기능이 생기기 전에 끝난 작업은 본 것으로 친다
