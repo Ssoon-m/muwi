@@ -14,7 +14,7 @@ const verify = {
 const rework = { id: 'rework', title: '고침', after: ['verify'], status: 'done', attempts: 1, spentMs: 100, tries: [] };
 const view = {
   nodes: [verify, rework],
-  flow: { cards: [{ id: 'verify', node: 'verify', tries: [1] }, { id: 'rework', node: 'rework' }, { id: 'verify#2', node: 'verify', tries: [2] }], edges: [] },
+  drawn: { cards: [{ id: 'verify', node: 'verify', tries: [1] }, { id: 'rework', node: 'rework' }, { id: 'verify#2', node: 'verify', tries: [2] }], edges: [] },
 };
 
 test('나뉜 카드: 앞 카드는 그 회차가 남긴 상태·결과·시간으로, 지금 회차가 든 카드는 지금 상태로 그린다', () => {
@@ -42,7 +42,7 @@ test('한 카드에 회차 여럿이면 "1~2회차"로 적는다', () => {
   assert.equal(cardNode(verify, { id: 'verify', node: 'verify', tries: [1, 2] }).round, '1~2회차');
 });
 
-test('보여 줄 노드는 그 노드의 마지막 카드로 찾는다. flow가 없는 기록은 노드 하나가 카드 하나다', () => {
+test('보여 줄 노드는 그 노드의 마지막 카드로 찾는다. drawn이 없는 기록은 노드 하나가 카드 하나다', () => {
   assert.deepEqual(lastCards(view, ['verify', 'rework']), ['verify#2', 'rework']);
   const plain = { nodes: [rework] };
   assert.deepEqual([...cardNodes(plain).keys()], ['rework']);

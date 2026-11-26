@@ -1982,7 +1982,7 @@ export default class Muwi extends View {
     const size = laneSize(lane) ?? (this.lanesOn ? null : this.canvasSize);
     const L = view.layout;
     const c = this.colors(t);
-    // 카드마다 그 카드가 그리는 노드. 다시 한 노드는 그 사이에 끝난 노드 뒤에 새 카드로 나뉜다 (core의 flow.ts, cards.js)
+    // 카드마다 그 카드가 그리는 노드. 다시 한 노드는 그 사이에 끝난 노드 뒤에 새 카드로 나뉜다 (core의 flow.ts가 주는 drawn, cards.js)
     const byId = Object.fromEntries(cardNodes(view));
 
     // 작업이 바뀌거나, 지금 일어나는 곳이 바뀌거나, 계획의 모양이 바뀌면 다시 맞춘다

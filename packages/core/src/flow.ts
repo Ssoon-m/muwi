@@ -15,7 +15,7 @@ import type { Event, NodeStatus, Plan } from './store.ts';
 
 /** 그리는 카드 하나. 다시 한 노드가 여러 카드로 나뉘면 카드마다 그리는 회차(tries)를 적는다. 나뉘지 않은 노드는 id가 노드 id다 */
 export type Card = { id: string; node: string; tries?: number[] };
-export type Flow = { cards: Card[]; edges: { from: string; to: string }[] };
+export type Drawn = { cards: Card[]; edges: { from: string; to: string }[] };
 
 type Attempt = {
   n: number;
@@ -35,7 +35,7 @@ type Draw = { id: string; node: string; tries: number[]; start: number };
 /** 이 회차 카드의 id. 노드 id에는 #이 들어가지 않는다 (plan.ts의 NODE_ID) */
 export const cardId = (node: string, n: number) => `${node}#${n}`;
 
-export function flowOf(plan: Plan, events: Event[]): Flow {
+export function flowOf(plan: Plan, events: Event[]): Drawn {
   const byId = new Map(plan.nodes.map(n => [n.id, n]));
   const next = new Map(plan.nodes.map(n => [n.id, [] as string[]]));
   for (const n of plan.nodes) for (const a of n.after) next.get(a)?.push(n.id);

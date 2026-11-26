@@ -24,7 +24,7 @@ export const BOARD_VERSION = 1;
 async function withLayout(v: WorkView, prefer: Flow = 'right', fit?: Fit) {
   const { layoutFor, layoutProblems } = await import('./layout.ts');
   // 계획의 선이 아니라 실제 흐름에 맞춘 카드와 선을 배치한다 (flow.ts)
-  const { layout, flow } = await layoutFor({ nodes: v.flow.cards, edges: v.flow.edges }, prefer, fit);
+  const { layout, flow } = await layoutFor({ nodes: v.drawn.cards, edges: v.drawn.edges }, prefer, fit);
   return { ...v, layout, flow, layoutProblems: layoutProblems(layout, flow) };
 }
 

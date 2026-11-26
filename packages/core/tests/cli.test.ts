@@ -622,6 +622,21 @@ test('보관: 끝났거나 멈춘 작업을 목록에서 치우고, 기록은 �
   assert.match(muwi(['unarchive', 'fin']).out, /fin: 보관한 작업이 아니에요/);
 });
 
+test('muwi board: 그래프는 실제 흐름대로 그린 카드와 선(drawn)으로 배치한다. 다시 한 회차는 그 사이에 끝난 노드 뒤에 새 카드로', () => {
+  const { muwi } = bench();
+  muwi(['plan', '--work', 'a', PLAN]);
+  for (const [id, what] of [['read', 'start'], ['read', 'done'], ['impl', 'start'], ['impl', 'done'], ['check', 'start'], ['check', 'done'], ['impl', 'start']]) muwi(['node', id, what]);
+  const g = JSON.parse(muwi(['board', '--work', 'a']).out).selected;
+  // 계획의 선은 그대로다
+  assert.deepEqual(g.edges.map((e: any) => `${e.from}>${e.to}`).sort(), ['impl>check', 'read>impl']);
+  assert.deepEqual(g.drawn.cards.map((c: any) => c.id), ['read', 'impl', 'impl#2', 'check']);
+  assert.deepEqual(g.drawn.edges.map((e: any) => `${e.from}>${e.to}`).sort(), ['check>impl#2', 'impl>check', 'read>impl']);
+  // 배치는 그 카드들로 한다. 그리는 방향(flow)과 이름이 겹치지 않는다
+  assert.deepEqual(g.layout.nodes.map((n: any) => n.id).sort(), ['check', 'impl', 'impl#2', 'read']);
+  assert.equal(g.flow, 'right');
+  assert.deepEqual(g.layoutProblems, []);
+});
+
 test('muwi board: 작업을 고르지 않으면 보관한 작업은 맨 위여도 고르지 않는다 (모두 보관했으면 고른 작업이 없다)', () => {
   const { muwi } = bench();
   const one = JSON.stringify({ title: '끝낼 작업', nodes: [{ id: 'a', title: 'A' }] });
