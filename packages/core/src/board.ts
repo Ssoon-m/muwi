@@ -2,7 +2,7 @@
 //   작업 목록, 고른 작업의 노드와 기록, 그래프 좌표, 이어 하기에 쓸 사실, 최근 세션과 그 터미널, 보기가 더한 값.
 //   --work를 여러 번 주면 그 작업들의 그래프를 모두 준다 (graphs. 한 칸에 여러 작업을 나눠 그리는 보기가 쓴다).
 //   새 판이 나왔으면 그것도 (update. 보기가 배너로 알린다. 업데이트는 muwi update가 한다).
-// 보기는 이것만 읽고 그린다. 기록을 바꾸지 않는다.
+// 보기는 이것만 읽고 그린다. 기록을 바꾸지 않는다 (휴지통에서 30일 지난 작업만 비운다).
 import path from 'node:path';
 import { ROOT } from './events.ts';
 import { str, type Args, out } from './kit.ts';
@@ -11,6 +11,7 @@ import { terminals, views } from './plugins.ts';
 import { resumeFacts } from './resume.ts';
 import { recentSessions } from './session.ts';
 import { clock, readJson } from './store.ts';
+import { purgeTrash } from './trash.ts';
 import { newerKnown, releaseUrl } from './update.ts';
 import { PAST_DAYS, loadBoard, loadView, type WorkView } from './view.ts';
 // 그래프 배치(ELK)는 무거워서 board를 그릴 때만 불러온다 (훅은 이 파일을 자주 불러온다)
@@ -29,6 +30,12 @@ async function withLayout(v: WorkView, prefer: Flow = 'right', fit?: Fit) {
 export async function cmdBoard(a: Args, dir: string) {
   // 작업 시간을 센 때. 보기는 진행 중인 노드에 이 뒤로 흐른 시간을 더해 초마다 늘린다
   const now = clock.now().getTime();
+  // 휴지통에서 30일 지난 작업을 비운다 (보기가 자주 부르므로 따로 비우는 때를 두지 않아도 된다). 못 비워도 목록은 보여 준다
+  try {
+    purgeTrash(dir);
+  } catch {
+    // 다음에 다시 비운다
+  }
   const board = loadBoard(dir);
   // --work를 여러 번 주면 그 작업들을 모두 그린다. 첫 작업이 고른 작업이다.
   // 고른 작업이 없으면 맨 위 작업을 보여 준다. 접어 둔 지난 작업보다 지금 작업이 먼저이고, 보관한 작업은 고르지 않는다 (모두 보관했으면 고른 작업이 없다)

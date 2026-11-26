@@ -17,6 +17,8 @@ muwi가 남기는 파일의 위치와 형식을 정리했습니다. 기록을 �
   .sessions/
     <세션>.json       세션 정보
     <세션>.ok         이번 요청에서 계획 확인을 마쳤다는 표시
+  .trash/
+    <지운 때>-<작업>/   지운 작업 (muwi delete). 30일 동안 muwi restore로 되살린다
   config.json         설정
   setup.json          muwi setup이 설치한 항목
   .hook-errors.log    훅에서 난 오류
@@ -64,6 +66,8 @@ muwi가 남기는 파일의 위치와 형식을 정리했습니다. 기록을 �
 | `session` | 대화가 요약될 때 | `what`: `compact` |
 | `viewed` | 끝난 작업을 사람이 처음 볼 때 (그래프 칸이 사람이 고른 그 작업을 보여 줄 때, 그 작업을 한 대화의 터미널에 키보드가 있을 때, 또는 `muwi viewed`) | 없음 |
 | `archive`, `unarchive` | 사람이 작업을 보관하거나 꺼낼 때 (`muwi archive`, `muwi unarchive`, 그래프 칸의 보관 버튼) | 없음 |
+
+보관한 작업을 지우면(`muwi delete`) 사건을 적지 않고 작업 폴더를 통째로 `~/.muwi/.trash/<지운 때(ms)>-<작업>/`으로 옮깁니다. 되살리면(`muwi restore`) 그대로 돌아오므로 기록은 지우기 전과 같습니다. 30일이 지난 것은 그 뒤에 muwi가 휴지통을 볼 때(그래프 칸이 목록을 읽을 때, `muwi delete`·`muwi restore`) 지웁니다.
 
 `skill`과 `agent`의 `node`, `attempt`는 그 일이 일어난 순간에 하고 있던 노드와 회차입니다. 없으면 어느 노드도 하고 있지 않았다는 뜻입니다.
 

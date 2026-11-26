@@ -456,6 +456,102 @@ test('setup.json이 깨져도 명령과 훅은 돈다 (훅은 지침을 준다).
   assert.equal(JSON.parse(fs.readFileSync(setupFile, 'utf8')).root, path.resolve(import.meta.dirname, '..'));
 });
 
+test('삭제: 보관한 작업만 지운다 (끝 → 보관 → 삭제). 작업 폴더를 통째로 휴지통에 옮기고, 되살리면 보관함으로 돌아온다', () => {
+  const { dir, muwi } = bench();
+  const one = JSON.stringify({ title: '끝낼 작업', nodes: [{ id: 'a', title: 'A' }] });
+  // fin은 세션 s2가 맡았다 (지운 뒤에 그 세션이 적으려 하는지 본다)
+  for (const w of ['fin', 'fin2', 'kept']) {
+    const session = w === 'fin' ? 's2' : 'lead';
+    muwi(['plan', '--work', w, '--request', '끝내 줘', one], { session });
+    muwi(['node', 'a', 'start', '--work', w], { session });
+    muwi(['node', 'a', 'done', '--work', w], { session });
+  }
+  fs.writeFileSync(path.join(dir, 'fin', 'review.md'), '리뷰');
+  const summary = (work: string) => JSON.parse(muwi(['status', '--json', '--all']).out).works.find((w: any) => w.work === work);
+  // 보관하지 않은 작업은 지우지 않는다. 하나라도 안 되면 아무것도 지우지 않는다
+  muwi(['archive', 'fin', 'fin2']);
+  const refused = muwi(['delete', 'fin', 'kept']);
+  assert.equal(refused.code, 1);
+  assert.match(refused.err, /보관한 작업만 지워요 \(끝 → 보관 → 삭제\): kept/);
+  assert.ok(fs.existsSync(path.join(dir, 'fin')));
+  assert.equal(muwi(['delete', 'nope']).code, 1);
+  // 지우면 목록과 폴더에서 빠지고, 폴더는 통째로 휴지통에 있다 (그 폴더에 둔 파일까지)
+  assert.match(muwi(['delete', 'fin']).out, /^fin: 지웠어요\. 30일 동안 휴지통에 있어요/);
+  assert.equal(summary('fin'), undefined);
+  assert.ok(!fs.existsSync(path.join(dir, 'fin')));
+  const trashed = fs.readdirSync(path.join(dir, '.trash'));
+  assert.equal(trashed.length, 1);
+  assert.match(trashed[0], /^\d+-fin$/);
+  assert.equal(fs.readFileSync(path.join(dir, '.trash', trashed[0], 'review.md'), 'utf8'), '리뷰');
+  assert.match(muwi(['restore']).out, /^fin  .+에 지움 · 30일 남음/);
+  // 지운 작업에 붙어 있던 세션은 그 작업에 더 적지 않는다 (계획이 없다)
+  const late = muwi(['node', 'a', 'start'], { session: 's2' });
+  assert.equal(late.code, 1);
+  assert.match(late.err, /어느 작업인지 알 수 없어요/);
+  assert.ok(!fs.existsSync(path.join(dir, 'fin')));
+  // 되살리면 보관한 채로 돌아온다
+  assert.match(muwi(['restore', 'fin']).out, /fin: 되살렸어요\. 보관함에 있어요/);
+  assert.equal(summary('fin').archived, true);
+  assert.equal(fs.readFileSync(path.join(dir, 'fin', 'review.md'), 'utf8'), '리뷰');
+  assert.match(muwi(['restore', 'fin']).err, /휴지통에 없는 작업이에요: fin/);
+  // 보관한 작업을 모두 지운다. 같은 이름의 작업이 새로 생겼으면 되살리지 않는다
+  const all = muwi(['delete', '--archived']).out;
+  assert.match(all, /^fin: 지웠어요/m);
+  assert.match(all, /^fin2: 지웠어요/m);
+  assert.equal(summary('kept').archived, undefined);
+  assert.match(muwi(['delete', '--archived']).out, /지울 보관한 작업이 없어요/);
+  muwi(['plan', '--work', 'fin', '--request', '같은 이름', one]);
+  assert.match(muwi(['restore', 'fin']).err, /같은 이름의 작업이 있어서 되살리지 않았어요: fin/);
+  assert.match(muwi(['restore', 'fin2']).out, /fin2: 되살렸어요/);
+});
+
+test('삭제 뒤: 그 작업에 적으려는 명령은 빈 폴더를 남기지 않고, 그 작업을 하던 세션은 같은 이름으로 다시 만들지 않으며, 되살리기는 막히지 않는다', () => {
+  const { dir, muwi } = bench();
+  const one = JSON.stringify({ title: '끝낼 작업', nodes: [{ id: 'a', title: 'A' }] });
+  const finish = (w: string, session: string) => {
+    muwi(['plan', '--work', w, '--request', '끝내 줘', one], { session });
+    muwi(['node', 'a', 'start', '--work', w], { session });
+    muwi(['node', 'a', 'done', '--work', w], { session });
+    muwi(['archive', w]);
+  };
+  finish('fin', 's2');
+  finish('other', 'lead');
+  // 이름만 받는다 (경로를 주면 다른 폴더를 옮길 수 있다). --archived와 이름은 같이 주지 않는다
+  assert.match(muwi(['delete', '../fin']).err, /작업 이름에는 글자, 숫자/);
+  assert.match(muwi(['delete', '--archived', 'fin']).err, /--archived와 작업 이름을 같이 주지 않아요/);
+  assert.ok(fs.existsSync(path.join(dir, 'fin')));
+  assert.equal(muwi(['delete', 'fin']).code, 0);
+  // --work를 붙여 적어도 계획이 없어 실패하고, 빈 폴더를 남기지 않는다
+  for (const args of [['node', 'a', 'start', '--work', 'fin'], ['add', 'b', 'B', '--work', 'fin'], ['remove', 'a', '--why', 'x', '--work', 'fin']]) {
+    assert.equal(muwi(args, { session: 's2' }).code, 1, args.join(' '));
+    assert.ok(!fs.existsSync(path.join(dir, 'fin')), args.join(' '));
+  }
+  // 그 작업을 하던 세션이나 계획을 고치려는(--why) 쪽은 같은 이름으로 다시 만들지 않는다
+  const again = muwi(['plan', '--work', 'fin', '--request', '이어서', one], { session: 's2' });
+  assert.equal(again.code, 1);
+  assert.match(again.err, /fin: 지운 작업이에요 \(휴지통에 있어요\)\. 이어서 하려면 사람이 muwi restore fin/);
+  assert.equal(muwi(['plan', '--work', 'fin', '--why', '고침', one], { session: 'lead' }).code, 1);
+  assert.ok(!fs.existsSync(path.join(dir, 'fin')));
+  // 빈 폴더만 남아 있으면 치우고 되살린다. 여럿 중 하나가 안 돼도 나머지는 되살린다
+  fs.mkdirSync(path.join(dir, 'fin'));
+  assert.equal(muwi(['delete', 'other']).code, 0);
+  const both = muwi(['restore', 'nope', 'fin', 'other']);
+  assert.equal(both.code, 1);
+  assert.match(both.err, /휴지통에 없는 작업이에요: nope/);
+  assert.match(both.out, /^fin: 되살렸어요/m);
+  assert.match(both.out, /^other: 되살렸어요/m);
+  assert.ok(fs.existsSync(path.join(dir, 'fin', 'plan.json')));
+  assert.ok(!fs.existsSync(path.join(dir, 'fin', '.lock')));
+  // 계획 없는 폴더에 파일이 남아 있으면 덮어쓰지 않는다
+  assert.equal(muwi(['delete', 'fin']).code, 0);
+  fs.mkdirSync(path.join(dir, 'fin'));
+  fs.writeFileSync(path.join(dir, 'fin', 'note.md'), '남은 것');
+  assert.match(muwi(['restore', 'fin']).err, /폴더가 남아 있어서 되살리지 않았어요/);
+  // 다른 세션이 지운 이름으로 새로 시작하는 것은 막지 않는다
+  fs.rmSync(path.join(dir, 'fin'), { recursive: true });
+  assert.equal(muwi(['plan', '--work', 'fin', '--request', '새 일', one], { session: 's3' }).code, 0);
+});
+
 test('보관: 끝났거나 멈춘 작업을 목록에서 치우고, 기록은 그대로 두고, 다시 시작하면 목록으로 돌아온다', () => {
   const { muwi } = bench();
   const one = JSON.stringify({ title: '끝낼 작업', nodes: [{ id: 'a', title: 'A' }] });

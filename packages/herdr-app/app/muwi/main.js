@@ -69,6 +69,16 @@ function remember(key, value) {
   }
 }
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+/**
+ * 보관함 일: muwi 명령, 한 줄 결과에서 실제로 바뀐 작업을 알아보는 말, 알림, 되돌리기.
+ * 끝 → 보관 → 삭제 순서다. 삭제는 작업 폴더를 통째로 휴지통에 옮기고 30일 동안 되살릴 수 있다
+ */
+const SHELF = {
+  archive: { done: "보관했어요", busy: "보관하는 중…", fail: "보관하지 못했어요", text: (n) => `${n}개 보관했어요. 목록 맨 아래 "보관"에 있어요`, undo: "unarchive" },
+  unarchive: { done: "목록으로 꺼냈어요", busy: "꺼내는 중…", fail: "꺼내지 못했어요", text: (n) => `${n}개를 목록으로 꺼냈어요`, undo: "archive" },
+  delete: { done: "지웠어요", busy: "지우는 중…", fail: "지우지 못했어요", text: (n) => `${n}개 지웠어요. 30일 동안 휴지통에 있어요`, undo: "restore" },
+  restore: { done: "되살렸어요", busy: "되살리는 중…", fail: "되살리지 못했어요", text: (n) => `${n}개 되살렸어요. 맨 아래 "보관"에 있어요`, undo: "delete" },
+};
 const STATE_NAME = { waiting: "응답 대기", blocked: "막힘", doing: "작업 중", stalled: "멈춤", done: "끝" };
 /**
  * 하는 노드가 없는 작업(앞 노드를 끝내고 다음 노드를 아직 시작하지 않음)은 그 작업의 세션이 하는 일로 보여 준다 (muwi의 between).
@@ -295,6 +305,8 @@ export default class Muwi extends View {
     /** 보는 방식(split 나눠 보기, focus 크게 보기)과 지도 줄을 접었는가. 칸마다 기억한다 */
     this.laneMode = remembered("laneMode") === "focus" ? "focus" : "split";
     this.stripFolded = remembered("stripFolded") === "1";
+    /** 넓은 칸의 오른쪽 기록 칸(작업 · 노드)을 접었는가. 접으면 얇은 띠만 남고 그래프가 그만큼 넓어진다 */
+    this.detailFolded = remembered("detailFolded") === "1";
     /** 여러 작업을 나눠 그리는 중인가 (마지막으로 그린 것) */
     this.lanesOn = false;
     /** 마지막으로 그릴 때 보는 중이던 작업. 바뀌면 큰 그래프를 눌러 고른 것을 푼다 */
@@ -351,7 +363,7 @@ export default class Muwi extends View {
       this.tab = "node";
       // herdr-app check는 견본으로 보관함과 알림 줄까지 그려 본다
       this.showShelf = true;
-      this.shelfToast = { id: 0, text: "1개 보관했어요. 목록 맨 아래 \"보관\"에 있어요", undo: { works: ["finished"], on: false } };
+      this.shelfToast = { id: 0, text: SHELF.delete.text(1), undo: { works: ["finished"], action: "restore" } };
       return;
     }
     this.load(cx);
@@ -817,6 +829,7 @@ export default class Muwi extends View {
       this.lanesBox(t, { targets: sample, viewing: view.work, pins: sample.filter((w) => w !== view.work).slice(0, 3) }, links, live, now, works);
       this.modeControl(t);
       this.idleNote(t);
+      this.detailRail(t);
     }
     const root = v_flex().id("root").size_full().min_h(0).text_color(t.foreground).text_size(12)
       .on_size_change((size, cx) => {
@@ -870,7 +883,8 @@ export default class Muwi extends View {
         .when(Boolean(view) && !wide, (el) => el.child(
           div().flex_none().h(this.drawer ? 36 + drawerH : 36).border_t(1).border_color(t.border).bg(t.surface)
             .child(this.detailPane(t, view, now, true)))))
-      .when(Boolean(view) && wide, (el) => el
+      .when(Boolean(view) && wide && this.detailFolded, (el) => el.child(this.detailRail(t)))
+      .when(Boolean(view) && wide && !this.detailFolded, (el) => el
         // 경계: 끌어서 오른쪽 기록 칸의 너비를 바꾼다
         .child(div().id("detail-edge").w(6).ml(-3).mr(-3).flex_none().h_full().cursor_col_resize()
           .when(Boolean(this.resizing), (el2) => el2.bg(t.accent))
@@ -1394,7 +1408,7 @@ export default class Muwi extends View {
 
   /**
    * 작업 목록: 묶음 머리와 줄들. 끝났거나 멈춘 채로 오래된 작업(past)은 맨 아래에 "지난 작업 N개"로 접어 둔다.
-   * 사람이 보관한 작업(muwi archive)은 그 아래 "보관 N개"로 접어 둔다. 둘 다 지우지는 않는다.
+   * 사람이 보관한 작업(muwi archive)은 그 아래 "보관 N개"로 접어 둔다. 보관한 작업만 지울 수 있다 (끝 → 보관 → 삭제, 휴지통 30일).
    * compact: 사이드바를 좁혀 아이콘만 보일 때
    */
   list(t, works, groups, selected, now, fill, compact) {
@@ -1425,7 +1439,14 @@ export default class Muwi extends View {
           .hover((s) => s.bg(t.hover))
           .on_click((_e, cx) => { this.showShelf = !openShelf; cx.notify(); })
           .child(div().w(14).flex_none().text_size(10).text_color(t.dim).child(openShelf ? "▾" : "▸"))
-          .child(div().flex_1().text_size(11).text_color(t.dim).child(`보관 ${shelf.length}개`)))
+          .child(div().flex_1().text_size(11).text_color(t.dim).child(`보관 ${shelf.length}개`))
+          // 보관한 작업을 한 번에 지운다 (펼쳤을 때만. 무엇을 지우는지 보이게)
+          .when(openShelf, (el2) => el2.child(div().id("delete-shelf").flex_none().px(7).py(2).rounded(5).text_size(10.5).text_color(t.dim).cursor_pointer()
+            .hover((s) => s.text_color(t.blocked).bg(t.hover))
+            .tooltip(`보관한 작업 ${shelf.length}개를 모두 지워요. 작업 폴더째 30일 동안 휴지통에 있어 되살릴 수 있어요`)
+            .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+            .on_click((_e, cx) => { cx.stop_propagation(); this.shelfAct("delete", ["--archived"], cx); })
+            .child(this.shelving === "delete" ? SHELF.delete.busy : "모두 삭제"))))
         .when(openShelf, (el2) => el2.children(shelf.map((w) => row({ kind: "work", w, agents: [], ask: false }))))))
       // 알림은 스크롤 밖, 목록 아래에 붙인다 (목록이 길어도 보인다)
       .when(Boolean(this.shelfToast) && !compact, (el) => el.child(this.toastBar(t)));
@@ -1439,7 +1460,7 @@ export default class Muwi extends View {
       .child(div().flex_1().min_w(0).text_color(n.error ? t.blocked : t.foreground).child(n.text))
       .when(Boolean(n.undo), (el) => el.child(div().id("shelf-undo").flex_none().px(6).py(2).rounded(5).font_medium().text_color(t.accent).cursor_pointer()
         .hover((s) => s.bg(t.hover))
-        .on_click((_e, cx) => { const u = n.undo; this.shelfToast = null; this.shelve(u.works, u.on, cx); })
+        .on_click((_e, cx) => { const u = n.undo; this.shelfToast = null; this.shelfAct(u.action, u.works, cx); })
         .child("되돌리기")))
       .child(div().id("shelf-toast-close").flex_none().px(4).text_color(t.dim).cursor_pointer()
         .hover((s) => s.text_color(t.foreground))
@@ -1448,32 +1469,39 @@ export default class Muwi extends View {
         .child("×"));
   }
 
-  /**
-   * 작업을 보관하거나 꺼낸다 (muwi archive·unarchive). 기록을 바꾸는 것은 muwi 명령이 하고, 이 칸은 다시 읽을 뿐이다.
-   * args: 작업 이름들, 또는 ["--done"] (끝난 작업 모두)
-   */
+  /** 작업을 보관하거나(on) 꺼낸다 (muwi archive·unarchive). args: 작업 이름들, 또는 ["--done"] (끝난 작업 모두) */
   shelve(args, on, cx) {
+    this.shelfAct(on ? "archive" : "unarchive", args, cx);
+  }
+
+  /**
+   * 보관함 일을 한다 (SHELF: 보관, 꺼내기, 삭제, 되살리기). 기록을 바꾸는 것은 muwi 명령이 하고, 이 칸은 다시 읽을 뿐이다.
+   * 결과를 알림으로 띄우고, 실제로 바뀐 작업만 되돌릴 수 있게 한다.
+   * args: 작업 이름들, 또는 ["--done"] (끝난 작업 모두 보관), ["--archived"] (보관한 작업 모두 삭제)
+   */
+  shelfAct(action, args, cx) {
     if (this.shelving) return;
-    this.shelving = true;
+    const a = SHELF[action];
+    this.shelving = action;
     cx.notify();
     cx.spawn(async (cx) => {
-      const r = await runMuwi([on ? "archive" : "unarchive", ...args], { timeout: 10000 }).catch((e) => ({ code: 1, stderr: String(e?.message ?? e) }));
-      this.shelving = false;
+      const r = await runMuwi([action, ...args], { timeout: 10000 }).catch((e) => ({ code: 1, stderr: String(e?.message ?? e) }));
+      this.shelving = null;
       this.stale = true;
+      // muwi가 실제로 바꾼 작업들. 되돌리기는 이 작업들만 되돌린다 (여럿 중 일부가 안 됐어도 된 것은 되돌릴 수 있다)
+      const moved = (r?.stdout ?? "").split("\n").map((l) => l.startsWith(" ") ? null : l.match(new RegExp(`^(.+?): ${a.done}`))?.[1]).filter(Boolean);
+      const undo = moved.length ? { undo: { works: moved, action: a.undo } } : {};
       let toast;
-      if (r?.code !== 0) toast = { text: `${on ? "보관" : "꺼내기"}하지 못했어요: ${(r?.stderr || r?.stdout || "").trim().split("\n")[0]}`, error: true };
-      else {
-        // muwi가 실제로 보관하거나 꺼낸 작업들. 되돌리기는 이 작업들만 되돌린다
-        const moved = (r.stdout ?? "").split("\n").map((l) => /^(.+?): (보관했어요|목록으로 꺼냈어요)/.exec(l)?.[1]).filter(Boolean);
-        toast = moved.length
-          ? { text: on ? `${moved.length}개 보관했어요. 목록 맨 아래 "보관"에 있어요` : `${moved.length}개를 목록으로 꺼냈어요`, undo: { works: moved, on: !on } }
-          : { text: (r.stdout ?? "").trim().split("\n")[0] || "바뀐 것이 없어요" };
-      }
+      if (r?.code !== 0) {
+        const why = `${a.fail}: ${(r?.stderr || r?.stdout || "").trim().split("\n")[0]}`;
+        toast = { text: moved.length ? `${a.text(moved.length)}. ${why}` : why, error: true, ...undo };
+      } else toast = moved.length ? { text: a.text(moved.length), ...undo } : { text: (r.stdout ?? "").trim().split("\n")[0] || "바뀐 것이 없어요" };
       const id = ++this.toastSeq;
       this.shelfToast = { ...toast, id };
       cx.notify();
       // 잠시 뒤에 사라진다. 그 사이에 다른 알림이 떴으면 그대로 둔다
-      await cx.sleep(toast.error ? 10000 : 6000);
+      // 지운 것은 되돌릴 틈을 더 준다 (그 뒤에도 30일 동안 muwi restore로 되살린다)
+      await cx.sleep(toast.error ? 10000 : action === "delete" ? 15000 : 6000);
       if (this.shelfToast?.id === id) {
         this.shelfToast = null;
         cx.notify();
@@ -1487,15 +1515,19 @@ export default class Muwi extends View {
    * (버튼은 테두리까지 아래 줄 글 한 줄보다 낮다). 고른 작업의 시간은 그래프 위 머리줄에 나온다
    */
   shelveButton(t, w, selected) {
-    const on = !w.archived;
-    return div().id(`shelve-${w.work}`).flex_none().px(7).line_height("14px").rounded(4).text_size(10.5).text_color(t.muted).cursor_pointer()
+    const button = (id, label, tip, act, danger) => div().id(id).flex_none().px(7).line_height("14px").rounded(4).text_size(10.5).text_color(t.muted).cursor_pointer()
       .bg(selected ? t.selected : t.hover).border_1().border_color(t.border)
-      .hover((s) => s.text_color(t.foreground).bg(t.surface))
-      .tooltip(on ? "목록에서 치워요. 기록은 그대로예요 (다시 시작하면 돌아와요)" : "목록으로 꺼내요")
+      .hover((s) => s.text_color(danger ? t.blocked : t.foreground).bg(t.surface))
+      .tooltip(tip)
       // 줄을 누른 것으로 치지 않는다 (그 작업을 고르지 않는다)
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-      .on_click((_e, cx) => { cx.stop_propagation(); this.shelve([w.work], on, cx); })
-      .child(on ? "보관" : "꺼내기");
+      .on_click((_e, cx) => { cx.stop_propagation(); this.shelfAct(act, [w.work], cx); })
+      .child(label);
+    if (!w.archived) return button(`shelve-${w.work}`, "보관", "목록에서 치워요. 기록은 그대로예요 (다시 시작하면 돌아와요)", "archive");
+    // 보관한 작업: 꺼내기와 삭제 (끝 → 보관 → 삭제)
+    return h_flex().flex_none().gap(4).items_center()
+      .child(button(`shelve-${w.work}`, "꺼내기", "목록으로 꺼내요", "unarchive"))
+      .child(button(`delete-${w.work}`, "삭제", "작업 폴더째 지워요 (기록과 그 폴더의 파일). 30일 동안 휴지통에 있어 되살릴 수 있어요", "delete", true));
   }
 
   /** 묶음 머리. 누르면 접는다 */
@@ -1513,7 +1545,7 @@ export default class Muwi extends View {
         .tooltip(`끝난 작업 ${g.items.length}개를 모두 보관해요. 목록에서만 빠지고 기록은 그대로예요 (되돌릴 수 있어요)`)
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click((_e, cx) => { cx.stop_propagation(); this.shelve(["--done"], true, cx); })
-        .child(this.shelving ? "보관하는 중…" : "모두 보관")))
+        .child(this.shelving === "archive" ? SHELF.archive.busy : "모두 보관")))
       .when(!open, (el) => el.child(div().text_size(10).text_color(t.dim).child("▸")));
   }
 
@@ -2148,10 +2180,31 @@ export default class Muwi extends View {
       .when(foldable, (el) => el.child(div().id("detail-fold").h(22).px(8).flex().items_center().rounded(5)
         .text_size(10.5).text_color(t.dim).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground))
         .on_click((_e, cx) => { this.drawer = !open; cx.notify(); })
-        .child(open ? "접기 ▾" : "펴기 ▴")));
+        .child(open ? "접기 ▾" : "펴기 ▴")))
+      // 넓은 칸의 오른쪽 기록 칸은 옆으로 접는다 (그래프가 그만큼 넓어진다)
+      .when(!foldable, (el) => el.child(div().id("detail-hide").h(22).px(8).flex().items_center().rounded(5)
+        .text_size(10.5).text_color(t.dim).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground))
+        .tooltip("기록 칸을 접어 그래프를 넓게 봐요")
+        .on_click((_e, cx) => this.setDetailFolded(true, cx))
+        .child("접기 ▸")));
     return v_flex().size_full().min_h(0)
       .child(strip)
       .when(open, (el) => el.child(div().flex_1().min_h(0).child(this.detail(t, view, now))));
+  }
+
+  /** 접은 기록 칸: 오른쪽 끝의 얇은 띠. 누르면 편다 */
+  detailRail(t) {
+    return v_flex().id("detail-rail").w(28).flex_none().h_full().pt(8).items_center().border_l(1).border_color(t.border).bg(t.surface)
+      .cursor_pointer().hover((s) => s.bg(t.hover)).tooltip("기록 칸 펴기 (작업 · 노드)")
+      .on_click((_e, cx) => this.setDetailFolded(false, cx))
+      .child(div().text_size(11).text_color(t.dim).child("◂"));
+  }
+
+  /** 기록 칸을 접거나 편다. 칸마다 따로이고, Herdr 앱을 다시 켜면 마지막으로 고른 대로 시작한다 */
+  setDetailFolded(folded, cx) {
+    this.detailFolded = folded;
+    remember("detailFolded", folded ? "1" : "0");
+    cx.notify();
   }
 
   /** 기록: 작업 탭이면 시킨 말과 계획이 바뀐 기록, 노드 탭이면 고른 노드 */

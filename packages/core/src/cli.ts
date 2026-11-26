@@ -17,9 +17,10 @@ import { adapterOf } from './connectors/index.ts';
 import { gaps } from './connectors/types.ts';
 import { TOOLS, toolById } from './connectors/tools.ts';
 import {
-  SCHEMA, appendEvent, listWorks, nowIso, readConfig, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
+  SCHEMA, appendEvent, checkWorkName, listWorks, nowIso, readConfig, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
   type NodeStatus, type Plan, type RunBy, type ShowIn,
 } from './store.ts';
+import { TRASH_DAYS, daysLeft, listTrash, purgeTrash, restoreWork, trashWork } from './trash.ts';
 import { afterCommand, cacheFile, cachedLatest, checkLatest, releaseUrl, updateTarget } from './update.ts';
 import { PAST_DAYS, loadBoard, loadView, type Actor, type Between, type NodeView, type Quiet, type Try, type WorkView } from './view.ts';
 
@@ -61,6 +62,9 @@ const HELP = `사용법: muwi <명령>
   muwi archive <작업>… | --done        끝났거나 멈춘 작업을 목록에서 치운다 (보관). 기록은 그대로 있고, 다시 시작하면 목록으로 돌아온다
                                        --done: 끝난 작업을 모두 보관한다
   muwi unarchive <작업>…               보관한 작업을 목록으로 꺼낸다
+  muwi delete <작업>… | --archived     보관한 작업을 지운다 (끝 → 보관 → 삭제). 작업 폴더를 통째로 휴지통에 옮기고 30일 뒤에 비운다
+                                       --archived: 보관한 작업을 모두 지운다
+  muwi restore [<작업>…]               지운 작업을 휴지통에서 되살린다 (보관함으로 돌아온다). 작업 없이 부르면 휴지통 목록
   muwi show [<작업>] [--json]           작업 하나의 기록: 노드, 읽은 skill, 계획이 바뀐 이유, 문제 표시
   muwi session                         이 세션이 붙어 있는 작업과 읽은 skill
   muwi guide                           작업 진행 방식(지침)을 보여 준다. muwi가 업데이트되면 muwi 명령의 출력 끝에도 한 번 나온다
@@ -161,6 +165,11 @@ function savePlan(dir: string, work: string, make: (old: Plan | null) => PlanInp
   const why = str(a, 'why')?.trim() || undefined;
   return withLock(workDir(dir, work), () => {
     const old = readPlan(dir, work);
+    // 지운 작업을 하던 세션이 계획을 고치려 하거나(--why), 그 작업에 붙어 있던 세션이 다시 적으면 같은 이름의 빈 새 작업을 만들지 않는다.
+    // 만들면 휴지통의 그 작업을 되살릴 수 없게 된다. 다른 세션이 지운 이름으로 새로 시작하는 것은 막지 않는다
+    if (!old && listTrash(dir).some(t => t.work === work) && (why || (key && readSession(dir, key)?.work === work))) {
+      throw new Fail(`${work}: 지운 작업이에요 (휴지통에 있어요). 이어서 하려면 사람이 muwi restore ${work}로 되살려야 해요. 새로 시작하려면 다른 이름으로 계획을 적어요`);
+    }
     const input = make(old);
     const at = nowIso();
     if (!old) {
@@ -414,6 +423,70 @@ function cmdArchive(a: Args, dir: string, on: boolean) {
     appendEvent(dir, v.work, { type: on ? 'archive' : 'unarchive' }, null);
     out(on ? `${v.work}: 보관했어요. 목록에서 빠지고 기록은 그대로 있어요 (꺼내려면 muwi unarchive ${v.work})` : `${v.work}: 목록으로 꺼냈어요`);
   }
+}
+
+/**
+ * 삭제: 보관한 작업의 폴더를 통째로(계획·기록과 그 폴더에 둔 파일까지) 휴지통으로 옮긴다. 끝 → 보관 → 삭제 순서라 보관하지 않은 작업은 지우지 않는다.
+ * TRASH_DAYS 동안 muwi restore로 되살린다
+ */
+function cmdDelete(a: Args, dir: string) {
+  purgeTrash(dir);
+  if (a.flags.archived && a.pos.length) throw new Fail('--archived와 작업 이름을 같이 주지 않아요 (--archived는 보관한 작업을 모두 지워요)');
+  const names = a.flags.archived ? loadBoard(dir).works.filter(w => w.archived).map(w => w.work) : a.pos;
+  if (!names.length) {
+    if (a.flags.archived) return out('지울 보관한 작업이 없어요');
+    throw new Fail('지울 작업을 적어요: muwi delete <작업>… (보관한 작업을 모두 지우려면 --archived)');
+  }
+  // 작업 이름만 받는다 (경로를 주면 다른 폴더를 옮길 수 있다)
+  for (const work of names) {
+    const bad = checkWorkName(work);
+    if (bad) throw new Fail(bad);
+  }
+  const views = names.map(work => {
+    const v = loadView(dir, work);
+    if (!v) throw new Fail(`없는 작업이에요: ${work} (muwi status --all로 목록을 봐요)`);
+    return v;
+  });
+  // 하나라도 받을 수 없으면 아무것도 지우지 않는다
+  const kept = views.filter(v => !v.archived);
+  if (kept.length) throw new Fail(`보관한 작업만 지워요 (끝 → 보관 → 삭제): ${kept.map(v => v.work).join(', ')}. 먼저 muwi archive로 보관해요`);
+  // 작업마다 잠그고 다시 확인한 뒤 옮긴다 (그 사이에 다시 시작한 작업은 지우지 않는다). 하나가 안 돼도 나머지는 지운다
+  const failed: string[] = [];
+  for (const work of names) {
+    try {
+      withLock(workDir(dir, work), () => {
+        if (!loadView(dir, work)?.archived) throw new Fail('지우는 사이에 다시 시작했어요');
+        trashWork(dir, work);
+      });
+      out(`${work}: 지웠어요. ${TRASH_DAYS}일 동안 휴지통에 있어요 (되살리려면 muwi restore ${work})`);
+    } catch (e: any) {
+      failed.push(`${work}(${e?.message ?? e})`);
+    }
+  }
+  if (failed.length) throw new Fail(`지우지 못했어요: ${failed.join(', ')}`);
+}
+
+/** 지운 작업을 휴지통에서 되살린다 (가장 최근에 지운 것). 보관한 채로 돌아오므로 보관함에 있다. 작업 없이 부르면 휴지통 목록 */
+function cmdRestore(a: Args, dir: string) {
+  purgeTrash(dir);
+  if (!a.pos.length) {
+    const list = listTrash(dir);
+    if (!list.length) return out('휴지통이 비어 있어요');
+    for (const t of list) out(`${t.work}  ${new Date(t.at).toLocaleString()}에 지움 · ${daysLeft(t)}일 남음`);
+    return out('되살리려면 muwi restore <작업> (같은 작업이 여럿이면 가장 최근에 지운 것)');
+  }
+  // 하나가 안 돼도 나머지는 되살린다
+  const failed: string[] = [];
+  for (const work of a.pos) {
+    const bad = checkWorkName(work);
+    const r = bad ? null : restoreWork(dir, work);
+    if (bad) failed.push(bad);
+    else if (r === null) failed.push(`휴지통에 없는 작업이에요: ${work} (muwi restore로 목록을 봐요)`);
+    else if (r === 'taken') failed.push(`같은 이름의 작업이 있어서 되살리지 않았어요: ${work}`);
+    else if (r === 'leftover') failed.push(`${workDir(dir, work)} 폴더가 남아 있어서 되살리지 않았어요 (계획이 없는 폴더예요. 치우고 다시 해요)`);
+    else out(`${work}: 되살렸어요. 보관함에 있어요 (목록으로 꺼내려면 muwi unarchive ${work})`);
+  }
+  if (failed.length) throw new Fail(failed.join('\n'));
 }
 
 function cmdViewed(a: Args, dir: string) {
@@ -772,7 +845,7 @@ const help = () => {
 
 /** 코어의 명령. 보기가 같은 이름의 명령을 더해도 코어가 먼저다 */
 const CORE = new Set([
-  'plan', 'add', 'remove', 'node', 'flag', 'viewed', 'show', 'status', 'session', 'guide', 'board',
+  'plan', 'add', 'remove', 'node', 'flag', 'viewed', 'delete', 'restore', 'show', 'status', 'session', 'guide', 'board',
   'run', 'wait', 'peek', 'tell', 'tidy', 'resume', 'hook', 'setup', 'config', 'version', '--version', '-v', 'help', '--help', '-h',
 ]);
 
@@ -792,6 +865,8 @@ async function run(cmd: string | undefined, a: Args, dir: string) {
     case 'viewed': return cmdViewed(a, dir);
     case 'archive': return cmdArchive(a, dir, true);
     case 'unarchive': return cmdArchive(a, dir, false);
+    case 'delete': return cmdDelete(a, dir);
+    case 'restore': return cmdRestore(a, dir);
     case 'show': return cmdShow(a, dir);
     case 'status': return cmdStatus(a, dir);
     case 'board': return cmdBoard(a, dir);

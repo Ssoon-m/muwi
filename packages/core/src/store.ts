@@ -122,6 +122,11 @@ export function withLock<T>(folder: string, fn: () => T): T {
       fs.mkdirSync(lock);
       break;
     } catch (e: any) {
+      // 기다리는 사이에 작업 폴더가 없어졌다 (지웠거나, 계획 없는 빈 폴더를 다른 명령이 치웠다): 다시 만들고 잡는다
+      if (e.code === 'ENOENT') {
+        fs.mkdirSync(folder, { recursive: true });
+        continue;
+      }
       if (e.code !== 'EEXIST') throw e;
       // 10초 넘은 잠금은 죽은 프로세스가 남긴 것으로 보고 넘겨받는다
       try {
@@ -142,7 +147,14 @@ export function withLock<T>(folder: string, fn: () => T): T {
     try {
       fs.rmdirSync(lock);
     } catch {
-      // 이미 지워졌으면 그대로 둔다
+      // 이미 지워졌으면 그대로 둔다 (작업을 지우면 잠금도 같이 휴지통으로 간다)
+    }
+    // 계획이 없는 작업(지웠거나 없는 이름)에 적으려다 실패했으면 빈 폴더를 남기지 않는다.
+    // 남기면 지운 작업을 되살릴 때 같은 이름의 폴더로 보인다. 비어 있지 않으면 지워지지 않는다
+    try {
+      fs.rmdirSync(folder);
+    } catch {
+      // 비어 있지 않다 (계획이 있는 작업)
     }
   }
 }
