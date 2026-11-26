@@ -44,7 +44,7 @@ const HELP = `사용법: muwi <명령>
   muwi node <id> block "<이유>"         막혔다
   muwi node <id> pause                 하던 노드를 잠시 멈춘다 (다른 노드를 먼저 할 때). 다시 start하면 같은 회차로 이어진다
   muwi flag [<id>] "<메모>"             문제 지점을 표시한다
-  muwi viewed [--work <작업>]          끝난 작업을 본 것으로 적는다 (새 결과에서 뺀다. 보기가 그 작업을 보여 줄 때 적는다)
+  muwi viewed [--work <작업>]          끝난 작업을 본 것으로 적는다 (새 결과에서 뺀다. 보기가 그 작업을 보여 주거나 그 작업의 터미널에 사람이 있을 때 적는다)
 
   새 세션에 맡기기 (터미널 연결이 있을 때. 멀티플렉서의 터미널 안에서)
   muwi run <id> "<맡길 일>" [--show pane|tab] [--down] [--name <이름>] [--agent "<도구나 명령>"] [--cwd <폴더>]

@@ -9,6 +9,7 @@
 import { View, div, svg, image, PathBuilder } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { LANE, justShelved, laneTargets, layoutLanes, togglePin } from "./lanes.js";
+import { claimSeen, seenWorks, talksOf } from "./seen.js";
 import {
   exec, home, theme, watchFolder, checking, shared, setShared, agents, panes, terminals, focused, updates, run, notify,
   layout as shownLayout, props as blockProps, window as appWindow, settings,
@@ -24,7 +25,7 @@ const PICKED = "muwi.picked";
 const JUMP = "muwi.jump";
 /** 고정한 작업들 (고정한 순서). 모든 칸이 같이 쓰고 앱을 다시 켜도 남는다 */
 const PINS = "muwi.pins";
-/** 새 결과를 본 것으로 적기 시작한 칸이 있다 { work, at }. 칸이 여럿이어도(사이드바 목록, 그래프 칸) 한 칸만 적는다 */
+/** 새 결과를 본 것으로 적기 시작한 칸이 있는 작업들 { 작업: 맡은 때 }. 칸이 여럿이어도(사이드바 목록, 그래프 칸) 한 칸만 적는다 (seen.js의 claimSeen) */
 const SEEN = "muwi.seen";
 const PLACE_NAME = { bottom: "아래", top: "위" };
 /** 지도 줄의 높이: 펼쳤을 때(지도 한 줄)와 접었을 때. 큰 그래프 줄 수를 셀 때 뺀다 */
@@ -1540,7 +1541,7 @@ export default class Muwi extends View {
    */
   talkOf(w, links) {
     if (!w || checking()) return null;
-    const keys = [...new Set(w.talks ?? [w.lead, ...Object.keys(w.sessions ?? {})].filter(Boolean))];
+    const keys = talksOf(w);
     if (!keys.length) return null;
     const running = agents();
     const live = new Set(running.map((a) => a.address));
@@ -1824,27 +1825,33 @@ export default class Muwi extends View {
   }
 
   /**
-   * 새 결과를 그 작업의 터미널에서 봤으면 본 것으로 적는다: Herdr 창이 앞에 있고, 키보드가 그 작업을 한 대화가 열려 있는
-   * 터미널(talkOf, 터미널로 이동 단추가 가는 곳)에 있다. 한 터미널에서 지켜보는 동안 작업이 끝나면 새 결과로 올라오지 않고 바로 "끝"으로 간다.
-   * 다른 창에 가 있는 동안 끝났으면 Herdr 창으로 돌아와 그 터미널에 있을 때 적는다. 그래프 칸이 무엇을 보여 주는지와 상관없다 (목록 칸도 한다)
+   * 새 결과를 그 작업의 터미널에서 봤으면 본 것으로 적는다 (seen.js의 seenWorks): Herdr 창이 앞에 있고 보이며,
+   * 키보드가 있는 터미널(terminal.show로 바꿔 보여 주는 중이면 보이는 터미널)의 지금 세션이 그 작업을 한 대화다.
+   * 한 터미널에서 지켜보는 동안 작업이 끝나면 새 결과에 머물지 않고 곧바로 "끝"으로 간다. 다른 창에 가 있는 동안 끝났으면
+   * Herdr 창으로 돌아와 그 터미널에 있을 때 적는다. 그래프 칸이 무엇을 보여 주는지와 상관없다 (목록 칸도 한다).
+   * 1초마다 모든 칸에서 도므로 새 결과가 없거나 그 터미널의 세션을 모르면 바로 끝낸다
    */
   seenHere(cx) {
     if (checking() || !this.data) return;
-    const unread = (this.data.works ?? []).filter((w) => w.unread && !w.archived);
-    if (!unread.length || appWindow()?.active === false) return;
-    const term = focused()?.terminal ?? null;
-    if (!term) return;
-    const links = this.links();
-    for (const w of unread) if (this.talkOf(w, links)?.terminal === term) this.markViewed(w.work, cx);
+    const works = this.data.works ?? [];
+    if (!works.some((w) => w.unread && !w.archived)) return;
+    const win = appWindow();
+    const f = focused();
+    const terminal = f?.shown ?? f?.terminal ?? null;
+    const owner = terminal ? this.ownerOf(terminal) : null;
+    if (!owner) return;
+    const front = Boolean(win?.active) && win?.visible !== false;
+    const agent = agents().some((a) => a.address === terminal);
+    for (const work of seenWorks({ works, front, terminal, owner, agent })) this.markViewed(work, cx);
   }
 
   /** 새 결과를 본 것으로 적는다. 적고 나면 다시 읽어 목록에서 "끝"으로 내린다 */
   markViewed(work, cx) {
     if (this.viewing.has(work)) return;
-    // 다른 칸이 방금 적기 시작했으면 그 칸에 맡긴다 (같은 기록을 두 번 남기지 않게)
-    const claim = shared(SEEN);
-    if (claim?.work === work && Date.now() - (claim.at ?? 0) < 10000) return;
-    setShared(SEEN, { work, at: Date.now() });
+    // 다른 칸이 방금 이 작업을 적기 시작했으면 그 칸에 맡긴다 (같은 기록을 두 번 남기지 않게. 작업마다 따로 맡는다)
+    const claim = claimSeen(shared(SEEN), work, Date.now());
+    if (!claim.ok) return;
+    setShared(SEEN, claim.claims);
     this.viewing.add(work);
     cx.spawn(async (cx) => {
       const r = await runMuwi(["viewed", "--work", work], { timeout: 10000 }).catch(() => null);
