@@ -642,6 +642,34 @@ test('muwi board: 그래프는 실제 흐름대로 그린 카드와 선(drawn)�
   assert.deepEqual(g.layoutProblems, []);
 });
 
+test('세션이 새 작업으로 넘어가 하던 작업이 맡은 세션 없이 멈추면: 남긴 노드를 정리하라고 알리고, 어디로 갔는지 보여 준다', () => {
+  const { muwi } = bench();
+  muwi(['plan', '--work', 'a', PLAN]);
+  muwi(['node', 'read', 'start']);
+  muwi(['node', 'read', 'done', '읽음']);
+  // 같은 대화에서 새 일을 시켰다: 새 작업으로 넘어간다
+  const moved = muwi(['plan', '--work', 'b', '--request', '새 일', JSON.stringify({ title: '새 일', nodes: [{ id: 'x', title: 'X' }] })]);
+  assert.equal(moved.code, 0, moved.err);
+  assert.match(moved.out, /※ 이 세션이 하던 작업 a에 끝나지 않은 노드가 남았어요: impl\(시작 전\), check\(시작 전\)/);
+  assert.match(moved.out, /muwi remove <id> --why "<이유>" --work a/);
+  const board = JSON.parse(muwi(['board']).out);
+  const a = board.works.find((w: any) => w.work === 'a');
+  assert.equal(a.state, 'stalled');
+  assert.equal(a.movedTo, 'b');
+  assert.match(muwi(['status']).out, /하던 세션이 다른 작업으로 감 \(b\)/);
+  // 남긴 노드를 정리하고 돌아오면 다시 알리지 않는다
+  muwi(['remove', 'impl', '--why', '안 함', '--work', 'a']);
+  muwi(['remove', 'check', '--why', '안 함', '--work', 'a']);
+  const back = muwi(['node', 'x', 'start', '--work', 'b']);
+  assert.doesNotMatch(back.out, /끝나지 않은 노드가 남았어요/);
+  assert.equal(JSON.parse(muwi(['board']).out).works.find((w: any) => w.work === 'a').state, 'done');
+  // 다 끝내고 넘어가면 알리지 않는다
+  muwi(['node', 'x', 'done', '끝', '--work', 'b']);
+  const c = muwi(['plan', '--work', 'c', '--request', '또 새 일', JSON.stringify({ title: '또', nodes: [{ id: 'y', title: 'Y' }] })]);
+  assert.equal(c.code, 0, c.err);
+  assert.doesNotMatch(c.out, /끝나지 않은 노드가 남았어요/);
+});
+
 test('muwi board: 작업을 고르지 않으면 보관한 작업은 맨 위여도 고르지 않는다 (모두 보관했으면 고른 작업이 없다)', () => {
   const { muwi } = bench();
   const one = JSON.stringify({ title: '끝낼 작업', nodes: [{ id: 'a', title: 'A' }] });

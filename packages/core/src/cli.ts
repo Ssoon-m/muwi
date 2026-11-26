@@ -567,7 +567,7 @@ function skillsLine(t: Pick<Try, 'skills' | 'seen' | 'instant'>, started: boolea
 }
 
 function printShow(v: WorkView) {
-  const between = v.between ? BETWEEN_NAME[v.between] : v.quiet ? QUIET_NAME[v.quiet] : undefined;
+  const between = v.movedTo ? `하던 세션이 다른 작업으로 감 (${v.movedTo})` : v.between ? BETWEEN_NAME[v.between] : v.quiet ? QUIET_NAME[v.quiet] : undefined;
   out(`${v.work}${v.title ? ` · ${v.title}` : ''} · ${STATE_NAME[v.state]}${between ? ` · ${between}` : ''}${v.unread ? ' · 아직 안 봄' : ''} (${v.counts.done}/${v.counts.total} 끝${v.spentMs > 0 ? ` · 작업 ${dur(v.spentMs)}` : ''})`);
   if (v.request) out(`요청: ${v.request}`);
   if (v.helpers.sessions || v.helpers.subagents) {
@@ -660,7 +660,7 @@ function cmdStatus(a: Args, dir: string) {
     out(`${(w.archived ? '보관' : w.unread ? '새 결과' : STATE_NAME[w.state]).padEnd(7)} ${w.work}  ${w.counts.done}/${w.counts.total}${w.spentMs > 0 ? ` · ${dur(w.spentMs)}` : ''}${w.title ? `  ${w.title}` : ''}`);
     for (const n of w.active) out(`          ${MARK[n.status]} ${n.id}  ${n.title}${n.closed ? ' (세션이 닫힘)' : n.quiet ? ` (${QUIET_NAME[n.quiet]})` : ''}${n.note ? ` : ${n.note}` : ''}`);
     // 하는 노드가 없으면 그 작업의 세션이 무얼 하는지
-    const between = w.between ? BETWEEN_NAME[w.between] : undefined;
+    const between = w.movedTo ? `하던 세션이 다른 작업으로 감 (${w.movedTo})` : w.between ? BETWEEN_NAME[w.between] : undefined;
     if (between) out(`          · ${between}`);
   }
   if (past.length && !a.flags.all) out(`지난 작업 ${past.length}개는 접어 뒀어요 (${PAST_DAYS}일 넘게 바뀐 것이 없는 작업). muwi status --all로 봐요.`);

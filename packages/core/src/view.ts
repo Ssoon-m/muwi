@@ -147,6 +147,11 @@ export type WorkView = {
   quiet?: Quiet;
   /** 하는 노드가 없을 때(앞 노드를 끝내고 다음 노드를 아직 시작하지 않음), 그 작업에 붙어 있는 세션이 하는 일 */
   between?: Between;
+  /**
+   * 맡은 세션이 없는(gone) 작업에서, 이 작업을 하던 세션이 살아 있는데 다른 작업으로 옮겨 붙었으면 그 작업.
+   * 같은 대화에서 새 일을 시켜 세션이 넘어가면 남긴 노드가 그대로 "멈춤"으로 남는다. 어디로 갔는지 보여 준다
+   */
+  movedTo?: string;
   /** 새 결과: 모두 끝났는데 사람이 아직 보지 않았다 (끝난 뒤에 viewed 기록이 없다) */
   unread?: boolean;
   /** 보관: 사람이 목록에서 치웠다 (muwi archive). 그 뒤에 작업에 무슨 일이 생기면(다시 시작) 목록으로 돌아온다 */
@@ -412,6 +417,12 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
   // 하는 노드가 없다: 앞 노드를 끝내고 다음 노드를 아직 시작하지 않았다. 그 작업에 붙어 있는 세션이 지금 하는 일로 정한다
   const between = base ? undefined : betweenOf(plan.work, sessions, closed);
   const state: WorkState = base ?? BETWEEN_STATE[between!];
+  // 맡은 세션이 없다: 이 작업을 하던 세션 중 살아 있는 것이 다른 작업에 붙어 있으면 그리로 간 것이다 (가장 최근에 본 세션)
+  const movedTo = between === 'gone'
+    ? Object.entries(sessions)
+      .filter(([key, s]) => !closed.has(key) && s.work && s.work !== plan.work)
+      .sort((a, b) => (b[1].seenAt ?? '').localeCompare(a[1].seenAt ?? ''))[0]?.[1].work
+    : undefined;
 
   // 새 결과: 마지막 노드가 끝난 뒤로 사람이 보지 않았다. 이 기능이 생기기 전에 끝난 작업은 본 것으로 친다
   let unread = false;
@@ -438,6 +449,7 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
     updatedAt: lastAt > plan.updatedAt ? lastAt : plan.updatedAt,
     state,
     ...(between ? { between } : {}),
+    ...(movedTo ? { movedTo } : {}),
     ...(quiet ? { quiet } : {}),
     ...(unread ? { unread: true } : {}),
     ...(archived ? { archived: true } : {}),
@@ -531,7 +543,7 @@ const NOTES: ReadonlySet<string> = new Set(['viewed', 'flag']);
 /** 이만큼 지나도록 바뀐 것이 없으면 "지난 작업"으로 접는다. 지우지는 않는다 */
 export const PAST_DAYS = 7;
 
-export type WorkSummary = Pick<WorkView, 'work' | 'title' | 'request' | 'state' | 'between' | 'quiet' | 'unread' | 'archived' | 'createdAt' | 'updatedAt' | 'counts' | 'spentMs'> & {
+export type WorkSummary = Pick<WorkView, 'work' | 'title' | 'request' | 'state' | 'between' | 'movedTo' | 'quiet' | 'unread' | 'archived' | 'createdAt' | 'updatedAt' | 'counts' | 'spentMs'> & {
   /** 이 작업을 한 대화(세션)들: 계획을 낸 대화 먼저, 나머지는 최근에 본 순. 보기가 누를 때 그 대화로 간다 */
   talks?: string[];
   /**
@@ -585,6 +597,7 @@ export function loadBoard(dir: string, env: NodeJS.ProcessEnv = process.env): { 
         request: v.request,
         state: v.state,
         ...(v.between ? { between: v.between } : {}),
+        ...(v.movedTo ? { movedTo: v.movedTo } : {}),
         ...(v.quiet ? { quiet: v.quiet } : {}),
         talks: talksOf(v),
         ...(v.unread ? { unread: true } : {}),

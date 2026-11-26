@@ -2,6 +2,7 @@
 // 코어의 명령과 보기가 더하는 명령이 함께 쓴다.
 import { attach, readSession, sessionKey } from './session.ts';
 import { checkWorkName, listWorks, readPlan, type Plan } from './store.ts';
+import { loadView } from './view.ts';
 
 /** 사람에게 보여 줄 이유와 함께 명령을 끝낸다 (code: 종료 코드) */
 export class Fail extends Error {
@@ -106,7 +107,30 @@ export function needPlan(dir: string, work: string): Plan {
 /** 이 명령을 실행한 세션을 그 작업에 붙인다 (그 뒤의 명령과 훅이 그 작업에 적는다) */
 export function join(dir: string, work: string) {
   const key = sessionKey();
-  if (key) attach(dir, key, work);
+  if (!key) return;
+  const prev = readSession(dir, key)?.work;
+  attach(dir, key, work);
+  if (prev && prev !== work) {
+    const note = leftBehind(dir, prev);
+    if (note) out(note);
+  }
+}
+
+const LEFT_NAME: Record<string, string> = { todo: '시작 전', doing: '작업 중', waiting: '응답 대기', blocked: '막힘' };
+
+/**
+ * 세션이 다른 작업으로 옮겨 붙었다. 그 때문에 하던 작업이 맡은 세션 없이 멈췄으면(다른 세션도 붙어 있지 않다) 남긴 노드를 정리하라고 알린다.
+ * 같은 대화에서 새 일을 시키면 세션은 새 작업으로 넘어가고, 하던 작업의 남은 노드(커밋·보고 등)는 그래프에 "멈춤"으로 계속 남는다
+ */
+function leftBehind(dir: string, work: string): string | null {
+  const v = loadView(dir, work);
+  if (!v || v.state !== 'stalled' || v.between !== 'gone') return null;
+  const left = v.nodes.filter(n => n.status !== 'done');
+  if (!left.length) return null;
+  return [
+    `※ 이 세션이 하던 작업 ${work}에 끝나지 않은 노드가 남았어요: ${left.map(n => `${n.id}(${LEFT_NAME[n.status] ?? n.status})`).join(', ')}. 맡은 세션이 없어 그래프에 "멈춤"으로 남아요.`,
+    `  이미 끝낸 일이면 muwi node <id> done "<결과>" --work ${work}, 하지 않을 일이면 muwi remove <id> --why "<이유>" --work ${work}로 맞춘 뒤, 지금 작업에는 --work를 붙여 적어요. 나중에 이어 할 일이면 그대로 둬요.`,
+  ].join('\n');
 }
 
 /** 걸린 시간을 사람이 읽는 글로 (4m 1s, 1h 1m 1s) */

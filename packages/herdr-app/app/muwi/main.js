@@ -234,6 +234,7 @@ const SAMPLE = (() => {
     works: [
       { ...work, past: false, active: [{ id: "pr", title: "PR 올리기", status: "waiting", note: "PR 올릴까요?" }] },
       { ...work, work: "stalled", title: "멈춘 작업", state: "stalled", past: false, active: [{ id: "x", title: "하던 일", status: "doing", closed: true }] },
+      { ...work, work: "moved", title: "다른 작업으로 넘어간 작업", state: "stalled", between: "gone", movedTo: "sample", past: false, active: [] },
       { ...work, work: "fresh", title: "새 결과 작업", state: "done", unread: true, past: false, active: [] },
       { ...work, work: "between", title: "다음 노드를 준비하는 작업", state: "doing", between: "working", past: false, active: [] },
       { ...work, work: "quiet", title: "세션이 멈춘 작업", state: "waiting", quiet: "stopped", past: false, active: [{ id: "y", title: "하던 일", status: "doing", quiet: "stopped" }] },
@@ -687,6 +688,11 @@ export default class Muwi extends View {
     return map;
   }
 
+  /** 작업의 제목 (목록에 없으면 작업 이름) */
+  titleOf(work) {
+    return (this.data?.works ?? []).find((w) => w.work === work)?.title ?? work;
+  }
+
   /** 그 터미널에서 지금 도는 세션 (muwi board의 owners). 모르면 null */
   ownerOf(terminal) {
     return this.data?.owners?.[terminal] ?? null;
@@ -981,7 +987,10 @@ export default class Muwi extends View {
     const per = Math.max(1, Math.min(grid.cols, shown.length));
     const lines = [];
     for (let i = 0; i < shown.length; i += per) lines.push(shown.slice(i, i + per));
-    const head = { viewing: plan.viewing, pins: plan.pins, split: !focus };
+    // 키보드가 있는 터미널의 지금 세션. 그 세션이 한 작업이 여럿이면 보는 중은 하나(지금 붙어 있는 작업)이고, 나머지에는 "같은 터미널"을 붙인다
+    const f = focused();
+    const here = f ? this.ownerOf(f.shown ?? f.terminal) : null;
+    const head = { viewing: plan.viewing, pins: plan.pins, split: !focus, here };
     const big = v_flex().id("lanes").flex_1().min_w(0).min_h(0).gap(LANE.gap).p(LANE.pad)
       .children(lines.map((line, n) => h_flex().id(`lane-line-${n}`).flex_1().min_w(0).min_h(0).items_stretch().gap(LANE.gap)
         .children(line.map((work) => this.laneBox(t, work, links, live, now, head, rowOf(work))))
@@ -1007,7 +1016,8 @@ export default class Muwi extends View {
       .border(on ? 2 : 1).border_color(on ? t.accent : t.border)
       // 그래프를 아직 읽지 않았으면 머리줄은 목록의 줄로 그린다
       // 점검(herdr-app check)에서는 터미널로 이동 단추도 견본으로 그려 본다
-      .child(this.laneHead(t, work, v ?? row, on, now, head, checking() ? { terminal: "check", name: "견본" } : row ? this.talkOf(row, links) : null))
+      .child(this.laneHead(t, work, v ?? row, on, now, head, checking() ? { terminal: "check", name: "견본" } : row ? this.talkOf(row, links) : null,
+        Boolean(head.here) && (row?.talks ?? []).includes(head.here)))
       .child(v ? this.canvas(t, v, now, on) : div().flex_1().p(12).text_size(11).text_color(t.dim)
         .child(this.asked.has(work) && !this.loading ? "그래프를 읽지 못했어요" : "불러오는 중…"));
   }
@@ -1017,7 +1027,7 @@ export default class Muwi extends View {
    * 누르면 그 작업을 고른다 (자리는 그대로). 두 번 누르면 그 작업으로 크게 보기 ↔ 나눠 보기.
    * talk: 그 작업을 한 대화가 열려 있는 터미널 (talkOf). 있으면 터미널로 이동 단추를 둔다
    */
-  laneHead(t, work, v, on, now, head, talk) {
+  laneHead(t, work, v, on, now, head, talk, same = false) {
     const c = this.colors(t);
     const color = v ? (c[v.state] ?? t.muted) : t.muted;
     const viewing = work === head.viewing;
@@ -1035,6 +1045,10 @@ export default class Muwi extends View {
       // 보는 중인 작업은 늘 크게 보이므로 고정 단추 대신 "보는 중"을 붙인다 (이미 고정한 작업이면 풀 수 있게 남긴다)
       .when(viewing, (el) => el.child(div().flex_none().h(18).px(6).flex().items_center().rounded(5).text_size(10)
         .bg(tint(t.accent, 0.14)).text_color(t.accent).child("보는 중")))
+      // 보는 중은 아니지만 키보드가 있는 터미널의 세션이 한 작업 (한 대화에서 여러 일을 시켰다). 보는 중보다 흐리게
+      .when(!viewing && same, (el) => el.child(div().id(`lane-same-${work}`).flex_none().h(18).px(6).flex().items_center().rounded(5).text_size(10)
+        .border_1().border_color(tint(t.accent, 0.35)).text_color(tint(t.accent, 0.8)).tooltip("지금 보는 터미널의 세션이 한 작업이에요")
+        .child("같은 터미널")))
       // 터미널로 이동: 목록의 줄을 누를 때와 같다 (그 작업이 보는 중이 되고, 그 대화의 터미널로 간다. 다른 탭이어도)
       .when(Boolean(talk), (el) => el.child(div().id(`lane-go-${work}`).flex_none().size(20).flex().items_center().justify_center().rounded(5)
         .cursor_pointer().hover((s) => s.bg(t.hover)).tooltip(`터미널로 이동 (${talk.name})`)
@@ -1611,6 +1625,8 @@ export default class Muwi extends View {
       // 하는 노드가 여럿이면(나란히 맡긴 점검들) 첫 노드와 나머지 수
       : first ? `${first.title}${w.active.length > 1 ? ` 외 ${w.active.length - 1}` : ""}${first.closed ? " · 세션이 닫힘" : w.quiet ? ` · ${QUIET_NAME[w.quiet]}` : first.note ? ` · ${first.note}` : ""}`
       // 하는 노드가 없다 (몇 단계째인지는 오른쪽에 나온다)
+      // 하던 세션이 살아서 다른 작업으로 넘어갔다: 어디로 갔는지 (같은 대화에서 새 일을 시켰다)
+      : w.between === "gone" && w.movedTo ? `다른 작업으로 감 · ${this.titleOf(w.movedTo)}`
       : (w.between && BETWEEN_NAME[w.between]) || "다음 노드 전";
     // 끝났거나 멈춘 작업(과 보관한 작업)은 마우스를 올리면 보관(꺼내기) 버튼이 나온다.
     // 고정한 작업은 📌가 붙고, 마우스를 올리면 어느 작업이든 고정 단추가 나온다 (그래프 칸에서 큰 그래프로 먼저 보인다)
@@ -2253,8 +2269,16 @@ export default class Muwi extends View {
           .child(line([...new Set(view.outside.map((s) => s.skill))].join(", ")))))
         .when(loose.length > 0, (el) => el.child(v_flex().gap(3).child(label("문제 표시"))
           .children(loose.map((f) => line(`⚑ ${f.text}`, t.blocked)))))
-        .when(view.state === "stalled", (el) => el.child(v_flex().gap(8).child(label("이어서 하려면"))
-          .child(div().text_size(10.5).text_color(t.dim).child(view.between === "gone" ? "이 작업을 맡은 세션이 없어요" : "하던 세션이 모두 닫혔어요"))
+        .when(view.state === "stalled", (el) => el.child(v_flex().gap(8).child(label(view.movedTo ? "이어서 하거나 정리하려면" : "이어서 하려면"))
+          .child(div().text_size(10.5).text_color(t.dim).child(view.movedTo
+            ? `하던 세션이 다른 작업(${this.titleOf(view.movedTo)})으로 넘어갔어요. 남은 노드를 이미 끝냈거나 하지 않을 일이면 보관하세요. 그 세션에 기록을 맞춰 달라고 해도 돼요.`
+            : view.between === "gone" ? "이 작업을 맡은 세션이 없어요" : "하던 세션이 모두 닫혔어요"))
+          // 다른 작업으로 넘어가 남은 작업은 대개 손볼 일이 없다: 여기서 바로 보관한다 (목록 줄의 보관과 같다)
+          .when(Boolean(view.movedTo) && !view.archived, (el2) => el2.child(h_flex().child(div().id(`stalled-shelve-${view.work}`).flex_none().px(8).py(3).rounded(5)
+            .border_1().border_color(t.border).text_size(11).text_color(t.muted).cursor_pointer()
+            .hover((s) => s.text_color(t.foreground).bg(t.hover))
+            .on_click((_e, cx) => this.shelfAct("archive", [view.work], cx))
+            .child("보관"))))
           .when(Boolean(view.launcher), (el2) => el2.child(this.openRow(t, "continue-work", "새 대화로 이어 가기", "muwi 기록(계획·결과)을 읽고 멈춘 노드부터 이어 가요", this.launchWith(view.launcher, `${view.work} 작업 이어서 해줘`),
             this.folderOk(view, view.cwd) ? view.cwd : null, view.work)))
           .when(Boolean(view.cwd), (el2) => el2.child(div().text_size(10.5).text_color(t.dim).child(this.folderOk(view, view.cwd)
