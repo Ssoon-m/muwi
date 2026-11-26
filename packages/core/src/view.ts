@@ -5,6 +5,7 @@
 // 시각을 맞춰 보며 짐작하지 않는다. 확실하지 않게 적힌 것(guess)과 관찰하지 못한 것(seen: false)은 그대로 드러낸다.
 import type { Event, NodeStatus, Plan, PlanNode, ShowIn } from './store.ts';
 import { clock, listWorks, readEvents, readPlan, resultsSince } from './store.ts';
+import { flowOf, type Drawn } from './flow.ts';
 import { sessionStates } from './live.ts';
 import { readSession, sessionLabel } from './session.ts';
 
@@ -156,7 +157,10 @@ export type WorkView = {
    */
   spentMs: number;
   nodes: NodeView[];
+  /** 계획의 선 */
   edges: { from: string; to: string }[];
+  /** 그래프에 그리는 카드와 선: 계획의 선을 실제로 일어난 순서에 맞춘 것 (flow.ts). 다시 한 노드는 카드가 나뉠 수 있다. board의 flow(그리는 방향)와 다르다 */
+  drawn: Drawn;
   changes: Change[];
   /** 계획에서 빠진 노드. 빠진 뒤에도 무엇이었는지 볼 수 있게 남긴다 */
   gone: { at: string; id: string; title: string; status: NodeStatus; why?: string }[];
@@ -440,6 +444,7 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
     spentMs: unionMs(spans),
     nodes,
     edges: plan.nodes.flatMap(n => n.after.filter(a => byId.has(a)).map(a => ({ from: a, to: n.id }))),
+    drawn: flowOf(plan, events),
     changes: planEvents.map(e => ({ at: e.at, by: e.by, why: e.why, first: Boolean(e.first), added: e.added, removed: e.removed, changed: e.changed })),
     // 같은 id로 다시 넣은 노드는 빠진 것으로 치지 않는다
     gone: planEvents.flatMap(e => (e.gone ?? []).filter(g => !byId.has(g.id)).map(g => ({ at: e.at, id: g.id, title: g.title, status: g.status, ...(e.why ? { why: e.why } : {}) }))),

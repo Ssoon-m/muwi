@@ -8,6 +8,7 @@
 // 키보드가 있는 터미널이 바뀌면 그 터미널의 세션이 하는 작업이 보는 중이 된다 (나오는 작업은 그대로, 자리 순서만 바뀐다).
 import { View, div, svg, image, PathBuilder } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
+import { cardNodes, lastCards } from "./cards.js";
 import { LANE, justShelved, laneTargets, layoutLanes, togglePin } from "./lanes.js";
 import { claimSeen, seenWorks, talksOf } from "./seen.js";
 import {
@@ -224,6 +225,7 @@ const SAMPLE = (() => {
       spawn: { at: "2026-01-01T00:00:00.000Z", terminal: "t9", task: "견본으로 맡긴 말" }, spawns: [{ at: "2026-01-01T00:00:00.000Z", terminal: "t9", task: "견본으로 맡긴 말" }] }),
     node("pr", "PR 올리기", "waiting", 588, { note: "PR 올릴까요?", seen: false, closed: true, session: SAMPLE_CLOSED, flags: [{ at: "2026-01-01T00:00:00.000Z", text: "견본" }] }),
   ];
+  const cards = [{ id: "read", node: "read" }, { id: "impl", node: "impl", tries: [1, 2] }, { id: "impl#3", node: "impl", tries: [3] }, { id: "pr", node: "pr" }];
   const work = {
     work: "sample", title: "견본 작업", request: "견본", state: "waiting", updatedAt: "2026-01-01T00:00:00.000Z",
     counts: { total: 3, todo: 0, doing: 1, waiting: 1, blocked: 0, done: 1 },
@@ -251,12 +253,16 @@ const SAMPLE = (() => {
       changes: [{ at: "2026-01-01T00:00:00.000Z", by: "human", why: "견본", first: false, added: ["pr"], removed: [], changed: [] }],
       sessions: { s1: { label: "t1", tool: "claude", terminal: "t1" }, [SAMPLE_CLOSED]: { label: "t2", tool: "claude", terminal: "t2", cwd: "/tmp/sample repo" } },
       resumable: [SAMPLE_CLOSED], exists: { "/tmp/sample repo": true },
+      // 다시 한 노드가 두 카드로 나뉜 그림 (막힘으로 끝난 지난 회차 카드와 지금 회차 카드. cards.js).
+      // 그리는 코드를 지나가게 하는 견본이라 선은 flowOf가 만드는 모양이 아니다 (실제로는 다시 한 카드 앞에 다른 노드의 카드가 온다)
+      drawn: { cards, edges: [{ from: "read", to: "impl" }, { from: "impl", to: "impl#3" }, { from: "impl#3", to: "pr" }] },
       layout: {
-        width: 840, height: 118,
-        nodes: nodes.map((n, i) => ({ id: n.id, x: 28 + i * 280, y: 28, w: 224, h: 62 })),
+        width: 1120, height: 118,
+        nodes: cards.map((c, i) => ({ id: c.id, x: 28 + i * 280, y: 28, w: 224, h: 62 })),
         edges: [
           { key: "read|impl", from: "read", to: "impl", points: [[252, 59], [308, 59]] },
-          { key: "impl|pr", from: "impl", to: "pr", points: [[532, 59], [588, 59]] },
+          { key: "impl|impl#3", from: "impl", to: "impl#3", points: [[532, 59], [588, 59]] },
+          { key: "impl#3|pr", from: "impl#3", to: "pr", points: [[812, 59], [868, 59]] },
         ],
       },
     },
@@ -1083,14 +1089,15 @@ export default class Muwi extends View {
     if (L?.width) {
       const z = Math.min((W - 14) / L.width, (H - 12) / L.height);
       const ox = (W - L.width * z) / 2, oy = (H - L.height * z) / 2;
-      const byId = Object.fromEntries(raw.nodes.map((n) => [n.id, n]));
+      // 카드마다 그 카드가 그리는 노드 (다시 한 노드는 카드가 나뉠 수 있다. cards.js)
+      const byId = Object.fromEntries(cardNodes(raw));
       for (const e of L.edges) {
         const path = roundPath(PathBuilder.stroke(1), e.points.map(([x, y]) => [ox + x * z, oy + y * z]), 3).build();
         parts.push(window.paint_path(path, t.input).absolute().left(0).top(0).w(W).h(H));
       }
       for (const q of L.nodes) {
         const n = byId[q.id];
-        const going = n && !n.closed && (n.status === "doing" || n.status === "waiting" || n.status === "blocked");
+        const going = n && !n.closed && !n.past && (n.status === "doing" || n.status === "waiting" || n.status === "blocked");
         const col = !n ? t.border : n.closed ? t.muted : (c[n.status] ?? t.border);
         parts.push(div().absolute().left(ox + q.x * z).top(oy + q.y * z).w(Math.max(4, q.w * z)).h(Math.max(3, q.h * z)).rounded(2)
           .bg(n?.status === "todo" ? t.raised : tint(col, going ? 0.95 : 0.5)).border(going ? 1 : 0.5).border_color(going ? col : t.border));
@@ -1909,7 +1916,8 @@ export default class Muwi extends View {
     // 다 담기지 않으면 높이를 읽히는 만큼만 줄이고, 볼 노드를 가운데에 둔다
     const z = Math.max(floor, Math.min(1, s.height / L.height));
     lane.zoom = z;
-    const ids = this.focusIds(view);
+    // 다시 한 노드는 지금 회차가 든 카드에
+    const ids = lastCards(view, this.focusIds(view));
     const boxes = L.nodes.filter((p) => ids.includes(p.id));
     if (!boxes.length) return;
     const x1 = Math.min(...boxes.map((p) => p.x)), x2 = Math.max(...boxes.map((p) => p.x + p.w));
@@ -1979,7 +1987,12 @@ export default class Muwi extends View {
     const size = laneSize(lane) ?? (this.lanesOn ? null : this.canvasSize);
     const L = view.layout;
     const c = this.colors(t);
-    const byId = Object.fromEntries(view.nodes.map((n) => [n.id, n]));
+    // 카드마다 그 카드가 그리는 노드. 다시 한 노드는 그 사이에 끝난 노드 뒤에 새 카드로 나뉜다 (core의 flow.ts가 주는 drawn, cards.js)
+    const byId = Object.fromEntries(cardNodes(view));
+    // 노드마다 고른 것으로 그릴 카드: 누른 카드가 그 노드의 것이면 그 카드, 아니면 마지막 카드
+    const shown = new Map();
+    for (const [id, c] of Object.entries(byId)) shown.set(c.node ?? id, id);
+    if (this.nodeCard && byId[this.nodeCard]) shown.set(byId[this.nodeCard].node ?? this.nodeCard, this.nodeCard);
 
     // 작업이 바뀌거나, 지금 일어나는 곳이 바뀌거나, 계획의 모양이 바뀌면 다시 맞춘다
     const live = view.nodes.filter((n) => n.status === "doing" || n.status === "waiting" || n.status === "blocked").map((n) => n.id).join(",");
@@ -2028,8 +2041,10 @@ export default class Muwi extends View {
       // 하는 중이라고 적혀 있어도 그 세션이 일을 멈췄으면 응답 대기처럼 그린다 (돌지 않고, 색도 응답 대기 색)
       const quiet = this.nodeQuiet(view, n);
       const color = n.closed ? t.muted : quiet ? c.waiting : c[n.status];
-      const active = !n.closed && (n.status === "doing" || n.status === "waiting" || n.status === "blocked");
-      const picked = this.node === n.id && view.work === this.mainWork;
+      // 나뉜 카드의 지난 회차(past)는 막힘으로 끝났어도 지금 일어나는 일이 아니다
+      const active = !n.closed && !n.past && (n.status === "doing" || n.status === "waiting" || n.status === "blocked");
+      // 고른 노드가 여러 카드로 나뉘었으면 누른 카드(없으면 지금 회차가 든 마지막 카드)만 고른 것으로 그린다
+      const picked = this.node === (n.node ?? n.id) && view.work === this.mainWork && (shown.get(n.node ?? n.id) ?? n.id) === n.id;
       if (active) {
         const moving = n.status === "doing" && !quiet;
         glows.push(div().absolute().left(x - 6 * z).top(y - 6 * z).w(w + 12 * z).h(h + 12 * z).rounded(12 * z).bg(color)
@@ -2050,7 +2065,8 @@ export default class Muwi extends View {
         // 작업의 기록은 위의 "작업" 탭이나 그래프의 빈 곳을 눌러서 본다 (다시 눌러 고르기를 풀지 않는다: 두 번 누르기와 겹친다)
         .on_click((e, cx) => {
           this.pick(view.work);
-          this.node = n.id;
+          this.node = n.node ?? n.id;
+          this.nodeCard = n.id;
           this.tab = "node";
           this.drawer = true;
           if ((e?.click_count ?? 1) >= 2) this.goNode(view, n);
@@ -2062,7 +2078,8 @@ export default class Muwi extends View {
             .child(div().flex_1().min_w(0).truncate().text_size(12.5 * z).text_color(n.status === "todo" ? t.muted : t.foreground)
               .when(active, (el) => el.font_semibold()).child(n.title))
             // 다시 한 노드는 눈에 띄게: 여기서 뭔가 걸렸다는 신호다
-            .when(n.attempts > 1, (el) => el.child(chip(`${n.attempts}회차`, t.accent, false)))
+            // 나뉜 카드는 그 카드의 회차 ("1회차" → 뒤 노드 → "2회차")
+            .when(Boolean(n.round) || n.attempts > 1, (el) => el.child(chip(n.round ?? `${n.attempts}회차`, t.accent, false)))
             .when(Boolean(tag), (el) => el.child(chip(tag.text, t.muted, tag.planned)))
             // 여러 도구가 같이 한 작업이면 이 노드를 어느 도구가 했는지 (리뷰는 Codex, 구현은 Claude처럼)
             .when(Boolean(madeBy(n)), (el) => el.child(chip(madeBy(n), t.accent, true)))

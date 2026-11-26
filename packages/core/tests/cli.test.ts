@@ -76,11 +76,11 @@ test('muwi plan: 새 작업인데 이름이 없으면 알려 주고, 틀린 계�
 test('진행: 노드 상태를 적는다. 순서는 막지 않고, 없는 노드와 빠진 설명만 알려 준다', () => {
   const { dir, muwi } = bench();
   muwi(['plan', '--work', 'w', PLAN]);
-  // 앞 노드가 끝나지 않아도 시작할 수 있다 (기록일 뿐이다). 같이 하는 거면 계획에서 나란히 두라고 알린다
+  // 앞 노드가 끝나지 않아도 시작할 수 있다 (기록일 뿐이다). 앞 노드를 아직 하고 있지 않으면 그래프는 그 노드를 건너뛰어 그리므로 계획을 고치라고 하지 않는다
   const early = muwi(['node', 'check', 'start']);
   assert.equal(early.code, 0);
-  assert.match(early.out, /앞 노드 impl가 아직 끝나지 않았어요/);
-  assert.match(early.out, /check의 after를 \["read"\]으로 바꿔 muwi plan --why/);
+  assert.match(early.out, /앞 노드 impl를 아직 하고 있지 않아요/);
+  assert.doesNotMatch(early.out, /나란히 두세요/);
   assert.match(early.out, /muwi node check pause로 멈추고 impl를 먼저 끝내요/);
   // 맡은 서브에이전트는 계획을 고치지 않으므로 알리지 않는다
   assert.doesNotMatch(muwi(['node', 'check', 'start', '--sub']).out, /앞 노드/);
@@ -349,22 +349,35 @@ test('지침: muwi guide가 원본을 보여 주고, muwi가 업데이트되면 
   assert.doesNotMatch(muwi(['node', 'check', 'start']).out, /업데이트됐다/);
 });
 
-test('계획은 선으로 이어진 그래프다: muwi add에 자리를 주지 않으면 맨 끝 노드 뒤에 잇고, 계획에 끊긴 노드가 있으면 알려 준다', () => {
+test('계획은 선으로 이어진 그래프다: muwi add는 자리를 꼭 받고(없으면 새 작업으로 적으라고 알린다), 계획에 끊긴 노드가 있으면 알려 준다', () => {
   const { dir, muwi } = bench();
   muwi(['plan', '--work', 'a', PLAN]);
+  const ids = () => JSON.parse(fs.readFileSync(path.join(dir, 'a', 'plan.json'), 'utf8')).nodes.map((n: any) => n.id);
   const after = (id: string) => JSON.parse(fs.readFileSync(path.join(dir, 'a', 'plan.json'), 'utf8')).nodes.find((n: any) => n.id === id).after;
-  // 자리를 주지 않았다: 뒤에 아무것도 없는 노드(check) 뒤에 잇는다. 따로 떨어진 노드가 되지 않는다
-  const added = muwi(['add', 'pr', 'PR 올리기', '--why', '리뷰 받기']);
+  // 자리를 주지 않았다: 짐작해서 잇지 않는다. 어느 노드 다음인지 적거나, 이 작업의 흐름에 없는 일이면 새 작업으로 적으라고 한다
+  const events = () => fs.readFileSync(path.join(dir, 'a', 'events.jsonl'), 'utf8');
+  const before = events();
+  const guess = muwi(['add', 'pr', 'PR 올리기', '--why', '리뷰 받기']);
+  assert.equal(guess.code, 2);
+  assert.match(guess.err, /같은 작업: 이 작업에서 시킨 일을 이루는 일[\s\S]*새 작업: 새로 시킨 일/);
+  assert.match(guess.err, /새 작업이면 이 작업에 넣지 말고 새로 적어요: muwi plan --work <새 이름>/);
+  assert.match(guess.err, /같은 작업이면 어느 노드 다음인지 적어요: muwi add pr "PR 올리기" --after <노드>/);
+  assert.match(guess.err, /○ check/);
+  // 계획도 기록도 그대로다
+  assert.deepEqual(ids(), ['read', 'impl', 'check']);
+  assert.equal(events(), before);
+  // 하던 노드 앞에 끼우는 것(--before만)은 자리를 준 것이다
+  const ahead = muwi(['add', 'ask', '먼저 물어보기', '--before', 'impl', '--why', '먼저 확인']);
+  assert.equal(ahead.code, 0, ahead.err);
+  assert.ok(after('impl').includes('ask'));
+  muwi(['remove', 'ask', '--why', '시험']);
+  // 자리를 주면 그대로
+  const added = muwi(['add', 'pr', 'PR 올리기', '--after', 'check', '--why', '리뷰 받기']);
   assert.equal(added.code, 0, added.err);
   assert.deepEqual(after('pr'), ['check']);
-  assert.match(added.out, /자리를 주지 않아 check 뒤에 이었어요/);
   assert.doesNotMatch(added.out, /이어지지 않은 노드/);
-  // 자리를 주면 그대로
   muwi(['add', 'lint', 'lint', '--after', 'impl', '--why', '먼저 확인']);
   assert.deepEqual(after('lint'), ['impl']);
-  // 끝이 둘이면(pr, lint) 둘 다의 뒤에 잇는다
-  muwi(['add', 'wrap', '정리', '--why', '마무리']);
-  assert.deepEqual(after('wrap').sort(), ['lint', 'pr']);
   // 일부러 따로 두는 노드: --alone. 그래도 끊겨 있다고 알려 준다 (막지는 않는다)
   const alone = muwi(['add', 'memo', '따로 할 일', '--alone', '--why', '순서 없음']);
   assert.equal(alone.code, 0, alone.err);
@@ -380,6 +393,31 @@ test('계획은 선으로 이어진 그래프다: muwi add에 자리를 주지 �
   assert.doesNotMatch(flat.out, /이어지지 않은 노드/);
   // 노드가 하나인 계획은 선이 없어도 알리지 않는다
   assert.doesNotMatch(muwi(['plan', '--work', 'd', JSON.stringify({ title: 't', nodes: [{ id: 'x', title: 'X' }] })]).out, /선이 없어요/);
+});
+
+test('앞 노드를 하는 중에 다음 노드를 시작하면, 같이 하는 거면 계획에서 나란히 두라고 알린다', () => {
+  const { muwi } = bench();
+  muwi(['plan', '--work', 'w', PLAN]);
+  muwi(['node', 'read', 'start']);
+  muwi(['node', 'read', 'done', '읽음']);
+  muwi(['node', 'impl', 'start']);
+  const early = muwi(['node', 'check', 'start']).out;
+  assert.match(early, /앞 노드 impl를 아직 하고 있어요. 그래프에는 계획대로 impl 다음에 그려지고/);
+  assert.match(early, /check의 after를 \["read"\]으로 바꿔 muwi plan --why/);
+});
+
+test('시작을 적지 않고 끝낸 노드를 다시 시작하면 2회차다', () => {
+  const { dir, muwi } = bench();
+  muwi(['plan', '--work', 'w', PLAN]);
+  muwi(['node', 'read', 'done', '읽음']);
+  muwi(['node', 'read', 'start']);
+  const read = JSON.parse(fs.readFileSync(path.join(dir, 'w', 'plan.json'), 'utf8')).nodes.find((n: any) => n.id === 'read');
+  assert.equal(read.attempt, 2);
+  assert.match(muwi(['show', 'w']).out, /read[\s\S]*2회차/);
+  // 시작을 적지 않고 막혔던 노드도 한 번 한 것이다
+  muwi(['node', 'impl', 'block', '권한이 없음']);
+  muwi(['node', 'impl', 'start']);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'w', 'plan.json'), 'utf8')).nodes.find((n: any) => n.id === 'impl').attempt, 2);
 });
 
 test('터미널 연결과 보기 없이: 기록과 보기는 되고, 새 세션 명령은 무엇이 필요한지 알린다. 연결과 보기는 setup이 적어 둔 경로에서 불러오고, 불러오지 못해도 훅은 그대로 돈다', () => {
@@ -587,6 +625,21 @@ test('보관: 끝났거나 멈춘 작업을 목록에서 치우고, 기록은 �
   assert.match(muwi(['unarchive', 'fin']).out, /fin: 목록으로 꺼냈어요/);
   assert.equal(summary('fin').archived, undefined);
   assert.match(muwi(['unarchive', 'fin']).out, /fin: 보관한 작업이 아니에요/);
+});
+
+test('muwi board: 그래프는 실제 흐름대로 그린 카드와 선(drawn)으로 배치한다. 다시 한 회차는 그 사이에 끝난 노드 뒤에 새 카드로', () => {
+  const { muwi } = bench();
+  muwi(['plan', '--work', 'a', PLAN]);
+  for (const [id, what] of [['read', 'start'], ['read', 'done'], ['impl', 'start'], ['impl', 'done'], ['check', 'start'], ['check', 'done'], ['impl', 'start']]) muwi(['node', id, what]);
+  const g = JSON.parse(muwi(['board', '--work', 'a']).out).selected;
+  // 계획의 선은 그대로다
+  assert.deepEqual(g.edges.map((e: any) => `${e.from}>${e.to}`).sort(), ['impl>check', 'read>impl']);
+  assert.deepEqual(g.drawn.cards.map((c: any) => c.id), ['read', 'impl', 'impl#2', 'check']);
+  assert.deepEqual(g.drawn.edges.map((e: any) => `${e.from}>${e.to}`).sort(), ['check>impl#2', 'impl>check', 'read>impl']);
+  // 배치는 그 카드들로 한다. 그리는 방향(flow)과 이름이 겹치지 않는다
+  assert.deepEqual(g.layout.nodes.map((n: any) => n.id).sort(), ['check', 'impl', 'impl#2', 'read']);
+  assert.equal(g.flow, 'right');
+  assert.deepEqual(g.layoutProblems, []);
 });
 
 test('muwi board: 작업을 고르지 않으면 보관한 작업은 맨 위여도 고르지 않는다 (모두 보관했으면 고른 작업이 없다)', () => {
