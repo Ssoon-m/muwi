@@ -1,6 +1,6 @@
 {
   "name": "@muwi/herdr-app",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "muwi를 Herdr 앱에서 보기: 작업 목록과 그래프 칸, 레이아웃",
   "license": "MIT",
   "type": "module",
