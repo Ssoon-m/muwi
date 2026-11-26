@@ -10,7 +10,7 @@ import { cmdPeek, cmdResume, cmdRun, cmdTell, cmdTidy, cmdWait } from './delegat
 import { Fail, dur, join, needPlan, out, parseArgs, resolveWork, str, type Args } from './kit.ts';
 import { hasTerminals, loadPlugins, pluginFailures, terminals, views } from './plugins.ts';
 import { earlyStart, fromSubagent, markNode } from './node.ts';
-import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
+import { addNode, carryStatus, diffPlan, isEmptyDiff, joinPoint, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
 import { readSession, sessionKey, sessionLabel } from './session.ts';
 import { installedTools, newerElsewhere, olderThan, readInstall, refreshSetup, removeSetup, runSetup } from './setup.ts';
 import { adapterOf } from './connectors/index.ts';
@@ -30,7 +30,7 @@ const HELP = `사용법: muwi <명령>
   muwi plan --work <이름> --request "<시킨 말>" '<계획 JSON>'    새 작업의 계획을 적는다
   muwi plan --why "<바꾼 이유>" '<계획 JSON>'                    계획을 바꾼다 (같은 id의 노드는 상태를 잇는다)
   muwi add <id> "<제목>" [--after a,b] [--before c] --why "…"   노드 하나를 끼워 넣는다 (--run, --show도 받는다)
-                                       자리를 주지 않으면 맨 끝 노드 뒤에 잇는다. 어느 노드와도 잇지 않으려면 --alone
+                                       자리를 주지 않으면 진행된 끝(끝났거나 하고 있는 맨 뒤 노드) 뒤에 잇는다. 어느 노드와도 잇지 않으려면 --alone
   muwi remove <id> --why "…"                                   노드 하나를 뺀다
       계획 JSON: {"title": "한 줄 설명", "nodes": [{"id": "read", "title": "티켓 읽기"},
                                                   {"id": "impl", "title": "구현", "after": ["read"]}]}
@@ -313,16 +313,16 @@ function cmdAdd(a: Args, dir: string) {
   const after = (str(a, 'after') ?? '').split(',').map(s => s.trim()).filter(Boolean);
   const before = str(a, 'before');
   const fresh = { id, title, after, ...(str(a, 'run') ? { run: str(a, 'run') } : {}), ...(str(a, 'show') ? { show: str(a, 'show') } : {}) } as NodeInput;
-  /** 자리를 주지 않아서 맨 끝 노드 뒤에 이었으면 그 노드들 */
+  /** 자리를 주지 않아서 알아서 이었으면 그 노드들 */
   let tail: string[] = [];
   const { plan, paused } = savePlan(dir, work, old => {
     if (!old) throw new Fail(`작업이 없어요: ${work} (muwi status로 목록을 봐요)`);
     if (old.nodes.some(n => n.id === id)) throw new Fail(`이미 있는 노드예요: ${id}`);
     if (before && !old.nodes.some(n => n.id === before)) throw new Fail(`--before의 ${before}는 없는 노드예요. 있는 노드: ${old.nodes.map(n => n.id).join(', ')}`);
-    // 자리를 주지 않은 노드는 맨 끝 노드(뒤에 아무것도 없는 노드) 뒤에 잇는다. 나중에 넣는 노드는 대개 하던 일 다음에 할 일이다.
+    // 자리를 주지 않은 노드는 진행된 끝 뒤에 잇는다 (joinPoint). 나중에 넣는 노드는 대개 하던 일 다음에 할 일이다.
     // 잇지 않으면 그래프에 선 없이 따로 떨어진 노드가 된다. 일부러 그렇게 두려면 --alone
     if (!after.length && !before && !a.flags.alone) {
-      tail = old.nodes.filter(n => !old.nodes.some(m => m.after.includes(n.id))).map(n => n.id);
+      tail = joinPoint(old);
       fresh.after = tail;
     }
     const { plan: input, problems } = parsePlan(addNode(old, fresh, before));

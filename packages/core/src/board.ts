@@ -23,7 +23,8 @@ export const BOARD_VERSION = 1;
 /** prefer: 칸 모양으로 정한 흐름 방향. fit(칸 크기)을 알면 칸에 훨씬 크게 들어가는 쪽으로 바꿀 수 있다. 실제로 쓴 방향을 flow로 돌려준다 */
 async function withLayout(v: WorkView, prefer: Flow = 'right', fit?: Fit) {
   const { layoutFor, layoutProblems } = await import('./layout.ts');
-  const { layout, flow } = await layoutFor({ nodes: v.nodes, edges: v.edges }, prefer, fit);
+  // 계획의 선이 아니라 실제 흐름에 맞춘 카드와 선을 배치한다 (flow.ts)
+  const { layout, flow } = await layoutFor({ nodes: v.flow.cards, edges: v.flow.edges }, prefer, fit);
   return { ...v, layout, flow, layoutProblems: layoutProblems(layout, flow) };
 }
 
