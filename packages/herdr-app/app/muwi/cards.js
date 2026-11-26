@@ -44,7 +44,10 @@ export function cardNode(n, card) {
     startedAt: part[0]?.startedAt,
     endedAt: end?.endedAt,
     since: end?.endedAt,
-    // 지금 일어나는 일이 아니다: 세션이 닫힘·멈춤, 계획과 다름, 맡긴 세션 같은 표시는 지금 회차의 카드에만
+    // 지난 회차다: 막힘·응답 대기로 끝났어도 지금 일어나는 일로 빛나지 않는다. 세션이 닫힘·멈춤, 계획과 다름, 맡긴 세션,
+    // 문제 표시(⚑)는 지금 회차의 카드에만
+    past: true,
+    flags: [],
     closed: false,
     quiet: undefined,
     paused: false,

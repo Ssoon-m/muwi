@@ -8,7 +8,10 @@
 //  2. 손대기 전 노드 뒤에 그려지는 노드: B를 (마지막으로) 시작할 때 계획상 앞 노드 A가 끝나지도 하고 있지도 않았으면,
 //     A 대신 A의 앞 노드 쪽으로 올라가 그때 끝났거나 하고 있던 노드 뒤에 잇는다. 그 앞 노드들은 옆 가지로 남는다.
 //     예: review → apply-review(응답 대기) → review2(시작 전) 뒤에 넣은 reorg(끝)는 review 뒤에 그린다.
+//     끝까지 올라가도 없으면 시작한 적 있는 노드(응답 대기·막힘)에서 멈춘다. 그것도 없으면(아무것도 하기 전에 시작했다) 잇지 않는다.
 //     시작 전이거나 잠시 멈춘 노드(앞에 끼어든 노드에 자리를 내줬다)는 계획대로 잇는다. 그 노드는 앞 노드 뒤에 할 일이다.
+//  3. 다시 한 카드 뒤에 시작한 일: 계획상 앞 노드가 다시 한 카드 바로 앞의 카드여도, 그 다시 한 카드가 끝난 뒤 시작했으면 그 카드 뒤에 그린다.
+//     예: recheck → fix(2회차) → screens (계획은 recheck → screens)
 //
 // 때는 시각이 아니라 기록의 줄 순서로 잰다. 같은 시각에 적힌 줄(끝내면서 다음 노드를 시작)도 앞뒤가 갈린다.
 import type { Event, NodeStatus, Plan } from './store.ts';
@@ -111,26 +114,76 @@ export function flowOf(plan: Plan, events: Event[]): Drawn {
     return [...list].reverse().find(c => c.start <= i)?.id ?? list[0]?.id ?? node;
   };
   const latest = (node: string) => cards.get(node)?.at(-1)?.id ?? node;
+  /**
+   * 카드의 때: 그 카드의 첫 회차를 마지막으로 시작(다시 시작)한 줄. 이 때에 앞 노드가 어땠는지로 선을 잇는다.
+   * 한 카드에 회차가 더 들었어도 첫 회차로 잰다. 뒤 회차는 다른 노드의 다시 한 회차와 겹칠 수 있다 (서로 앞뒤가 되어 고리가 생긴다)
+   */
+  const anchor = (c: Draw) => attemptOf(c.node, c.tries[0])?.resumed ?? c.start;
+  /** 카드가 끝난 줄 (마지막 회차가 끝으로 끝났으면) */
+  const endOf = (c: Draw) => attemptOf(c.node, c.tries[c.tries.length - 1])?.done;
+  const progressed = (s: NodeStatus) => s === 'done' || s === 'doing';
 
-  // 2. 계획의 선을 각 노드의 첫 카드로 잇는다
+  /** 다시 한 카드들과, 그 카드 앞에 그린 카드 (1에서 이은 선) */
+  const byCard = new Map([...cards.values()].flat().map(c => [c.id, c]));
+  const reruns = new Map<string, Draw[]>();
+  for (const [from, to] of edges) {
+    const z = byCard.get(to);
+    if (z) reruns.set(from, [...(reruns.get(from) ?? []), z]);
+  }
+  /**
+   * 카드 from 뒤에 노드 node를 그리려는데, from 뒤에 다른 노드를 다시 한 카드가 그려졌고 그 카드가 at 전에 끝났으면 그 카드 뒤에 잇는다.
+   * 예: recheck → fix(2회차)를 끝낸 뒤 시작한 screens는 계획상 recheck 다음이지만 fix(2회차) 뒤에 그린다 (위에서 아래로 읽으면 한 순서)
+   */
+  const gate = (from: string, node: string, at: number) => {
+    let cur = from;
+    for (let guard = 0; guard < byCard.size; guard++) {
+      const z = (reruns.get(cur) ?? []).find(c => c.node !== node && (endOf(c) ?? Infinity) < at);
+      if (!z) break;
+      cur = z.id;
+    }
+    return cur;
+  };
+  /**
+   * 앞 노드 p가 그때(at) 손대기 전이었다: 그때 끝났거나 하고 있던 노드를 만날 때까지 앞 노드 쪽으로 올라간다.
+   * 끝까지 없으면 시작한 적 있는 노드(응답 대기·막힘)에서 멈춘다. 그것도 없으면(아무것도 하기 전에 시작했다) 잇지 않는다
+   */
+  const climb = (p: string, at: number): string[] => {
+    const walk = (ok: (s: NodeStatus) => boolean) => {
+      const seen = new Set<string>();
+      const up = (q: string): string[] => {
+        if (seen.has(q)) return [];
+        seen.add(q);
+        return ok(statusAt(q, at)) ? [cardAt(q, at)] : before(q).flatMap(up);
+      };
+      return up(p);
+    };
+    const found = walk(progressed);
+    return found.length ? found : walk(s => s !== 'todo');
+  };
+
+  // 2. 계획의 선 p → n을 그때 p가 어땠는지에 맞춰 n의 카드에 잇는다
   for (const n of plan.nodes) {
-    const mine = cards.get(n.id);
-    // 시작 전이거나 잠시 멈췄다: 계획대로 앞 노드(의 마지막 카드) 뒤에 할 일이다
-    if (!mine?.length || (mine.length === 1 && n.status === 'todo')) {
-      for (const p of before(n.id)) edges.push([latest(p), n.id]);
+    const mine = cards.get(n.id) ?? [];
+    // 시작 전: 계획대로 앞 노드(의 마지막 카드) 뒤에 할 일이다
+    if (!mine.length) {
+      for (const p of before(n.id)) edges.push([gate(latest(p), n.id, Infinity), n.id]);
       continue;
     }
     const first = mine[0];
-    const at = Math.max(...first.tries.map(k => attemptOf(n.id, k)?.resumed ?? first.start));
-    const seen = new Set<string>();
-    // 그때 끝났거나 하고 있던 노드를 만날 때까지 앞 노드 쪽으로 올라간다
-    const up = (p: string): string[] => {
-      if (seen.has(p)) return [];
-      seen.add(p);
-      const s = statusAt(p, at);
-      return s === 'done' || s === 'doing' ? [cardAt(p, at)] : before(p).flatMap(up);
-    };
-    for (const p of before(n.id)) for (const from of up(p)) edges.push([from, first.id]);
+    const at = anchor(first);
+    for (const p of before(n.id)) {
+      if (progressed(statusAt(p, at))) {
+        edges.push([gate(cardAt(p, at), n.id, at), first.id]);
+        continue;
+      }
+      // 첫 카드를 시작할 때 p는 손대기 전이었다: 그때 진행된 노드 뒤에 그린다
+      for (const from of climb(p, at)) edges.push([gate(from, n.id, at), first.id]);
+      // p는 나중에 끼워 넣은 노드일 수 있다 (다시 하던 회차 앞에 --before). 뒤 카드를 시작할 때 진행돼 있었으면 그 카드에 잇고,
+      // 지금 잠시 멈춰 있으면(다시 시작 전) p가 끝난 뒤 이어 할 마지막 카드에 잇는다
+      const later = mine.slice(1).find(c => progressed(statusAt(p, anchor(c))));
+      if (later) edges.push([gate(cardAt(p, anchor(later)), n.id, anchor(later)), later.id]);
+      else if (n.status === 'todo') edges.push([latest(p), mine[mine.length - 1].id]);
+    }
   }
 
   // 카드는 계획의 순서대로, 나뉜 카드는 그 노드 자리에 회차 순서대로 둔다 (배치가 계획의 순서를 따른다)
@@ -139,7 +192,8 @@ export function flowOf(plan: Plan, events: Event[]): Drawn {
     if (!mine || mine.length < 2) return [{ id: n.id, node: n.id }];
     return mine.map(c => ({ id: c.id, node: n.id, tries: c.tries }));
   });
-  // 같은 선은 한 번만, 돌아가는 선(고리)은 넣지 않는다 (위의 규칙으로는 생기지 않지만 배치가 깨지지 않게)
+  // 같은 선은 한 번만 넣는다. 고리는 위의 규칙으로는 생기지 않아야 하지만, 회차가 엇갈리게 겹친 드문 기록에서 생겨도 배치가 깨지지 않게
+  // 먼저 넣은 선(1의 다시 한 회차 선)을 남기고 고리를 닫는 선은 뺀다
   const drawn: { from: string; to: string }[] = [];
   const outOf = new Map<string, string[]>();
   const reaches = (a: string, b: string) => {

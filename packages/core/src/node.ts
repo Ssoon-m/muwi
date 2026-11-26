@@ -35,8 +35,10 @@ export function fromSubagent(dir: string, work: string, id: string, key: string 
  * 기다리다 이어 하거나, 잠시 멈췄다(pause) 다시 하거나, 하는 중에 다른 쪽이 이어받는 것은 같은 회차다.
  */
 /**
- * 앞 노드가 끝나기 전에 시작한 노드에 붙일 말. 그래프는 계획대로 앞 노드 다음에 그려지고 "순서 앞당김"으로만 보이므로,
- * 같이 하는 거면 계획에서 나란히 두라고 알린다 (막지는 않는다). 나란히 = 안 끝난 앞 노드 대신 그 노드의 앞 노드들 뒤
+ * 앞 노드가 끝나기 전에 시작한 노드에 붙일 말 (막지는 않는다).
+ * 앞 노드를 하고 있으면 그래프는 계획대로 그 노드 다음에 그리고 "순서 앞당김"으로 보이므로, 같이 하는 거면 계획에서 나란히 두라고 알린다
+ * (나란히 = 안 끝난 앞 노드 대신 그 노드의 앞 노드들 뒤). 앞 노드를 아직 하고 있지 않으면(시작 전·응답 대기·막힘) 그래프는 이미
+ * 그 노드를 건너뛰어 실제로 한 순서대로 그리므로(flow.ts) 계획을 고칠 필요는 없다
  */
 export function earlyStart(nodes: PlanNode[], id: string): string | null {
   const byId = new Map(nodes.map(n => [n.id, n]));
@@ -44,13 +46,20 @@ export function earlyStart(nodes: PlanNode[], id: string): string | null {
   if (!node) return null;
   const open = (node.after ?? []).filter(p => byId.has(p) && byId.get(p)!.status !== 'done');
   if (!open.length) return null;
-  const side = [...new Set([...(node.after ?? []).filter(p => byId.has(p) && !open.includes(p)), ...open.flatMap(p => byId.get(p)!.after ?? [])])];
-  const names = open.join(', ');
-  return [
-    `앞 노드 ${names}가 아직 끝나지 않았어요. 그래프에는 계획대로 ${names} 다음에 그려지고 "순서 앞당김"으로 보여요.`,
-    `같이 하는 거면 계획에서 나란히 두세요: muwi show로 지금 계획을 보고 ${id}의 after를 ${side.length ? `[${side.map(s => `"${s}"`).join(', ')}]` : '빈 목록(맨 앞)'}으로 바꿔 muwi plan --why "<같이 하는 이유>" '<계획 JSON>'으로 다시 적어요.`,
-    `순서대로 하려던 거면 muwi node ${id} pause로 멈추고 ${names}를 먼저 끝내요.`,
-  ].join('\n');
+  const running = open.filter(p => byId.get(p)!.status === 'doing');
+  const idle = open.filter(p => !running.includes(p));
+  const side = [...new Set([...(node.after ?? []).filter(p => byId.has(p) && !running.includes(p)), ...running.flatMap(p => byId.get(p)!.after ?? [])])];
+  const lines: string[] = [];
+  if (running.length) {
+    const names = running.join(', ');
+    lines.push(
+      `앞 노드 ${names}를 아직 하고 있어요. 그래프에는 계획대로 ${names} 다음에 그려지고 "순서 앞당김"으로 보여요.`,
+      `같이 하는 거면 계획에서 나란히 두세요: muwi show로 지금 계획을 보고 ${id}의 after를 ${side.length ? `[${side.map(s => `"${s}"`).join(', ')}]` : '빈 목록(맨 앞)'}으로 바꿔 muwi plan --why "<같이 하는 이유>" '<계획 JSON>'으로 다시 적어요.`,
+    );
+  }
+  if (idle.length) lines.push(`앞 노드 ${idle.join(', ')}를 아직 하고 있지 않아요(시작 전·응답 대기·막힘). 그래프에는 그 노드를 건너뛰어 실제로 한 순서대로 그려져요.`);
+  lines.push(`순서대로 하려던 거면 muwi node ${id} pause로 멈추고 ${open.join(', ')}를 먼저 끝내요.`);
+  return lines.join('\n');
 }
 
 export function markNode(dir: string, work: string, id: string, status: NodeStatus, note: string | undefined, key: string | null, env: NodeJS.ProcessEnv = process.env, o: { sub?: boolean } = {}): Plan | null {
@@ -77,7 +86,9 @@ export function markNode(dir: string, work: string, id: string, status: NodeStat
     if (status === 'doing') {
       // 기다리다 이어 하거나, 잠시 멈췄던 노드(시작한 적이 있는데 아직으로 돌아간 노드)를 다시 하는 것은 같은 회차다
       const resume = before === 'waiting' || before === 'doing' || (before === 'todo' && (node.attempt ?? 0) > 0);
-      node.attempt = resume ? (node.attempt ?? 1) : (node.attempt ?? 0) + 1;
+      // 시작을 적지 않고 끝냈거나 막혔던 노드는 회차가 적혀 있지 않지만 한 번 한 것이다 (그 기록은 1회차로 읽는다). 다시 하면 2회차다
+      const done = node.attempt ?? (before === 'done' || before === 'blocked' ? 1 : 0);
+      node.attempt = resume ? (node.attempt ?? 1) : done + 1;
       node.by = { session: key, ...(agent ? { agent } : {}), at };
     } else delete node.by;
     plan.updatedAt = at;

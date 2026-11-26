@@ -225,6 +225,7 @@ const SAMPLE = (() => {
       spawn: { at: "2026-01-01T00:00:00.000Z", terminal: "t9", task: "견본으로 맡긴 말" }, spawns: [{ at: "2026-01-01T00:00:00.000Z", terminal: "t9", task: "견본으로 맡긴 말" }] }),
     node("pr", "PR 올리기", "waiting", 588, { note: "PR 올릴까요?", seen: false, closed: true, session: SAMPLE_CLOSED, flags: [{ at: "2026-01-01T00:00:00.000Z", text: "견본" }] }),
   ];
+  const cards = [{ id: "read", node: "read" }, { id: "impl", node: "impl", tries: [1, 2] }, { id: "impl#3", node: "impl", tries: [3] }, { id: "pr", node: "pr" }];
   const work = {
     work: "sample", title: "견본 작업", request: "견본", state: "waiting", updatedAt: "2026-01-01T00:00:00.000Z",
     counts: { total: 3, todo: 0, doing: 1, waiting: 1, blocked: 0, done: 1 },
@@ -252,12 +253,15 @@ const SAMPLE = (() => {
       changes: [{ at: "2026-01-01T00:00:00.000Z", by: "human", why: "견본", first: false, added: ["pr"], removed: [], changed: [] }],
       sessions: { s1: { label: "t1", tool: "claude", terminal: "t1" }, [SAMPLE_CLOSED]: { label: "t2", tool: "claude", terminal: "t2", cwd: "/tmp/sample repo" } },
       resumable: [SAMPLE_CLOSED], exists: { "/tmp/sample repo": true },
+      // 다시 한 노드가 두 카드로 나뉜 그림 (막힘으로 끝난 지난 회차 카드와 지금 회차 카드. cards.js)
+      drawn: { cards, edges: [{ from: "read", to: "impl" }, { from: "impl", to: "impl#3" }, { from: "impl#3", to: "pr" }] },
       layout: {
-        width: 840, height: 118,
-        nodes: nodes.map((n, i) => ({ id: n.id, x: 28 + i * 280, y: 28, w: 224, h: 62 })),
+        width: 1120, height: 118,
+        nodes: cards.map((c, i) => ({ id: c.id, x: 28 + i * 280, y: 28, w: 224, h: 62 })),
         edges: [
           { key: "read|impl", from: "read", to: "impl", points: [[252, 59], [308, 59]] },
-          { key: "impl|pr", from: "impl", to: "pr", points: [[532, 59], [588, 59]] },
+          { key: "impl|impl#3", from: "impl", to: "impl#3", points: [[532, 59], [588, 59]] },
+          { key: "impl#3|pr", from: "impl#3", to: "pr", points: [[812, 59], [868, 59]] },
         ],
       },
     },
@@ -1092,7 +1096,7 @@ export default class Muwi extends View {
       }
       for (const q of L.nodes) {
         const n = byId[q.id];
-        const going = n && !n.closed && (n.status === "doing" || n.status === "waiting" || n.status === "blocked");
+        const going = n && !n.closed && !n.past && (n.status === "doing" || n.status === "waiting" || n.status === "blocked");
         const col = !n ? t.border : n.closed ? t.muted : (c[n.status] ?? t.border);
         parts.push(div().absolute().left(ox + q.x * z).top(oy + q.y * z).w(Math.max(4, q.w * z)).h(Math.max(3, q.h * z)).rounded(2)
           .bg(n?.status === "todo" ? t.raised : tint(col, going ? 0.95 : 0.5)).border(going ? 1 : 0.5).border_color(going ? col : t.border));
@@ -1984,6 +1988,10 @@ export default class Muwi extends View {
     const c = this.colors(t);
     // 카드마다 그 카드가 그리는 노드. 다시 한 노드는 그 사이에 끝난 노드 뒤에 새 카드로 나뉜다 (core의 flow.ts가 주는 drawn, cards.js)
     const byId = Object.fromEntries(cardNodes(view));
+    // 노드마다 고른 것으로 그릴 카드: 누른 카드가 그 노드의 것이면 그 카드, 아니면 마지막 카드
+    const shown = new Map();
+    for (const [id, c] of Object.entries(byId)) shown.set(c.node ?? id, id);
+    if (this.nodeCard && byId[this.nodeCard]) shown.set(byId[this.nodeCard].node ?? this.nodeCard, this.nodeCard);
 
     // 작업이 바뀌거나, 지금 일어나는 곳이 바뀌거나, 계획의 모양이 바뀌면 다시 맞춘다
     const live = view.nodes.filter((n) => n.status === "doing" || n.status === "waiting" || n.status === "blocked").map((n) => n.id).join(",");
@@ -2032,8 +2040,10 @@ export default class Muwi extends View {
       // 하는 중이라고 적혀 있어도 그 세션이 일을 멈췄으면 응답 대기처럼 그린다 (돌지 않고, 색도 응답 대기 색)
       const quiet = this.nodeQuiet(view, n);
       const color = n.closed ? t.muted : quiet ? c.waiting : c[n.status];
-      const active = !n.closed && (n.status === "doing" || n.status === "waiting" || n.status === "blocked");
-      const picked = this.node === (n.node ?? n.id) && view.work === this.mainWork;
+      // 나뉜 카드의 지난 회차(past)는 막힘으로 끝났어도 지금 일어나는 일이 아니다
+      const active = !n.closed && !n.past && (n.status === "doing" || n.status === "waiting" || n.status === "blocked");
+      // 고른 노드가 여러 카드로 나뉘었으면 누른 카드(없으면 지금 회차가 든 마지막 카드)만 고른 것으로 그린다
+      const picked = this.node === (n.node ?? n.id) && view.work === this.mainWork && (shown.get(n.node ?? n.id) ?? n.id) === n.id;
       if (active) {
         const moving = n.status === "doing" && !quiet;
         glows.push(div().absolute().left(x - 6 * z).top(y - 6 * z).w(w + 12 * z).h(h + 12 * z).rounded(12 * z).bg(color)
@@ -2055,6 +2065,7 @@ export default class Muwi extends View {
         .on_click((e, cx) => {
           this.pick(view.work);
           this.node = n.node ?? n.id;
+          this.nodeCard = n.id;
           this.tab = "node";
           this.drawer = true;
           if ((e?.click_count ?? 1) >= 2) this.goNode(view, n);

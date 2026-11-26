@@ -48,3 +48,14 @@ test('보여 줄 노드는 그 노드의 마지막 카드로 찾는다. drawn이
   assert.deepEqual([...cardNodes(plain).keys()], ['rework']);
   assert.deepEqual(lastCards(plain, ['rework']), ['rework']);
 });
+
+test('막힘으로 끝난 지난 회차 카드는 지난 것(past)으로 그린다: 지금 일어나는 일로 빛나지 않고, 문제 표시는 지금 카드에만', () => {
+  const blocked = { ...verify, flags: [{ at: 'x', text: '견본' }], tries: [{ ...verify.tries[0], status: 'blocked', note: '권한이 없음' }, verify.tries[1]] };
+  const before = cardNode(blocked, { id: 'verify', node: 'verify', tries: [1] });
+  assert.equal(before.status, 'blocked');
+  assert.equal(before.past, true);
+  assert.deepEqual(before.flags, []);
+  const now = cardNode(blocked, { id: 'verify#2', node: 'verify', tries: [2] });
+  assert.equal(now.past, undefined);
+  assert.equal(now.flags.length, 1);
+});

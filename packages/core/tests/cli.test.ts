@@ -76,11 +76,11 @@ test('muwi plan: 새 작업인데 이름이 없으면 알려 주고, 틀린 계�
 test('진행: 노드 상태를 적는다. 순서는 막지 않고, 없는 노드와 빠진 설명만 알려 준다', () => {
   const { dir, muwi } = bench();
   muwi(['plan', '--work', 'w', PLAN]);
-  // 앞 노드가 끝나지 않아도 시작할 수 있다 (기록일 뿐이다). 같이 하는 거면 계획에서 나란히 두라고 알린다
+  // 앞 노드가 끝나지 않아도 시작할 수 있다 (기록일 뿐이다). 앞 노드를 아직 하고 있지 않으면 그래프는 그 노드를 건너뛰어 그리므로 계획을 고치라고 하지 않는다
   const early = muwi(['node', 'check', 'start']);
   assert.equal(early.code, 0);
-  assert.match(early.out, /앞 노드 impl가 아직 끝나지 않았어요/);
-  assert.match(early.out, /check의 after를 \["read"\]으로 바꿔 muwi plan --why/);
+  assert.match(early.out, /앞 노드 impl를 아직 하고 있지 않아요/);
+  assert.doesNotMatch(early.out, /나란히 두세요/);
   assert.match(early.out, /muwi node check pause로 멈추고 impl를 먼저 끝내요/);
   // 맡은 서브에이전트는 계획을 고치지 않으므로 알리지 않는다
   assert.doesNotMatch(muwi(['node', 'check', 'start', '--sub']).out, /앞 노드/);
@@ -382,6 +382,27 @@ test('계획은 선으로 이어진 그래프다: muwi add에 자리를 주지 �
   assert.doesNotMatch(muwi(['plan', '--work', 'd', JSON.stringify({ title: 't', nodes: [{ id: 'x', title: 'X' }] })]).out, /선이 없어요/);
 });
 
+test('앞 노드를 하는 중에 다음 노드를 시작하면, 같이 하는 거면 계획에서 나란히 두라고 알린다', () => {
+  const { muwi } = bench();
+  muwi(['plan', '--work', 'w', PLAN]);
+  muwi(['node', 'read', 'start']);
+  muwi(['node', 'read', 'done', '읽음']);
+  muwi(['node', 'impl', 'start']);
+  const early = muwi(['node', 'check', 'start']).out;
+  assert.match(early, /앞 노드 impl를 아직 하고 있어요. 그래프에는 계획대로 impl 다음에 그려지고/);
+  assert.match(early, /check의 after를 \["read"\]으로 바꿔 muwi plan --why/);
+});
+
+test('시작을 적지 않고 끝낸 노드를 다시 시작하면 2회차다', () => {
+  const { dir, muwi } = bench();
+  muwi(['plan', '--work', 'w', PLAN]);
+  muwi(['node', 'read', 'done', '읽음']);
+  muwi(['node', 'read', 'start']);
+  const read = JSON.parse(fs.readFileSync(path.join(dir, 'w', 'plan.json'), 'utf8')).nodes.find((n: any) => n.id === 'read');
+  assert.equal(read.attempt, 2);
+  assert.match(muwi(['show', 'w']).out, /read[\s\S]*2회차/);
+});
+
 test('자리를 주지 않은 노드는 진행된 끝(끝났거나 하고 있는 맨 뒤 노드) 뒤에 잇는다: 손대지 않았거나 기다리는 노드 밑에 붙지 않는다', () => {
   const { dir, muwi } = bench();
   muwi(['plan', '--work', 'a', PLAN]);
@@ -413,6 +434,13 @@ test('자리를 주지 않은 노드는 진행된 끝(끝났거나 하고 있는
   b.muwi(['node', 'impl', 'pause']);
   b.muwi(['add', 'note', '메모', '--why', '먼저']);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(b.dir, 'b', 'plan.json'), 'utf8')).nodes.find((n: any) => n.id === 'note').after, ['read']);
+  // 끝났거나 하는 노드가 없으면 시작한 적 있는 노드(응답 대기·막힘) 뒤에. 시작 전 노드 밑에 붙지 않는다
+  const c = bench();
+  c.muwi(['plan', '--work', 'c', PLAN]);
+  c.muwi(['node', 'read', 'start']);
+  c.muwi(['node', 'read', 'wait', '어느 티켓?']);
+  const asked = c.muwi(['add', 'x', '먼저 할 일', '--why', '새 요청']);
+  assert.match(asked.out, /자리를 주지 않아 read 뒤에 이었어요/);
 });
 
 test('터미널 연결과 보기 없이: 기록과 보기는 되고, 새 세션 명령은 무엇이 필요한지 알린다. 연결과 보기는 setup이 적어 둔 경로에서 불러오고, 불러오지 못해도 훅은 그대로 돈다', () => {

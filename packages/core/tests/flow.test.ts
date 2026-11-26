@@ -88,3 +88,77 @@ test('앞 노드 쪽으로 끝까지 올라가도 진행된 노드가 없으면 
   const f = flowOf(p, events([['b', 'doing'], ['b', 'done']]));
   assert.deepEqual(lines(f), []);
 });
+
+/** 선이 하나도 없는 카드 (기록이 있는 카드는 맨 앞 카드가 아니면 떨어지면 안 된다) */
+const loose = (f: { cards: { id: string }[]; edges: { from: string; to: string }[] }) =>
+  f.cards.map(c => c.id).filter(id => !f.edges.some(e => e.from === id || e.to === id));
+
+test('다시 하던 회차 앞에 노드를 끼워 넣으면(--before, 잠시 멈춤) 끼운 노드는 그 회차 카드 앞에 그린다', () => {
+  // verify를 다시 하다가(2회차, rework 뒤의 새 카드) 먼저 고칠 것을 앞에 끼웠다. fixfirst는 앞 노드가 없다
+  const lines2 = (status: NodeStatus, extra: [string, NodeStatus, number?][]) => flowOf(
+    plan([['impl', [], 'done'], ['fixfirst', [], extra.length > 1 ? 'done' : 'doing'], ['verify', ['impl', 'fixfirst'], status], ['rework', ['verify'], 'done']]),
+    events([
+      ['impl', 'doing'], ['impl', 'done'], ['verify', 'doing', 1], ['verify', 'done', 1], ['rework', 'doing', 1], ['rework', 'done', 1],
+      ['verify', 'doing', 2], ['verify', 'todo', 2], ...extra,
+    ]),
+  );
+  // 끼운 노드를 하는 중 (verify는 잠시 멈춤)
+  const paused = lines2('todo', [['fixfirst', 'doing']]);
+  assert.deepEqual(lines(paused), ['fixfirst→verify#2', 'impl→verify', 'rework→verify#2', 'verify→rework']);
+  // 끼운 노드를 끝내고 verify를 다시 움직여 끝냈다
+  const after = lines2('done', [['fixfirst', 'doing'], ['fixfirst', 'done'], ['verify', 'doing', 2], ['verify', 'done', 2]]);
+  assert.deepEqual(lines(after), ['fixfirst→verify#2', 'impl→verify', 'rework→verify#2', 'verify→rework']);
+  assert.deepEqual(loose(after), []);
+});
+
+test('두 노드를 다시 한 회차가 겹쳐도(확인을 다시 하는 동안 고침을 다시 했다) 고리 없이 둘 다 잇는다', () => {
+  const p = plan([['verify', [], 'done'], ['rework', ['verify'], 'done'], ['full', ['rework'], 'todo']]);
+  const f = flowOf(p, events([
+    ['verify', 'doing', 1], ['verify', 'done', 1], ['rework', 'doing', 1], ['rework', 'done', 1],
+    ['verify', 'doing', 2], ['rework', 'doing', 2], ['rework', 'done', 2], ['verify', 'done', 2],
+  ]));
+  // rework 2회차를 시작할 때 verify 2회차가 끝나지 않았으므로 rework는 한 카드(1~2회차)다
+  assert.deepEqual(f.cards.filter(c => c.tries).map(c => `${c.id}[${c.tries}]`), ['verify[1]', 'verify#2[2]']);
+  // 아직 시작하지 않은 full은 마지막에 끝난 다시 확인(verify#2) 뒤에 할 일이다
+  assert.deepEqual(lines(f), ['rework→verify#2', 'verify#2→full', 'verify→rework']);
+  assert.deepEqual(loose(f), []);
+  // 앞 노드를 다시 해 응답 대기로 둔 사이에 뒤 노드를 다시 했다: 뒤 노드(1~2회차)는 앞 노드의 1회차 뒤에 남는다
+  const g = flowOf(plan([['a', [], 'waiting'], ['b', ['a'], 'done']]), events([
+    ['a', 'doing', 1], ['a', 'done', 1], ['b', 'doing', 1], ['b', 'done', 1], ['a', 'doing', 2], ['a', 'waiting', 2], ['b', 'doing', 2], ['b', 'done', 2],
+  ]));
+  assert.deepEqual(lines(g), ['a→b', 'b→a#2']);
+});
+
+test('세 번 다시 한 고리: 회차마다 그 사이에 끝난 카드 뒤에 그린다', () => {
+  const p = plan([['fix', [], 'done'], ['check', ['fix'], 'done'], ['pr', ['check'], 'doing']]);
+  const f = flowOf(p, events([
+    ['fix', 'doing', 1], ['fix', 'done', 1], ['check', 'doing', 1], ['check', 'done', 1],
+    ['fix', 'doing', 2], ['fix', 'done', 2], ['check', 'doing', 2], ['check', 'done', 2],
+    ['fix', 'doing', 3], ['fix', 'done', 3], ['check', 'doing', 3], ['check', 'done', 3], ['pr', 'doing'],
+  ]));
+  assert.deepEqual(lines(f), ['check#2→fix#3', 'check#3→pr', 'check→fix#2', 'fix#2→check#2', 'fix#3→check#3', 'fix→check']);
+});
+
+test('다시 한 카드를 끝낸 뒤 시작한 다음 일은, 계획상 그 앞 카드 다음이어도 다시 한 카드 뒤에 그린다', () => {
+  // recheck에서 걸려 fix를 다시 했고(2회차), 그 뒤에 screens를 했다. 계획은 recheck → screens
+  const p = plan([['fix', [], 'done'], ['recheck', ['fix'], 'done'], ['screens', ['recheck'], 'done']]);
+  const f = flowOf(p, events([
+    ['fix', 'doing', 1], ['fix', 'done', 1], ['recheck', 'doing', 1], ['recheck', 'done', 1],
+    ['fix', 'doing', 2], ['fix', 'done', 2], ['screens', 'doing'], ['screens', 'done'],
+  ]));
+  assert.deepEqual(lines(f), ['fix#2→screens', 'fix→recheck', 'recheck→fix#2']);
+  // 다시 한 카드가 아직 하는 중일 때 시작했으면 나란히 둔다
+  const g = flowOf(p, events([
+    ['fix', 'doing', 1], ['fix', 'done', 1], ['recheck', 'doing', 1], ['recheck', 'done', 1],
+    ['fix', 'doing', 2], ['screens', 'doing'], ['screens', 'done'], ['fix', 'done', 2],
+  ]));
+  assert.deepEqual(lines(g), ['fix→recheck', 'recheck→fix#2', 'recheck→screens']);
+});
+
+test('앞 노드 쪽으로 올라가도 끝났거나 하는 노드가 없으면 시작한 적 있는 노드(응답 대기) 뒤에 그린다', () => {
+  // ask는 답을 기다리고, impl은 시작 전인데 새 요청 x를 했다
+  const p = plan([['ask', [], 'waiting'], ['impl', ['ask'], 'todo'], ['x', ['impl'], 'done']]);
+  const f = flowOf(p, events([['ask', 'doing'], ['ask', 'waiting'], ['x', 'doing'], ['x', 'done']]));
+  assert.deepEqual(lines(f), ['ask→impl', 'ask→x']);
+  assert.deepEqual(loose(f), []);
+});

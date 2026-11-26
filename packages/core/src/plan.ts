@@ -144,11 +144,14 @@ export function addNode(plan: Plan, node: NodeInput, before?: string): PlanInput
  * 나중에 넣는 노드는 대개 하던 일 다음에 할 일이다. 시작하지 않은 노드, 응답 대기·막힘 노드, 잠시 멈춘 노드는 건너뛴다.
  * 예: review → apply-review(응답 대기) → review2(시작 전)에 새 요청을 넣으면 review2가 아니라 review 뒤에 잇는다.
  * review2 뒤에 이으면 그 뒤로 끝낸 노드들이 모두 손대지 않은 노드 밑에 그려진다.
- * 진행된 노드가 없으면(계획만 적었다) 맨 끝 노드(뒤에 아무것도 없는 노드)들 뒤에 잇는다
+ * 끝났거나 하는 노드가 없으면 시작한 적 있는 노드(응답 대기·막힘) 가운데 맨 뒤, 그것도 없으면(계획만 적었다) 맨 끝 노드(뒤에 아무것도 없는 노드)들 뒤에 잇는다.
+ * 그래프가 그리는 규칙(flow.ts)과 같다
  */
 export function joinPoint(plan: Plan): string[] {
   const next = new Map(plan.nodes.map(n => [n.id, plan.nodes.filter(m => m.after.includes(n.id)).map(m => m.id)]));
-  const moved = new Set(plan.nodes.filter(n => n.status === 'done' || n.status === 'doing').map(n => n.id));
+  const pick = (ok: (n: PlanNode) => boolean) => new Set(plan.nodes.filter(ok).map(n => n.id));
+  let moved = pick(n => n.status === 'done' || n.status === 'doing');
+  if (!moved.size) moved = pick(n => n.status === 'waiting' || n.status === 'blocked');
   if (!moved.size) return plan.nodes.filter(n => !next.get(n.id)?.length).map(n => n.id);
   // 그 노드 뒤로(선을 따라 어디든) 진행된 노드가 있는가
   const movedLater = (id: string): boolean => {
