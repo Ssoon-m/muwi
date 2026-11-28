@@ -44,7 +44,7 @@ export function earlyStart(nodes: PlanNode[], id: string): string | null {
   const byId = new Map(nodes.map(n => [n.id, n]));
   const node = byId.get(id);
   if (!node) return null;
-  const open = (node.after ?? []).filter(p => byId.has(p) && byId.get(p)!.status !== 'done');
+  const open = openBefore(nodes, id);
   if (!open.length) return null;
   const running = open.filter(p => byId.get(p)!.status === 'doing');
   const idle = open.filter(p => !running.includes(p));
@@ -62,7 +62,32 @@ export function earlyStart(nodes: PlanNode[], id: string): string | null {
   return lines.join('\n');
 }
 
-export function markNode(dir: string, work: string, id: string, status: NodeStatus, note: string | undefined, key: string | null, env: NodeJS.ProcessEnv = process.env, o: { sub?: boolean } = {}): Plan | null {
+/** 계획에서 이 노드보다 먼저 하는 노드 중 아직 끝나지 않은 것 */
+function openBefore(nodes: PlanNode[], id: string): string[] {
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  return (byId.get(id)?.after ?? []).filter(p => byId.has(p) && byId.get(p)!.status !== 'done');
+}
+
+/**
+ * 시작한 것이 계획과 다른 점들. 막지 않는다. 판단의 근거(--why)를 남기라고 알릴 때 쓴다.
+ * nodes: 시작한 뒤의 계획, was: 시작하기 전 그 노드의 상태, sub: 서브에이전트가 시작했다
+ *   다시 하기: 끝냈거나 막혔던 노드를 다시 시작했다 (새 회차)
+ *   순서: 계획의 앞 노드가 끝나기 전에 시작했다
+ *   맡는 쪽: 계획(run)은 서브에이전트인데 서브에이전트가 아닌 쪽이, 또는 직접인데 서브에이전트가 시작했다
+ */
+export function offPlanStart(nodes: PlanNode[], id: string, was: NodeStatus | undefined, sub: boolean): string[] {
+  const node = nodes.find(n => n.id === id);
+  if (!node) return [];
+  const out: string[] = [];
+  if (was === 'done' || was === 'blocked') out.push(`${was === 'done' ? '끝낸' : '막혔던'} 노드를 ${node.attempt ?? 2}회차로 다시 함`);
+  const open = openBefore(nodes, id);
+  if (open.length) out.push(`${open.join(', ')}가 아직 안 끝남`);
+  if (node.run === 'subagent' && !sub) out.push('계획은 서브에이전트인데 이 세션이 시작함');
+  if (node.run === 'me' && sub) out.push('계획은 직접인데 서브에이전트가 시작함');
+  return out;
+}
+
+export function markNode(dir: string, work: string, id: string, status: NodeStatus, note: string | undefined, key: string | null, env: NodeJS.ProcessEnv = process.env, o: { sub?: boolean; why?: string } = {}): Plan | null {
   // 서브에이전트가 시작하는 것이면 훅이 방금 그 서브에이전트를 적어 뒀다 (명령에서는 세션 id가 같아 구분할 수 없다).
   // 훅이 알려 주지 않는 도구에서는 서브에이전트가 스스로 밝힌다 (--sub). 그때는 이름을 지어 준다
   const session = key ? readSession(dir, key) : null;
@@ -93,12 +118,13 @@ export function markNode(dir: string, work: string, id: string, status: NodeStat
     } else delete node.by;
     plan.updatedAt = at;
     writePlan(dir, plan);
-    // 같은 상태를 다시 적어도 사건은 남긴다. 다른 쪽이 이어받은 것일 수 있다
-    if (!same || status === 'doing') {
+    // 같은 상태를 다시 적어도 사건은 남긴다. 다른 쪽이 이어받은 것일 수 있고, 판단의 근거(why)를 덧붙인 것일 수 있다
+    if (!same || status === 'doing' || o.why) {
       appendEvent(dir, work, {
         type: 'node', node: id, status,
         ...(node.note ? { note: node.note } : {}),
         ...(node.attempt ? { attempt: node.attempt } : {}),
+        ...(o.why ? { why: o.why } : {}),
         // 시작할 때의 모델을 노드에 적어 둔다. 세션이 도중에 모델을 바꿔도 앞에서 한 노드의 기록은 그대로 남는다.
         // 서브에이전트는 세션과 다른 모델을 쓸 수 있어서 세션의 모델로 적지 않는다
         ...(status === 'doing' ? { ...(agent ? { agent } : {}), ...(declared ? { declared: true } : {}), seen: Boolean(session?.hooked), ...(!agent && session?.model ? { model: session.model } : {}) } : {}),

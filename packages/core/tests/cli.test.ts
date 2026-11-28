@@ -195,6 +195,49 @@ test('계획이 바뀐 기록에 노드의 모양이 남는다: 생긴 노드의
   assert.match(show, /-lint ~check\(앞 lint → impl\)  이유: 필요 없어짐/);
 });
 
+test('계획과 다르게 시작한 판단의 근거(--why): 회차에 적히고 muwi show에 나온다. 근거 없이 다르게 시작하면 막지 않고 한 줄 알린다', () => {
+  const { dir, muwi } = bench();
+  const plan = JSON.stringify({ nodes: [
+    { id: 'read', title: '티켓 읽기' },
+    { id: 'impl', title: '구현', after: ['read'], run: 'me' },
+    { id: 'review', title: '리뷰', after: ['impl'], run: 'subagent' },
+  ] });
+  muwi(['plan', '--work', 'w', plan]);
+  const hint = /계획과 다르게 시작했어요/;
+  // 계획대로면 알리지 않는다
+  const first = muwi(['node', 'read', 'start']);
+  assert.equal(first.code, 0);
+  assert.doesNotMatch(first.out, hint);
+  muwi(['node', 'read', 'done', '요구사항 2건']);
+  // 끝낸 노드를 다시 하기: 알리고(종료 코드 0), 같은 회차에 근거를 붙이는 법을 알려 준다
+  const redo = muwi(['node', 'read', 'start']);
+  assert.equal(redo.code, 0);
+  assert.match(redo.out, /계획과 다르게 시작했어요 \(끝낸 노드를 2회차로 다시 함\)\. 판단의 근거를 남기려면 muwi node read start --why "<근거>"로 다시 적어요/);
+  // 하는 중에 --why를 붙여 다시 start하면 같은 회차에 붙고, 마지막 근거를 쓴다
+  assert.doesNotMatch(muwi(['node', 'read', 'start', '--why', '첫 근거']).out, hint);
+  muwi(['node', 'read', 'start', '--why', '리뷰 댓글에 빠진 요구사항이 있어서']);
+  muwi(['node', 'read', 'done', '요구사항 3건']);
+  // 앞 노드가 끝나기 전에 시작, 계획은 서브에이전트인데 이 세션이 시작
+  const early = muwi(['node', 'review', 'start']);
+  assert.match(early.out, /계획과 다르게 시작했어요 \(impl가 아직 안 끝남, 계획은 서브에이전트인데 이 세션이 시작함\)/);
+  assert.doesNotMatch(muwi(['node', 'review', 'start', '--why', '바뀐 파일이 하나뿐이라']).out, hint);
+  // 계획은 직접인데 서브에이전트가 시작: 서브에이전트가 다시 적을 명령으로 알려 준다
+  const sub = muwi(['node', 'impl', 'start', '--sub', '--work', 'w']);
+  assert.match(sub.out, /계획은 직접인데 서브에이전트가 시작함\)\. 판단의 근거를 남기려면 muwi node impl start --sub --work w --why "<근거>"/);
+  assert.doesNotMatch(muwi(['node', 'impl', 'start', '--sub', '--work', 'w', '--why', '맡긴 세션이 다른 일을 하고 있어서']).out, hint);
+
+  const events = fs.readFileSync(path.join(dir, 'w', 'events.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l)).filter(e => e.type === 'node' && e.why);
+  assert.deepEqual(events.map(e => [e.node, e.attempt, e.why]), [
+    ['read', 2, '첫 근거'], ['read', 2, '리뷰 댓글에 빠진 요구사항이 있어서'], ['review', 1, '바뀐 파일이 하나뿐이라'], ['impl', 1, '맡긴 세션이 다른 일을 하고 있어서'],
+  ]);
+  const json = JSON.parse(muwi(['show', 'w', '--json']).out);
+  const read = json.nodes.find((n: any) => n.id === 'read');
+  assert.deepEqual(read.tries.map((t: any) => t.why ?? null), [null, '리뷰 댓글에 빠진 요구사항이 있어서']);
+  const show = muwi(['show', 'w']).out;
+  assert.match(show, /2회차 · .* · 근거: 리뷰 댓글에 빠진 요구사항이 있어서/);
+  assert.match(show, /읽은 skill: .* · 근거: 바뀐 파일이 하나뿐이라/);
+});
+
 test('작업 고르기: 세션이 붙어 있는 작업을 쓰고, 다른 세션은 --work로 들어온다', () => {
   const { muwi } = bench();
   muwi(['plan', '--work', 'one', PLAN], { session: 'lead' });

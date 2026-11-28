@@ -56,7 +56,7 @@ muwi가 남기는 파일의 위치와 형식을 정리했습니다. 기록을 �
 | `type` | 언제 | 주요 필드 |
 | --- | --- | --- |
 | `plan` | 계획을 적거나 바꿀 때 | `by`(`ai` 또는 `human`), `why`, `first`, `added`, `removed`, `changed`, `shapes`, `edits`, `gone` (아래 표) |
-| `node` | 노드의 상태가 바뀔 때 | `node`, `status`, `note`, `attempt`, `agent`(서브에이전트가 시작했을 때), `seen`(시작할 때 훅이 그 세션을 지켜보고 있었는지) |
+| `node` | 노드의 상태가 바뀔 때 | `node`, `status`, `note`, `attempt`, `agent`(서브에이전트가 시작했을 때), `seen`(시작할 때 훅이 그 세션을 지켜보고 있었는지), `model`, `why`(계획과 다르게 진행한 판단의 근거. `muwi node --why`) |
 | `skill` | skill을 읽을 때 | `skill`, `via`(`tool` 또는 `file`), `agent`, `node`, `attempt`, `guess`, `carried` |
 | `agent` | 서브에이전트가 시작하고 끝날 때 | `agent`, `what`(`start` 또는 `stop`), `kind`, `node`, `attempt`, `guess` |
 | `spawn` | `muwi run`·`muwi resume`으로 세션을 띄울 때 | `id`(띄운 것의 이름표), `node`, `terminal`, `from`(띄운 쪽의 터미널), `name`, `show`, `task`(맡긴 말), `cwd`, `model` |

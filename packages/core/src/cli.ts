@@ -9,7 +9,7 @@ import { cmdBoard } from './board.ts';
 import { cmdPeek, cmdResume, cmdRun, cmdTell, cmdTidy, cmdWait } from './delegate.ts';
 import { Fail, dur, join, needPlan, out, parseArgs, resolveWork, str, type Args } from './kit.ts';
 import { hasTerminals, loadPlugins, pluginFailures, terminals, views } from './plugins.ts';
-import { earlyStart, fromSubagent, markNode } from './node.ts';
+import { earlyStart, fromSubagent, markNode, offPlanStart } from './node.ts';
 import { addNode, carryStatus, diffPlan, editsOf, isEmptyDiff, parsePlan, removeNode, shape, type NodeInput, type PlanInput } from './plan.ts';
 import { readSession, sessionKey, sessionLabel } from './session.ts';
 import { installedTools, newerElsewhere, olderThan, readInstall, refreshSetup, removeSetup, runSetup } from './setup.ts';
@@ -41,6 +41,7 @@ const HELP = `사용법: muwi <명령>
 
   진행
   muwi node <id> start [--sub]         노드를 시작한다. 서브에이전트가 맡은 노드를 시작할 때는 --sub를 붙인다 (서브에이전트가 한 것으로 적힌다)
+      [--why "<근거>"]                 계획과 다르게 진행할 때(다시 하기, 앞 노드보다 먼저, 계획과 다른 쪽이 함) 그 판단의 근거
   muwi node <id> done ["<결과 한 줄>"]   노드를 끝낸다
   muwi node <id> wait "<물어볼 것>"     사람의 결정을 기다린다
   muwi node <id> block "<이유>"         막혔다
@@ -401,7 +402,10 @@ function cmdNode(id: string | undefined, action: string | undefined, text: strin
   const key = sessionKey();
   // 서브에이전트가 실행한 명령이면 부모 세션이 붙은 작업을 바꾸지 않는다 (--work를 붙여 적어도). 부모에게 갈 말도 받지 않는다
   const sub = fromSubagent(dir, work, id, key, Boolean(a.flags.sub));
-  const result = markNode(dir, work, id, status, note, key, process.env, { sub: Boolean(a.flags.sub) });
+  const why = str(a, 'why')?.trim() || undefined;
+  // 계획과 다르게 시작했는지 보려고 시작하기 전의 상태를 읽어 둔다 (알리기만 한다)
+  const was = readPlan(dir, work)?.nodes.find(n => n.id === id)?.status;
+  const result = markNode(dir, work, id, status, note, key, process.env, { sub: Boolean(a.flags.sub), ...(why ? { why } : {}) });
   if (!result) {
     const plan = needPlan(dir, work);
     throw new Fail(`없는 노드예요: ${id}. 있는 노드: ${plan.nodes.map(n => n.id).join(', ')}. 새 노드면 muwi add <id> "<제목>" --after <앞 노드> --why "<이유>"로 먼저 넣어요 (이 작업의 흐름에 없는 일이면 새 작업으로).`);
@@ -415,6 +419,9 @@ function cmdNode(id: string | undefined, action: string | undefined, text: strin
   // 앞 노드가 끝나기 전에 시작했다: 같이 하는 거면 계획을 고치라고 알린다. 맡은 서브에이전트는 계획을 고치지 않으므로 알리지 않는다
   const early = status === 'doing' && !sub ? earlyStart(result.nodes, id) : null;
   if (early) out(early);
+  // 계획과 다르게 시작했는데 근거가 없으면 근거를 남기는 법을 알린다 (막지 않는다). 다시 start하면 같은 회차에 붙는다
+  const off = status === 'doing' && !why ? offPlanStart(result.nodes, id, was, sub) : [];
+  if (off.length) out(`계획과 다르게 시작했어요 (${off.join(', ')}). 판단의 근거를 남기려면 muwi node ${id} start${sub ? ` --sub --work ${work}` : ''} --why "<근거>"로 다시 적어요.`);
 }
 
 function cmdFlag(a: Args, dir: string) {
@@ -630,11 +637,12 @@ function printShow(v: WorkView) {
       for (const t of n.tries) {
         const head = [`${t.n}회차`, t.startedAt ? clockTime(t.startedAt) : '', t.spentMs > 0 ? dur(t.spentMs) : '', t.who ? whoText(v, t.who) : ''].filter(Boolean).join(' · ');
         const result = t.note && t.n !== n.tries[n.tries.length - 1].n ? ` · ${{ waiting: '기다린 것', blocked: '막힌 이유', done: '결과' }[t.status as 'waiting' | 'blocked' | 'done'] ?? '메모'}: ${t.note}` : '';
-        out(`${indent}${head} · ${skillsLine(t, true)}${result}`);
+        out(`${indent}${head} · ${skillsLine(t, true)}${result}${t.why ? ` · 근거: ${t.why}` : ''}`);
       }
     } else {
-      const skills = skillsLine(n, n.attempts > 0);
-      if (skills) out(`${indent}${skills}`);
+      const why = n.tries[0]?.why;
+      const line = [skillsLine(n, n.attempts > 0), why ? `근거: ${why}` : ''].filter(Boolean).join(' · ');
+      if (line) out(`${indent}${line}`);
     }
     for (const sp of n.spawns) if (sp.task) out(`${indent}맡긴 말 (${sp.terminal}): ${sp.task.replace(/\s+/g, ' ').slice(0, 160)}${sp.task.length > 160 ? '…' : ''}`);
     for (const f of n.flags) out(`${indent}⚑ 문제 표시 (${clockTime(f.at)}): ${f.text}`);
@@ -901,7 +909,7 @@ const FLAGS: Record<string, string[]> = {
   plan: ['work', 'request', 'title', 'why', 'human', 'by', 'file', 'json'],
   add: ['work', 'after', 'before', 'alone', 'run', 'show', 'why', 'human', 'by'],
   remove: ['work', 'why', 'human', 'by'],
-  node: ['work', 'sub', 'result'],
+  node: ['work', 'sub', 'result', 'why'],
   flag: ['work'],
   viewed: ['work'],
   archive: ['work', 'done'],

@@ -50,6 +50,8 @@ export type Try = {
   seen: boolean;
   /** 시작을 적지 않았거나 시작과 끝을 한꺼번에 적었다. 하는 동안의 기록이 없다 */
   instant: boolean;
+  /** 계획과 다르게 진행한 판단의 근거 (muwi node --why). 이 회차에 여러 번 적었으면 마지막 것 */
+  why?: string;
 };
 
 export type Spawn = { at: string; /** 띄운 것의 이름표 */ id?: string; terminal: string; name?: string; show?: ShowIn; /** 그 세션에 맡긴 말 */ task?: string; /** 새 세션을 띄운 폴더 */ cwd?: string };
@@ -187,6 +189,7 @@ type Draft = {
   openFrom: number | null;
   status: NodeStatus;
   note?: string;
+  why?: string;
   /** 이 회차를 시작한 쪽들. 마지막이 지금(또는 끝까지) 한 쪽이다 */
   doers: Doer[];
   /** 시작을 적지 않고 끝낸 회차는 끝낸 세션이 한 것으로 본다 */
@@ -240,6 +243,7 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
       if ((prev.get(e.node) ?? 'todo') !== e.status) since.set(e.node, e.at);
       prev.set(e.node, e.status);
       d.status = e.status;
+      if (e.why) d.why = e.why;
       if (e.note) d.note = e.note;
       else if (e.status === 'doing' || e.status === 'todo') delete d.note;
       if (e.status === 'doing') {
@@ -356,6 +360,7 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
         skills,
         seen: d.seen || d.reads.size > 0,
         instant: !d.startedAt || quick,
+        ...(d.why ? { why: d.why } : {}),
       };
     });
     const last = tries[tries.length - 1];
