@@ -61,6 +61,9 @@ export function timelineOf(plan: Plan, events: Event[]): Timeline {
   const marks: PlanMark[] = [];
   const open = new Map<string, Segment>();
   const attempts = new Map<string, number>();
+  /** 회차마다 시작한 쪽의 줄. 서브에이전트 표시는 시작 줄에만 붙으므로 응답 대기·막힘·끝 줄은 이것으로 줄을 정한다 */
+  const starter = new Map<string, string>();
+  const laneAt = (e: Event, attempt: number) => (e.type === 'node' && e.status === 'doing' ? laneOf(e) : starter.get(`${e.type === 'node' ? e.node : ''}#${attempt}`) ?? laneOf(e));
   const close = (node: string, at: string) => {
     const s = open.get(node);
     if (!s) return;
@@ -80,8 +83,11 @@ export function timelineOf(plan: Plan, events: Event[]): Timeline {
     attempts.set(e.node, attempt);
     if (e.status === 'doing' || e.status === 'waiting' || e.status === 'blocked') {
       const fresh = e.status === 'doing' || !cur;
-      const lane = fresh ? laneOf(e) : cur.lane;
+      const lane = fresh ? laneAt(e, attempt) : cur.lane;
+      if (e.status === 'doing') starter.set(`${e.node}#${attempt}`, lane);
       if (cur && cur.kind === e.status && cur.lane === lane && cur.attempt === attempt) {
+        // 같은 노드에서 다시 물었으면(응답 대기 둘째 질문) 마지막 말을 쓴다
+        if (e.note) cur.note = e.note;
         if (e.why) cur.why = e.why;
         continue;
       }
@@ -99,7 +105,7 @@ export function timelineOf(plan: Plan, events: Event[]): Timeline {
       close(e.node, e.at);
     } else if (e.status === 'done') {
       segments.push({
-        node: e.node, title: '', attempt, lane: laneOf(e), kind: 'doing', start: e.at, end: e.at,
+        node: e.node, title: '', attempt, lane: laneAt(e, attempt), kind: 'doing', start: e.at, end: e.at,
         ...(e.note ? { note: e.note } : {}), ...(e.why ? { why: e.why } : {}), done: true, instant: true,
       });
     }

@@ -3,13 +3,15 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { redoChip, redoLine } from '../app/muwi/cards.js';
 
-test('회차 칩: 한 번만 한 노드에는 없다. 끝났으면 몇 번 했는지, 아니면 다시 하는 중', () => {
+test('회차 칩: 한 번만 한 노드에는 없다. 끝났으면 몇 번 했는지, 하는 중이면 다시 하는 중, 응답 대기·막힘·잠시 멈춤은 몇 회차인지', () => {
   assert.equal(redoChip({ attempts: 1, status: 'done' }), null);
   assert.equal(redoChip({ attempts: 0, status: 'todo' }), null);
   assert.equal(redoChip({ attempts: 2, status: 'done' }), '두 번 함');
   assert.equal(redoChip({ attempts: 5, status: 'done' }), '다섯 번 함');
   assert.equal(redoChip({ attempts: 6, status: 'done' }), '6번 함');
   assert.equal(redoChip({ attempts: 3, status: 'doing' }), '다시 하는 중');
+  assert.equal(redoChip({ attempts: 2, status: 'blocked' }), '2회차');
+  assert.equal(redoChip({ attempts: 2, status: 'waiting' }), '2회차');
 });
 
 test('셋째 줄: 지금 회차가 뒤 노드에서 돌아왔으면 어디서 왜, 아니면 앞 회차의 결과', () => {

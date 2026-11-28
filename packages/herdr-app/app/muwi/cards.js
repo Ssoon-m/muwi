@@ -3,10 +3,11 @@
 
 const TIMES = { 2: "두", 3: "세", 4: "네", 5: "다섯" };
 
-/** 회차 칩: 다시 한 노드만. 끝났으면 몇 번 했는지, 아니면 다시 하는 중 */
+/** 회차 칩: 다시 한 노드만. 끝났으면 몇 번 했는지, 하는 중이면 다시 하는 중, 그 밖(응답 대기·막힘·잠시 멈춤)은 몇 회차인지 */
 export function redoChip(n) {
   if (!(n.attempts > 1)) return null;
-  if (n.status !== "done") return "다시 하는 중";
+  if (n.status === "doing") return "다시 하는 중";
+  if (n.status !== "done") return `${n.attempts}회차`;
   return TIMES[n.attempts] ? `${TIMES[n.attempts]} 번 함` : `${n.attempts}번 함`;
 }
 

@@ -2228,10 +2228,12 @@ export default class Muwi extends View {
         const old = lane.px;
         const differs = (a) => !a || Math.abs(a.width - px.width) > 1 || Math.abs(a.height - px.height) > 1;
         // 이 그래프의 크기가 그대로여도 배치에 넘긴 크기와 다르면 맞춘다 (나눠 그리다 그래프 하나로 돌아왔을 때)
-        if (differs(old) || differs(this.fitPx)) {
+        // 타임라인을 펼친 그래프는 그만큼 낮다. 배치에 넘기는 크기는 펼치지 않은 그래프로 잰다 (그래프마다 다른 크기로 번갈아 덮어써 다시 배치하지 않게)
+        const timeline = this.timelineOpen.has(view.work);
+        if (differs(old) || (!timeline && differs(this.fitPx)) || !this.fitPx) {
           lane.px = { width: px.width, height: px.height };
-          // 배치에 넘기는 크기: 그래프 하나를 그리는 곳 (나눠 그린 큰 그래프는 크기가 같다)
-          this.fitPx = lane.px;
+          // 배치에 넘기는 크기: 그래프 하나를 그리는 곳 (나눠 그린 큰 그래프는 크기가 같다). 아직 모르면 펼친 그래프로라도 잰다
+          if (!timeline || !this.fitPx) this.fitPx = lane.px;
           lane.focusKey = null; // 크기가 바뀌면 다시 맞춘다
           // 칸이 가로로 길다가 세로로 길어졌으면(또는 반대) 흐름 방향을 바꿔 다시 읽는다
           if (this.loadedDown !== null && this.wantsDown() !== this.loadedDown) this.stale = true;

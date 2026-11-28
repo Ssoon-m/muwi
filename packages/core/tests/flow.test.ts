@@ -40,6 +40,15 @@ test('타임라인: 서브에이전트가 시작한 구간은 그 서브에이�
   assert.deepEqual(t.lanes.map(l => [l.key, l.name, l.sub]), [['s2', '세션', false], ['s1', '세션 2', false], ['x1', '서브 1', true]]);
 });
 
+test('타임라인: 같은 노드에서 다시 물으면 마지막 질문을 쓴다. 서브에이전트가 시작한 회차의 응답 대기는 잠시 멈췄다가 물어도 그 서브에이전트 줄에', () => {
+  const p = plan([['a', []]]);
+  const asked = timelineOf(p, events([['a', 'doing'], ['a', 'waiting', { note: 'PR 올릴까요?' }], ['a', 'waiting', { note: 'base는?' }]]));
+  assert.deepEqual(asked.segments.map(s => [s.kind, s.note]), [['doing', undefined], ['waiting', 'base는?']]);
+  // 서브에이전트 표시(agent)는 시작 줄에만 붙는다: 잠시 멈춘 뒤의 응답 대기도 시작한 서브에이전트의 줄에 둔다
+  const sub = timelineOf(p, events([['a', 'doing', { agent: 'x1' }], ['a', 'todo'], ['a', 'waiting', { note: '물어봄' }]]));
+  assert.deepEqual(sub.segments.map(s => `${s.kind}@${s.lane}`), ['doing@x1', 'waiting@x1']);
+});
+
 test('타임라인: 다른 세션이 이어받으면 구간을 나눈다. 잠시 멈추면 닫는다. 시작 없이 끝을 적으면 길이 없는 구간(instant)', () => {
   const p = plan([['a', []], ['b', []]]);
   const t = timelineOf(p, events([['a', 'doing'], ['a', 'doing', { session: 's2' }], ['a', 'todo'], ['b', 'done', { note: '한꺼번에' }]]));
