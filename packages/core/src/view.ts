@@ -467,6 +467,24 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
   };
 }
 
+/**
+ * 사건 기록만으로 노드마다 지금 상태와 회차를 다시 만든다 (계획에서 빠진 노드는 없다).
+ * plan.json의 status·attempt는 이것과 같아야 한다. 노드의 상태는 markNode가 같은 잠금 안에서 plan.json과 사건(node)에 함께 적고,
+ * 노드가 생기고 빠지는 것은 savePlan이 plan.json과 사건(plan)에 함께 적는다. plan.json은 지금 상태를 빨리 읽으려는 것이고 이력은 사건 기록에 있다
+ */
+export function replayNodes(events: Event[]): Map<string, { status: NodeStatus; attempt?: number }> {
+  const nodes = new Map<string, { status: NodeStatus; attempt?: number }>();
+  for (const e of events) {
+    if (e.type === 'plan') {
+      for (const id of e.added) if (!nodes.has(id)) nodes.set(id, { status: 'todo' });
+      for (const id of e.removed) nodes.delete(id);
+    } else if (e.type === 'node' && nodes.has(e.node)) {
+      nodes.set(e.node, { status: e.status, ...(e.attempt ? { attempt: e.attempt } : {}) });
+    }
+  }
+  return nodes;
+}
+
 /** 구간들을 겹침 없이 더한 길이 (ms). 나란히 한 노드의 시간을 두 번 세지 않는다 */
 export function unionMs(spans: [number, number][]): number {
   let total = 0, end = -Infinity;

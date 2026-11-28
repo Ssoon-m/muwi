@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { readEvents, readPlan } from '../src/store.ts';
+import { replayNodes } from '../src/view.ts';
 
 /** sh 스크립트(tool.sh, find-node.sh, bin/muwi)를 직접 시험하는 테스트. Windows에서는 CI가 Git Bash로 따로 확인한다 */
 const SH = process.platform === 'win32' ? { skip: 'sh 스크립트를 시험한다 (Windows는 CI의 Git Bash 단계에서 본다)' } : {};
@@ -236,6 +238,54 @@ test('계획과 다르게 시작한 판단의 근거(--why): 회차에 적히고
   const show = muwi(['show', 'w']).out;
   assert.match(show, /2회차 · .* · 근거: 리뷰 댓글에 빠진 요구사항이 있어서/);
   assert.match(show, /읽은 skill: .* · 근거: 바뀐 파일이 하나뿐이라/);
+});
+
+test('지금 노드 상태는 plan.json에, 이력은 사건 기록에: 사건만 다시 따라가도 plan.json의 상태·회차와 같다', () => {
+  const { dir, muwi } = bench();
+  /** 명령 하나를 실행하고 매번 사건으로 다시 만든 상태가 plan.json과 같은지 본다 */
+  const step = (args: string[]) => {
+    const r = muwi([...args, '--work', 'w']);
+    assert.ok(r.code === 0, `${args.join(' ')}: ${r.err}`);
+    const plan = readPlan(dir, 'w')!;
+    const replay = replayNodes(readEvents(dir, 'w'));
+    assert.deepEqual(
+      Object.fromEntries(replay),
+      Object.fromEntries(plan.nodes.map(n => [n.id, { status: n.status, ...(n.attempt ? { attempt: n.attempt } : {}) }])),
+      `${args.join(' ')} 뒤`,
+    );
+  };
+  step(['plan', PLAN]);
+  step(['node', 'read', 'start']);
+  step(['node', 'read', 'done', '요구사항 2건']);
+  step(['node', 'impl', 'wait', 'A안과 B안 중 어느 쪽?']);
+  step(['node', 'impl', 'start']);
+  step(['node', 'impl', 'done']);
+  step(['node', 'impl', 'start', '--why', '확인에서 빠진 경우를 찾아서']); // 2회차
+  step(['node', 'impl', 'pause']);
+  step(['node', 'impl', 'start']); // 같은 회차로 이어 하기
+  step(['node', 'check', 'block', '화면을 띄울 수 없음']);
+  step(['node', 'check', 'start']); // 막혔던 노드를 다시: 2회차
+  step(['node', 'check', 'pause']);
+  step(['node', 'check', 'pause']); // 같은 상태를 다시 적기
+  step(['add', 'lint', 'lint', '--after', 'impl', '--before', 'check', '--why', 'lint 먼저']);
+  step(['node', 'lint', 'done']); // 시작을 적지 않고 끝내기
+  step(['node', 'lint', 'start']); // 그 노드를 다시: 2회차
+  step(['node', 'lint', 'done']);
+  step(['remove', 'lint', '--why', '필요 없어짐']);
+  // 계획을 통째로 다시 낸다: 하던 노드(impl) 앞에 끝나지 않은 노드가 생겨 impl이 잠시 멈춘다
+  step(['plan', '--why', '설계를 먼저', JSON.stringify({ nodes: [
+    { id: 'read', title: '티켓 읽기' }, { id: 'design', title: '설계', after: ['read'] },
+    { id: 'impl', title: '구현', after: ['design'] }, { id: 'check', title: '화면 확인', after: ['impl'] },
+  ] })]);
+  step(['node', 'design', 'start', '--sub']);
+  step(['node', 'design', 'done']);
+  step(['node', 'impl', 'start']);
+  step(['node', 'impl', 'done']);
+  step(['node', 'check', 'start']);
+  step(['node', 'check', 'done']);
+  assert.deepEqual(Object.fromEntries(replayNodes(readEvents(dir, 'w'))), {
+    read: { status: 'done', attempt: 1 }, design: { status: 'done', attempt: 1 }, impl: { status: 'done', attempt: 2 }, check: { status: 'done', attempt: 2 },
+  });
 });
 
 test('작업 고르기: 세션이 붙어 있는 작업을 쓰고, 다른 세션은 --work로 들어온다', () => {

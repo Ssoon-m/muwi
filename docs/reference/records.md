@@ -49,6 +49,8 @@ muwi가 남기는 파일의 위치와 형식을 정리했습니다. 기록을 �
 
 훅은 `by`를 읽어서, 방금 일어난 일이 어느 노드의 것인지 알아냅니다.
 
+`plan.json`은 지금 상태이고, 이력은 `events.jsonl`에 있습니다. muwi는 둘을 같은 잠금 안에서 함께 적습니다. 그래서 `events.jsonl`의 `plan`·`node` 사건을 처음부터 따라가면 노드마다 `plan.json`의 `status`, `attempt`와 같은 값이 나옵니다 (`replayNodes`, `packages/core/src/view.ts`).
+
 ## events.jsonl
 
 일어난 일을 한 줄에 하나씩 덧붙입니다. 모든 줄에 시각 `at`과 세션 `session`이 있습니다.
