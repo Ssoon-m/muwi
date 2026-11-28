@@ -3,7 +3,7 @@
 //   작업마다: 계획이 바뀐 이유들, 빠진 노드, 문제 표시, 노드 밖에서 읽은 skill
 // 사건에는 어느 노드의 몇 번째 회차인지가 적혀 있다. 여기서는 적힌 대로 모으기만 한다.
 // 시각을 맞춰 보며 짐작하지 않는다. 확실하지 않게 적힌 것(guess)과 관찰하지 못한 것(seen: false)은 그대로 드러낸다.
-import type { Event, NodeStatus, Plan, PlanNode, ShowIn } from './store.ts';
+import type { Event, NodeEdit, NodeShape, NodeStatus, Plan, PlanNode, ShowIn } from './store.ts';
 import { clock, listWorks, readEvents, readPlan, resultsSince } from './store.ts';
 import { flowOf, type Drawn } from './flow.ts';
 import { sessionStates } from './live.ts';
@@ -50,6 +50,8 @@ export type Try = {
   seen: boolean;
   /** 시작을 적지 않았거나 시작과 끝을 한꺼번에 적었다. 하는 동안의 기록이 없다 */
   instant: boolean;
+  /** 계획과 다르게 진행한 판단의 근거 (muwi node --why). 이 회차에 여러 번 적었으면 마지막 것 */
+  why?: string;
 };
 
 export type Spawn = { at: string; /** 띄운 것의 이름표 */ id?: string; terminal: string; name?: string; show?: ShowIn; /** 그 세션에 맡긴 말 */ task?: string; /** 새 세션을 띄운 폴더 */ cwd?: string };
@@ -92,7 +94,8 @@ export type NodeView = PlanNode & {
   flags: { at: string; text: string }[];
 };
 
-export type Change = { at: string; by: 'ai' | 'human'; why?: string; first: boolean; added: string[]; removed: string[]; changed: string[] };
+/** 계획이 바뀐 한 번. shapes: 생긴 노드의 모양, edits: 바뀐 노드의 바뀐 필드 (전과 뒤) */
+export type Change = { at: string; by: 'ai' | 'human'; why?: string; first: boolean; added: string[]; removed: string[]; changed: string[]; shapes: NodeShape[]; edits: NodeEdit[] };
 /** stalled: 끝나지 않은 노드가 있는데 그 노드를 하던 세션이 모두 닫혔다 */
 export type WorkState = 'waiting' | 'blocked' | 'doing' | 'stalled' | 'done';
 /**
@@ -186,6 +189,7 @@ type Draft = {
   openFrom: number | null;
   status: NodeStatus;
   note?: string;
+  why?: string;
   /** 이 회차를 시작한 쪽들. 마지막이 지금(또는 끝까지) 한 쪽이다 */
   doers: Doer[];
   /** 시작을 적지 않고 끝낸 회차는 끝낸 세션이 한 것으로 본다 */
@@ -239,6 +243,7 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
       if ((prev.get(e.node) ?? 'todo') !== e.status) since.set(e.node, e.at);
       prev.set(e.node, e.status);
       d.status = e.status;
+      if (e.why) d.why = e.why;
       if (e.note) d.note = e.note;
       else if (e.status === 'doing' || e.status === 'todo') delete d.note;
       if (e.status === 'doing') {
@@ -355,6 +360,7 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
         skills,
         seen: d.seen || d.reads.size > 0,
         instant: !d.startedAt || quick,
+        ...(d.why ? { why: d.why } : {}),
       };
     });
     const last = tries[tries.length - 1];
@@ -445,8 +451,9 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
     nodes,
     edges: plan.nodes.flatMap(n => n.after.filter(a => byId.has(a)).map(a => ({ from: a, to: n.id }))),
     drawn: flowOf(plan, events),
-    changes: planEvents.map(e => ({ at: e.at, by: e.by, why: e.why, first: Boolean(e.first), added: e.added, removed: e.removed, changed: e.changed })),
-    // 같은 id로 다시 넣은 노드는 빠진 것으로 치지 않는다
+    changes: planEvents.map(e => ({ at: e.at, by: e.by, why: e.why, first: Boolean(e.first), added: e.added, removed: e.removed, changed: e.changed, shapes: e.shapes ?? [], edits: e.edits ?? [] })),
+    // 뺀 노드의 id는 다시 쓰지 않는다 (muwi add·plan이 받지 않는다). 그래서 빠진 노드는 계획에 다시 나오지 않는다
+    // 지금 계획에 있는 노드는 빼지 않는다 (같은 id를 다시 쓰는 것을 막기 전에 만든 작업)
     gone: planEvents.flatMap(e => (e.gone ?? []).filter(g => !byId.has(g.id)).map(g => ({ at: e.at, id: g.id, title: g.title, status: g.status, ...(e.why ? { why: e.why } : {}) }))),
     flags: flags.map(f => ({ at: f.at, node: f.node, text: f.text })),
     outside,
@@ -459,6 +466,24 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
     },
     counts,
   };
+}
+
+/**
+ * 사건 기록만으로 노드마다 지금 상태와 회차를 다시 만든다 (계획에서 빠진 노드는 없다).
+ * plan.json의 status·attempt는 이것과 같아야 한다. 노드의 상태는 markNode가 같은 잠금 안에서 plan.json과 사건(node)에 함께 적고,
+ * 노드가 생기고 빠지는 것은 savePlan이 plan.json과 사건(plan)에 함께 적는다. plan.json은 지금 상태를 빨리 읽으려는 것이고 이력은 사건 기록에 있다
+ */
+export function replayNodes(events: Event[]): Map<string, { status: NodeStatus; attempt?: number }> {
+  const nodes = new Map<string, { status: NodeStatus; attempt?: number }>();
+  for (const e of events) {
+    if (e.type === 'plan') {
+      for (const id of e.added) if (!nodes.has(id)) nodes.set(id, { status: 'todo' });
+      for (const id of e.removed) nodes.delete(id);
+    } else if (e.type === 'node' && nodes.has(e.node)) {
+      nodes.set(e.node, { status: e.status, ...(e.attempt ? { attempt: e.attempt } : {}) });
+    }
+  }
+  return nodes;
 }
 
 /** 구간들을 겹침 없이 더한 길이 (ms). 나란히 한 노드의 시간을 두 번 세지 않는다 */

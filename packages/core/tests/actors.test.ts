@@ -10,7 +10,7 @@ import { markNode } from '../src/node.ts';
 import { parsePlan, diffPlan, carryStatus, addNode } from '../src/plan.ts';
 import { attach, readSession, touchSession } from '../src/session.ts';
 import { modelIn } from '../src/connectors/tools.ts';
-import { appendEvent, clock, readEvents, readPlan, writePlan, type NodeStatus, type Plan, type RunBy } from '../src/store.ts';
+import { SCHEMA, appendEvent, clock, readEvents, readPlan, writePlan, type NodeStatus, type Plan, type RunBy } from '../src/store.ts';
 import { PAST_DAYS, loadBoard, loadView } from '../src/view.ts';
 
 /** sh 스크립트(tool.sh, find-node.sh, bin/muwi)를 직접 시험하는 테스트. Windows에서는 CI가 Git Bash로 따로 확인한다 */
@@ -421,7 +421,7 @@ test('계획을 통째로 다시 낼 때 이미 시작했거나 끝난 노드가
   const plan = readPlan(dir, 'shop-1')!;
   assert.deepEqual(plan.nodes.map(n => n.id), ['read', 'impl', 'impl-api', 'lint']);
   assert.deepEqual([plan.nodes[2].attempt, plan.nodes[2].by?.session], [1, 'child']);
-  assert.equal(plan.schema, 2);
+  assert.equal(plan.schema, SCHEMA);
 });
 
 test('뺀 노드의 기록은 남는다. 하던 노드를 빼면 알려 주고, 그 노드에 남긴 표시도 보인다', () => {

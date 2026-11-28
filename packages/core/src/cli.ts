@@ -9,16 +9,16 @@ import { cmdBoard } from './board.ts';
 import { cmdPeek, cmdResume, cmdRun, cmdTell, cmdTidy, cmdWait } from './delegate.ts';
 import { Fail, dur, join, needPlan, out, parseArgs, resolveWork, str, type Args } from './kit.ts';
 import { hasTerminals, loadPlugins, pluginFailures, terminals, views } from './plugins.ts';
-import { earlyStart, fromSubagent, markNode } from './node.ts';
-import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
+import { earlyStart, fromSubagent, markNode, offPlanStart } from './node.ts';
+import { addNode, carryStatus, diffPlan, editsOf, isEmptyDiff, parsePlan, removeNode, shape, type NodeInput, type PlanInput } from './plan.ts';
 import { readSession, sessionKey, sessionLabel } from './session.ts';
 import { installedTools, newerElsewhere, olderThan, readInstall, refreshSetup, removeSetup, runSetup } from './setup.ts';
 import { adapterOf } from './connectors/index.ts';
 import { gaps } from './connectors/types.ts';
 import { TOOLS, toolById } from './connectors/tools.ts';
 import {
-  SCHEMA, appendEvent, checkWorkName, listWorks, nowIso, readConfig, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
-  type NodeStatus, type Plan, type PlanNode, type RunBy, type ShowIn,
+  SCHEMA, appendEvent, checkWorkName, listWorks, nowIso, readConfig, readEvents, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
+  type NodeEdit, type NodeStatus, type Plan, type PlanNode, type RunBy, type ShowIn,
 } from './store.ts';
 import { TRASH_DAYS, daysLeft, listTrash, purgeTrash, restoreWork, trashWork } from './trash.ts';
 import { afterCommand, cacheFile, cachedLatest, checkLatest, releaseUrl, updateTarget } from './update.ts';
@@ -41,6 +41,7 @@ const HELP = `사용법: muwi <명령>
 
   진행
   muwi node <id> start [--sub]         노드를 시작한다. 서브에이전트가 맡은 노드를 시작할 때는 --sub를 붙인다 (서브에이전트가 한 것으로 적힌다)
+      [--why "<근거>"]                 계획과 다르게 진행할 때(다시 하기, 앞 노드보다 먼저, 계획과 다른 쪽이 함) 그 판단의 근거
   muwi node <id> done ["<결과 한 줄>"]   노드를 끝낸다
   muwi node <id> wait "<물어볼 것>"     사람의 결정을 기다린다
   muwi node <id> block "<이유>"         막혔다
@@ -186,7 +187,7 @@ function savePlan(dir: string, work: string, make: (old: Plan | null) => PlanInp
         nodes: carryStatus([], input.nodes),
       };
       writePlan(dir, plan);
-      appendEvent(dir, work, { type: 'plan', by, ...(why ? { why } : {}), first: true, added: plan.nodes.map(n => n.id), removed: [], changed: [] }, key, at);
+      appendEvent(dir, work, { type: 'plan', by, ...(why ? { why } : {}), first: true, added: plan.nodes.map(n => n.id), removed: [], changed: [], shapes: input.nodes.map(shape) }, key, at);
       return { plan, created: true, changed: true, paused: [] };
     }
     const diff = diffPlan(old.nodes, input.nodes);
@@ -203,6 +204,14 @@ function savePlan(dir: string, work: string, make: (old: Plan | null) => PlanInp
         2,
       );
     }
+    // 이 작업에서 뺀 노드의 id는 다시 쓰지 않는다. 기록은 노드 id로 모이므로 같은 id면 앞 노드의 회차와 결과가 새 노드에 섞인다
+    const reused = removedBefore(dir, work).filter(g => diff.added.includes(g.id));
+    if (reused.length) {
+      throw new Fail(
+        `이 작업에서 전에 뺀 노드의 id예요: ${reused.map(g => `${g.id}(${g.title})`).join(', ')}. 같은 id를 다시 쓰면 그 노드의 회차와 결과가 새 노드에 섞여요. 다른 id를 골라 다시 적어요. 뺀 노드와 같은 일을 다시 넣는 것이어도 새로 하는 일이니 새 id로 적어요.`,
+        2,
+      );
+    }
     if (!isEmptyDiff(diff) && !why) {
       throw new Fail(`${work}의 계획을 바꾸려면 --why "<이유>"를 적어요. 나중에 왜 바뀌었는지 볼 수 있게요. 사람이 바꾸라고 했으면 --human도 붙여요. 다른 새 작업이면 --work <새 이름>으로 적어요.`);
     }
@@ -211,8 +220,11 @@ function savePlan(dir: string, work: string, make: (old: Plan | null) => PlanInp
     if (!isEmptyDiff(diff)) {
       appendEvent(dir, work, {
         type: 'plan', by, ...(why ? { why } : {}), ...diff,
+        // 생긴 노드의 모양과 바뀐 노드의 전과 뒤. 무엇이 어떻게 바뀌었는지 기록만으로 알 수 있게
+        ...(diff.added.length ? { shapes: input.nodes.filter(n => diff.added.includes(n.id)).map(shape) } : {}),
+        ...(diff.changed.length ? { edits: editsOf(old.nodes, input.nodes, diff.changed) } : {}),
         // 빠진 노드가 무엇이었는지 남긴다. 빠진 뒤에도 기록에서 볼 수 있다
-        ...(gone.length ? { gone: gone.map(n => ({ id: n.id, title: n.title, status: n.status })) } : {}),
+        ...(gone.length ? { gone: gone.map(n => ({ ...shape(n), status: n.status })) } : {}),
       }, key, at);
     }
     // 하던 노드(작업 중, 응답 대기) 앞에 끝나지 않은 노드가 새로 생겼으면 그 노드는 아직 할 차례가 아니다.
@@ -225,6 +237,17 @@ function savePlan(dir: string, work: string, make: (old: Plan | null) => PlanInp
       .filter(p => p.by.length > 0);
     return { plan, created: false, changed: true, paused };
   });
+}
+
+/** 이 작업에서 전에 뺀 노드들 (계획이 바뀐 기록의 gone). 같은 id가 여러 번 빠졌으면 마지막 것 */
+function removedBefore(dir: string, work: string): { id: string; title: string }[] {
+  const out = new Map<string, { id: string; title: string }>();
+  for (const e of readEvents(dir, work)) {
+    if (e.type !== 'plan') continue;
+    for (const id of e.removed) out.set(id, { id, title: out.get(id)?.title ?? id });
+    for (const g of e.gone ?? []) out.set(g.id, { id: g.id, title: g.title });
+  }
+  return [...out.values()];
 }
 
 /** 앞에 끝나지 않은 노드가 생긴 하던 노드를 잠시 멈춘다. 다시 start하면 같은 회차로 이어진다 */
@@ -379,7 +402,10 @@ function cmdNode(id: string | undefined, action: string | undefined, text: strin
   const key = sessionKey();
   // 서브에이전트가 실행한 명령이면 부모 세션이 붙은 작업을 바꾸지 않는다 (--work를 붙여 적어도). 부모에게 갈 말도 받지 않는다
   const sub = fromSubagent(dir, work, id, key, Boolean(a.flags.sub));
-  const result = markNode(dir, work, id, status, note, key, process.env, { sub: Boolean(a.flags.sub) });
+  const why = str(a, 'why')?.trim() || undefined;
+  // 계획과 다르게 시작했는지 보려고 시작하기 전의 상태를 읽어 둔다 (알리기만 한다)
+  const was = readPlan(dir, work)?.nodes.find(n => n.id === id)?.status;
+  const result = markNode(dir, work, id, status, note, key, process.env, { sub: Boolean(a.flags.sub), ...(why ? { why } : {}) });
   if (!result) {
     const plan = needPlan(dir, work);
     throw new Fail(`없는 노드예요: ${id}. 있는 노드: ${plan.nodes.map(n => n.id).join(', ')}. 새 노드면 muwi add <id> "<제목>" --after <앞 노드> --why "<이유>"로 먼저 넣어요 (이 작업의 흐름에 없는 일이면 새 작업으로).`);
@@ -393,6 +419,12 @@ function cmdNode(id: string | undefined, action: string | undefined, text: strin
   // 앞 노드가 끝나기 전에 시작했다: 같이 하는 거면 계획을 고치라고 알린다. 맡은 서브에이전트는 계획을 고치지 않으므로 알리지 않는다
   const early = status === 'doing' && !sub ? earlyStart(result.nodes, id) : null;
   if (early) out(early);
+  // 계획과 다르게 시작했는데 근거가 없으면 근거를 남기는 법을 알린다 (막지 않는다). 다시 start하면 같은 회차에 붙는다
+  // 앞 노드가 안 끝난 것은 위의 안내가 이미 말했다: 같은 말을 두 번 하지 않고 근거를 남기는 법만 붙인다
+  const off = status === 'doing' && !why ? offPlanStart(result.nodes, id, was, sub, { open: !early }) : [];
+  const again = `muwi node ${id} start${sub ? ` --sub --work ${work}` : ''} --why "<근거>"`;
+  if (off.length) out(`계획과 다르게 시작했어요 (${off.join(', ')}). 판단의 근거를 남기려면 ${again}로 다시 적어요.`);
+  else if (early && !why) out(`같이 하기로 판단한 거면 그 근거를 남기려면 ${again}로 다시 적어요.`);
 }
 
 function cmdFlag(a: Args, dir: string) {
@@ -566,6 +598,21 @@ function skillsLine(t: Pick<Try, 'skills' | 'seen' | 'instant'>, started: boolea
   return parts.join(' · ');
 }
 
+/** 바뀐 노드 하나를 짧게: ~impl(제목 "구현" → "구현과 시험" · 앞 read → read,lint) */
+function editText(id: string, edit?: NodeEdit): string {
+  if (!edit) return `~${id}`;
+  const { before: b, after: a } = edit;
+  const list = (x?: string[]) => (x?.length ? x.join(',') : '없음');
+  const run = (x?: RunBy | null) => (x ? RUN_NAME[x] : '정하지 않음');
+  const parts = [
+    'title' in a ? `제목 "${b.title}" → "${a.title}"` : '',
+    'after' in a ? `앞 ${list(b.after)} → ${list(a.after)}` : '',
+    'run' in a ? `맡는 쪽 ${run(b.run)} → ${run(a.run)}` : '',
+    'show' in a ? `보여 줄 곳 ${b.show ?? '정하지 않음'} → ${a.show ?? '정하지 않음'}` : '',
+  ].filter(Boolean);
+  return `~${id}${parts.length ? `(${parts.join(' · ')})` : ''}`;
+}
+
 function printShow(v: WorkView) {
   const between = v.between ? BETWEEN_NAME[v.between] : v.quiet ? QUIET_NAME[v.quiet] : undefined;
   out(`${v.work}${v.title ? ` · ${v.title}` : ''} · ${STATE_NAME[v.state]}${between ? ` · ${between}` : ''}${v.unread ? ' · 아직 안 봄' : ''} (${v.counts.done}/${v.counts.total} 끝${v.spentMs > 0 ? ` · 작업 ${dur(v.spentMs)}` : ''})`);
@@ -593,11 +640,12 @@ function printShow(v: WorkView) {
       for (const t of n.tries) {
         const head = [`${t.n}회차`, t.startedAt ? clockTime(t.startedAt) : '', t.spentMs > 0 ? dur(t.spentMs) : '', t.who ? whoText(v, t.who) : ''].filter(Boolean).join(' · ');
         const result = t.note && t.n !== n.tries[n.tries.length - 1].n ? ` · ${{ waiting: '기다린 것', blocked: '막힌 이유', done: '결과' }[t.status as 'waiting' | 'blocked' | 'done'] ?? '메모'}: ${t.note}` : '';
-        out(`${indent}${head} · ${skillsLine(t, true)}${result}`);
+        out(`${indent}${head} · ${skillsLine(t, true)}${result}${t.why ? ` · 근거: ${t.why}` : ''}`);
       }
     } else {
-      const skills = skillsLine(n, n.attempts > 0);
-      if (skills) out(`${indent}${skills}`);
+      const why = n.tries[0]?.why;
+      const line = [skillsLine(n, n.attempts > 0), why ? `근거: ${why}` : ''].filter(Boolean).join(' · ');
+      if (line) out(`${indent}${line}`);
     }
     for (const sp of n.spawns) if (sp.task) out(`${indent}맡긴 말 (${sp.terminal}): ${sp.task.replace(/\s+/g, ' ').slice(0, 160)}${sp.task.length > 160 ? '…' : ''}`);
     for (const f of n.flags) out(`${indent}⚑ 문제 표시 (${clockTime(f.at)}): ${f.text}`);
@@ -610,7 +658,7 @@ function printShow(v: WorkView) {
       const what = [
         ...c.added.map(id => `+${id}`),
         ...c.removed.map(id => `-${id}`),
-        ...c.changed.map(id => `~${id}`),
+        ...c.changed.map(id => editText(id, c.edits.find(x => x.id === id))),
       ].join(' ');
       out(`  ${clockTime(c.at)}  ${c.by === 'human' ? '사람' : 'AI'}  ${what}  이유: ${c.why ?? '(없음)'}`);
     }
@@ -864,7 +912,7 @@ const FLAGS: Record<string, string[]> = {
   plan: ['work', 'request', 'title', 'why', 'human', 'by', 'file', 'json'],
   add: ['work', 'after', 'before', 'alone', 'run', 'show', 'why', 'human', 'by'],
   remove: ['work', 'why', 'human', 'by'],
-  node: ['work', 'sub', 'result'],
+  node: ['work', 'sub', 'result', 'why'],
   flag: ['work'],
   viewed: ['work'],
   archive: ['work', 'done'],

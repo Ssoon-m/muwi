@@ -31,7 +31,7 @@ muwi가 남기는 파일의 위치와 형식을 정리했습니다. 기록을 �
 | 필드 | 설명 |
 | --- | --- |
 | `work` | 작업 이름 |
-| `schema` | 기록 형식의 판. 지금은 `2`입니다 |
+| `schema` | 기록 형식의 판. 지금은 `3`입니다 |
 | `title` | 작업 제목 |
 | `request` | 사용자가 시킨 말 |
 | `cwd` | 작업을 시작한 폴더 |
@@ -49,14 +49,16 @@ muwi가 남기는 파일의 위치와 형식을 정리했습니다. 기록을 �
 
 훅은 `by`를 읽어서, 방금 일어난 일이 어느 노드의 것인지 알아냅니다.
 
+`plan.json`은 지금 상태이고, 이력은 `events.jsonl`에 있습니다. muwi는 둘을 같은 잠금 안에서 함께 적습니다. 그래서 `events.jsonl`의 `plan`·`node` 사건을 처음부터 따라가면 노드마다 `plan.json`의 `status`, `attempt`와 같은 값이 나옵니다 (`replayNodes`, `packages/core/src/view.ts`).
+
 ## events.jsonl
 
 일어난 일을 한 줄에 하나씩 덧붙입니다. 모든 줄에 시각 `at`과 세션 `session`이 있습니다.
 
 | `type` | 언제 | 주요 필드 |
 | --- | --- | --- |
-| `plan` | 계획을 적거나 바꿀 때 | `by`(`ai` 또는 `human`), `why`, `added`, `removed`, `changed`, `gone`(뺀 노드의 id, 제목, 상태) |
-| `node` | 노드의 상태가 바뀔 때 | `node`, `status`, `note`, `attempt`, `agent`(서브에이전트가 시작했을 때), `seen`(시작할 때 훅이 그 세션을 지켜보고 있었는지) |
+| `plan` | 계획을 적거나 바꿀 때 | `by`(`ai` 또는 `human`), `why`, `first`, `added`, `removed`, `changed`, `shapes`, `edits`, `gone` (아래 표) |
+| `node` | 노드의 상태가 바뀔 때 | `node`, `status`, `note`, `attempt`, `agent`(서브에이전트가 시작했을 때), `seen`(시작할 때 훅이 그 세션을 지켜보고 있었는지), `model`, `why`(계획과 다르게 진행한 판단의 근거. `muwi node --why`) |
 | `skill` | skill을 읽을 때 | `skill`, `via`(`tool` 또는 `file`), `agent`, `node`, `attempt`, `guess`, `carried` |
 | `agent` | 서브에이전트가 시작하고 끝날 때 | `agent`, `what`(`start` 또는 `stop`), `kind`, `node`, `attempt`, `guess` |
 | `spawn` | `muwi run`·`muwi resume`으로 세션을 띄울 때 | `id`(띄운 것의 이름표), `node`, `terminal`, `from`(띄운 쪽의 터미널), `name`, `show`, `task`(맡긴 말), `cwd`, `model` |
@@ -68,6 +70,18 @@ muwi가 남기는 파일의 위치와 형식을 정리했습니다. 기록을 �
 | `archive`, `unarchive` | 사람이 작업을 보관하거나 꺼낼 때 (`muwi archive`, `muwi unarchive`, 그래프 칸의 보관 버튼) | 없음 |
 
 보관한 작업을 지우면(`muwi delete`) 사건을 적지 않고 작업 폴더를 통째로 `~/.muwi/.trash/<지운 때(ms)>-<작업>/`으로 옮깁니다. 되살리면(`muwi restore`) 그대로 돌아오므로 기록은 지우기 전과 같습니다. 30일이 지난 것은 그 뒤에 muwi가 휴지통을 볼 때(그래프 칸이 목록을 읽을 때, `muwi delete`·`muwi restore`) 지웁니다.
+
+`plan`의 필드는 다음과 같습니다. 노드의 모양은 `id`, `title`, `after`와, 정했을 때만 있는 `run`, `show`입니다.
+
+| 필드 | 설명 |
+| --- | --- |
+| `first` | 처음 적은 계획입니다. 모든 노드가 `added`와 `shapes`에 있습니다 |
+| `added`, `removed`, `changed` | 생긴 노드, 빠진 노드, 모양이 바뀐 노드의 id |
+| `shapes` | 생긴 노드의 모양 |
+| `edits` | 바뀐 노드마다 `id`, `before`, `after`. `before`와 `after`에는 바뀐 필드만 있습니다. 없어진 `run`, `show`는 `null`입니다. 예: `{"id": "check", "before": {"after": ["impl"]}, "after": {"after": ["lint"]}}` |
+| `gone` | 빠진 노드의 모양과 빠질 때의 상태(`status`) |
+
+뺀 노드의 id는 그 작업에서 다시 쓰지 않습니다 (`muwi add`, `muwi plan`이 받지 않습니다). 그래서 한 노드 id의 사건은 모두 한 노드의 것입니다.
 
 `skill`과 `agent`의 `node`, `attempt`는 그 일이 일어난 순간에 하고 있던 노드와 회차입니다. 없으면 어느 노드도 하고 있지 않았다는 뜻입니다.
 

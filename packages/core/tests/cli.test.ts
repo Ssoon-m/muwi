@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { readEvents, readPlan } from '../src/store.ts';
+import { replayNodes } from '../src/view.ts';
 
 /** sh 스크립트(tool.sh, find-node.sh, bin/muwi)를 직접 시험하는 테스트. Windows에서는 CI가 Git Bash로 따로 확인한다 */
 const SH = process.platform === 'win32' ? { skip: 'sh 스크립트를 시험한다 (Windows는 CI의 Git Bash 단계에서 본다)' } : {};
@@ -138,6 +140,166 @@ test('계획 바꾸기: 이유가 있어야 하고, 같은 id의 노드는 상�
     ['human', 'lint 먼저 돌리라고 함', ['lint'], []],
     ['ai', '필요 없어짐', [], ['lint']],
   ]);
+});
+
+test('뺀 노드의 id는 같은 작업에서 다시 쓰지 않는다: 앞 노드의 회차와 결과가 새 노드에 섞이지 않게', () => {
+  const { dir, muwi } = bench();
+  muwi(['plan', '--work', 'w', PLAN]);
+  muwi(['node', 'impl', 'start']);
+  muwi(['node', 'impl', 'done', '첫 구현']);
+  assert.equal(muwi(['remove', 'impl', '--why', '접근을 바꿈']).code, 0);
+  // 다른 일을 같은 id로 넣으면 받지 않는다. 뺀 노드(id와 제목)를 알려 주고 다른 id를 고르라고 한다
+  const other = muwi(['add', 'impl', '다른 방식으로 구현', '--after', 'read', '--why', '새 접근']);
+  assert.equal(other.code, 2);
+  assert.match(other.err, /전에 뺀 노드의 id예요: impl\(구현\)/);
+  assert.match(other.err, /다른 id를 골라/);
+  // 같은 노드를 다시 넣는 것도 새로 하는 일이라 받지 않는다
+  assert.match(muwi(['add', 'impl', '구현', '--after', 'read', '--why', '다시 넣음']).err, /같은 일을 다시 넣는 것이어도 새로 하는 일이니 새 id로/);
+  // 계획을 통째로 다시 낼 때도 같다
+  const whole = muwi(['plan', '--why', '다시 짬', PLAN]);
+  assert.equal(whole.code, 2);
+  assert.match(whole.err, /impl\(구현\)/);
+  const plan = JSON.parse(fs.readFileSync(path.join(dir, 'w', 'plan.json'), 'utf8'));
+  assert.deepEqual(plan.nodes.map((n: any) => n.id), ['read', 'check']);
+  // 새 id는 받고, 앞 노드의 기록과 섞이지 않는다
+  assert.equal(muwi(['add', 'impl2', '다른 방식으로 구현', '--after', 'read', '--before', 'check', '--why', '새 접근']).code, 0);
+  const node = JSON.parse(muwi(['show', 'w', '--json']).out).nodes.find((n: any) => n.id === 'impl2');
+  assert.deepEqual([node.status, node.attempts, node.tries.length], ['todo', 0, 0]);
+});
+
+test('계획이 바뀐 기록에 노드의 모양이 남는다: 생긴 노드의 모양, 바뀐 노드의 전과 뒤, 빠진 노드의 앞 노드', () => {
+  const { dir, muwi } = bench();
+  muwi(['plan', '--work', 'w', PLAN]);
+  const next = JSON.stringify({ nodes: [
+    { id: 'read', title: '티켓 읽기' },
+    { id: 'impl', title: '구현과 시험', after: ['read'], run: 'subagent' },
+    { id: 'lint', title: 'lint', after: ['impl'] },
+    { id: 'check', title: '화면 확인', after: ['lint'] },
+  ] });
+  assert.equal(muwi(['plan', '--why', 'lint를 먼저', next]).code, 0);
+  assert.equal(muwi(['remove', 'lint', '--why', '필요 없어짐']).code, 0);
+  const plans = fs.readFileSync(path.join(dir, 'w', 'events.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l)).filter(e => e.type === 'plan');
+  // 첫 계획은 모든 노드의 모양
+  assert.deepEqual(plans[0].shapes, [
+    { id: 'read', title: '티켓 읽기', after: [] }, { id: 'impl', title: '구현', after: ['read'] }, { id: 'check', title: '화면 확인', after: ['impl'] },
+  ]);
+  // 바꾼 계획: 생긴 노드의 모양과, 바뀐 노드는 바뀐 필드만 전과 뒤로 (없던 값은 null)
+  assert.deepEqual(plans[1].shapes, [{ id: 'lint', title: 'lint', after: ['impl'] }]);
+  assert.deepEqual(plans[1].edits, [
+    { id: 'impl', before: { title: '구현', run: null }, after: { title: '구현과 시험', run: 'subagent' } },
+    { id: 'check', before: { after: ['impl'] }, after: { after: ['lint'] } },
+  ]);
+  // 뺀 노드는 앞 노드까지 남고, 이어 붙인 노드는 바뀐 노드로 남는다
+  assert.deepEqual(plans[2].gone, [{ id: 'lint', title: 'lint', after: ['impl'], status: 'todo' }]);
+  assert.deepEqual(plans[2].edits, [{ id: 'check', before: { after: ['lint'] }, after: { after: ['impl'] } }]);
+  const show = muwi(['show', 'w']).out;
+  assert.match(show, /\+lint ~impl\(제목 "구현" → "구현과 시험" · 맡는 쪽 정하지 않음 → 서브에이전트\) ~check\(앞 impl → lint\)  이유: lint를 먼저/);
+  assert.match(show, /-lint ~check\(앞 lint → impl\)  이유: 필요 없어짐/);
+});
+
+test('앞 노드가 끝나기 전에 시작하면 앞당김 안내 하나에 근거를 남기는 법만 붙인다 (같은 말을 두 번 하지 않는다)', () => {
+  const { muwi } = bench();
+  muwi(['plan', '--work', 'w', JSON.stringify({ nodes: [{ id: 'a', title: 'A' }, { id: 'b', title: 'B', after: ['a'] }] })]);
+  muwi(['node', 'a', 'start']);
+  const b = muwi(['node', 'b', 'start']);
+  assert.match(b.out, /앞 노드 a를 아직 하고 있어요/);
+  assert.doesNotMatch(b.out, /계획과 다르게 시작했어요/);
+  assert.match(b.out, /근거를 남기려면 muwi node b start --why "<근거>"로 다시 적어요/);
+  assert.doesNotMatch(muwi(['node', 'b', 'start', '--why', '다른 파일이라']).out, /근거를 남기려면/);
+});
+
+test('계획과 다르게 시작한 판단의 근거(--why): 회차에 적히고 muwi show에 나온다. 근거 없이 다르게 시작하면 막지 않고 한 줄 알린다', () => {
+  const { dir, muwi } = bench();
+  const plan = JSON.stringify({ nodes: [
+    { id: 'read', title: '티켓 읽기' },
+    { id: 'impl', title: '구현', after: ['read'], run: 'me' },
+    { id: 'review', title: '리뷰', after: ['impl'], run: 'subagent' },
+  ] });
+  muwi(['plan', '--work', 'w', plan]);
+  const hint = /계획과 다르게 시작했어요/;
+  // 계획대로면 알리지 않는다
+  const first = muwi(['node', 'read', 'start']);
+  assert.equal(first.code, 0);
+  assert.doesNotMatch(first.out, hint);
+  muwi(['node', 'read', 'done', '요구사항 2건']);
+  // 끝낸 노드를 다시 하기: 알리고(종료 코드 0), 같은 회차에 근거를 붙이는 법을 알려 준다
+  const redo = muwi(['node', 'read', 'start']);
+  assert.equal(redo.code, 0);
+  assert.match(redo.out, /계획과 다르게 시작했어요 \(끝낸 노드를 2회차로 다시 함\)\. 판단의 근거를 남기려면 muwi node read start --why "<근거>"로 다시 적어요/);
+  // 하는 중에 --why를 붙여 다시 start하면 같은 회차에 붙고, 마지막 근거를 쓴다
+  assert.doesNotMatch(muwi(['node', 'read', 'start', '--why', '첫 근거']).out, hint);
+  muwi(['node', 'read', 'start', '--why', '리뷰 댓글에 빠진 요구사항이 있어서']);
+  muwi(['node', 'read', 'done', '요구사항 3건']);
+  // 앞 노드가 끝나기 전에 시작, 계획은 서브에이전트인데 이 세션이 시작
+  const early = muwi(['node', 'review', 'start']);
+  // 앞 노드가 안 끝난 것은 앞당김 안내가 이미 말하므로 근거 안내에는 다시 적지 않는다
+  assert.match(early.out, /계획과 다르게 시작했어요 \(계획은 서브에이전트인데 이 세션이 시작함\)/);
+  assert.doesNotMatch(early.out, /아직 안 끝남/);
+  assert.equal(early.out.match(/--why/g)?.length, 1);
+  assert.doesNotMatch(muwi(['node', 'review', 'start', '--why', '바뀐 파일이 하나뿐이라']).out, hint);
+  // 계획은 직접인데 서브에이전트가 시작: 서브에이전트가 다시 적을 명령으로 알려 준다
+  const sub = muwi(['node', 'impl', 'start', '--sub', '--work', 'w']);
+  assert.match(sub.out, /계획은 직접인데 서브에이전트가 시작함\)\. 판단의 근거를 남기려면 muwi node impl start --sub --work w --why "<근거>"/);
+  assert.doesNotMatch(muwi(['node', 'impl', 'start', '--sub', '--work', 'w', '--why', '맡긴 세션이 다른 일을 하고 있어서']).out, hint);
+
+  const events = fs.readFileSync(path.join(dir, 'w', 'events.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l)).filter(e => e.type === 'node' && e.why);
+  assert.deepEqual(events.map(e => [e.node, e.attempt, e.why]), [
+    ['read', 2, '첫 근거'], ['read', 2, '리뷰 댓글에 빠진 요구사항이 있어서'], ['review', 1, '바뀐 파일이 하나뿐이라'], ['impl', 1, '맡긴 세션이 다른 일을 하고 있어서'],
+  ]);
+  const json = JSON.parse(muwi(['show', 'w', '--json']).out);
+  const read = json.nodes.find((n: any) => n.id === 'read');
+  assert.deepEqual(read.tries.map((t: any) => t.why ?? null), [null, '리뷰 댓글에 빠진 요구사항이 있어서']);
+  const show = muwi(['show', 'w']).out;
+  assert.match(show, /2회차 · .* · 근거: 리뷰 댓글에 빠진 요구사항이 있어서/);
+  assert.match(show, /읽은 skill: .* · 근거: 바뀐 파일이 하나뿐이라/);
+});
+
+test('지금 노드 상태는 plan.json에, 이력은 사건 기록에: 사건만 다시 따라가도 plan.json의 상태·회차와 같다', () => {
+  const { dir, muwi } = bench();
+  /** 명령 하나를 실행하고 매번 사건으로 다시 만든 상태가 plan.json과 같은지 본다 */
+  const step = (args: string[]) => {
+    const r = muwi([...args, '--work', 'w']);
+    assert.ok(r.code === 0, `${args.join(' ')}: ${r.err}`);
+    const plan = readPlan(dir, 'w')!;
+    const replay = replayNodes(readEvents(dir, 'w'));
+    assert.deepEqual(
+      Object.fromEntries(replay),
+      Object.fromEntries(plan.nodes.map(n => [n.id, { status: n.status, ...(n.attempt ? { attempt: n.attempt } : {}) }])),
+      `${args.join(' ')} 뒤`,
+    );
+  };
+  step(['plan', PLAN]);
+  step(['node', 'read', 'start']);
+  step(['node', 'read', 'done', '요구사항 2건']);
+  step(['node', 'impl', 'wait', 'A안과 B안 중 어느 쪽?']);
+  step(['node', 'impl', 'start']);
+  step(['node', 'impl', 'done']);
+  step(['node', 'impl', 'start', '--why', '확인에서 빠진 경우를 찾아서']); // 2회차
+  step(['node', 'impl', 'pause']);
+  step(['node', 'impl', 'start']); // 같은 회차로 이어 하기
+  step(['node', 'check', 'block', '화면을 띄울 수 없음']);
+  step(['node', 'check', 'start']); // 막혔던 노드를 다시: 2회차
+  step(['node', 'check', 'pause']);
+  step(['node', 'check', 'pause']); // 같은 상태를 다시 적기
+  step(['add', 'lint', 'lint', '--after', 'impl', '--before', 'check', '--why', 'lint 먼저']);
+  step(['node', 'lint', 'done']); // 시작을 적지 않고 끝내기
+  step(['node', 'lint', 'start']); // 그 노드를 다시: 2회차
+  step(['node', 'lint', 'done']);
+  step(['remove', 'lint', '--why', '필요 없어짐']);
+  // 계획을 통째로 다시 낸다: 하던 노드(impl) 앞에 끝나지 않은 노드가 생겨 impl이 잠시 멈춘다
+  step(['plan', '--why', '설계를 먼저', JSON.stringify({ nodes: [
+    { id: 'read', title: '티켓 읽기' }, { id: 'design', title: '설계', after: ['read'] },
+    { id: 'impl', title: '구현', after: ['design'] }, { id: 'check', title: '화면 확인', after: ['impl'] },
+  ] })]);
+  step(['node', 'design', 'start', '--sub']);
+  step(['node', 'design', 'done']);
+  step(['node', 'impl', 'start']);
+  step(['node', 'impl', 'done']);
+  step(['node', 'check', 'start']);
+  step(['node', 'check', 'done']);
+  assert.deepEqual(Object.fromEntries(replayNodes(readEvents(dir, 'w'))), {
+    read: { status: 'done', attempt: 1 }, design: { status: 'done', attempt: 1 }, impl: { status: 'done', attempt: 2 }, check: { status: 'done', attempt: 2 },
+  });
 });
 
 test('작업 고르기: 세션이 붙어 있는 작업을 쓰고, 다른 세션은 --work로 들어온다', () => {
