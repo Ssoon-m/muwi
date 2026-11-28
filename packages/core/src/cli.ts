@@ -115,6 +115,8 @@ const STATE_NAME: Record<WorkView['state'], string> = { waiting: '응답 대기'
 const BETWEEN_NAME: Partial<Record<Between, string>> = { working: '다음 노드 준비 중', asking: '세션이 입력을 기다림', stopped: '세션이 멈춤', gone: '맡은 세션이 없음' };
 /** 하는 중이라고 적힌 노드를 하던 세션이 일을 멈췄을 때 */
 const QUIET_NAME: Record<Quiet, string> = { asking: '세션이 입력을 기다림', stopped: '세션이 멈춤' };
+/** 맡은 세션이 없는 작업에서 하던 세션이 간 곳 */
+const movedName = (work: string) => `하던 세션이 다른 작업으로 감 (${work})`;
 
 const RUN_NAME: Record<RunBy, string> = { me: '직접', subagent: '서브에이전트', session: '새 세션' };
 const runTag = (n: { run?: RunBy; show?: ShowIn }) => (n.run ? `${RUN_NAME[n.run]}${n.show ? `, ${n.show}` : ''}` : '');
@@ -349,7 +351,6 @@ function cmdAdd(a: Args, dir: string) {
     if (!input) throw new Fail(`노드를 넣지 못했어요:\n${problems.map(p => `  - ${p}`).join('\n')}`, 2);
     return input;
   }, a);
-  join(dir, work);
   out(`노드를 넣었어요: ${id} (${work}, 노드 ${plan.nodes.length}개)`);
   pausePlanned(dir, work, paused);
   printPlan(readPlan(dir, work) ?? plan);
@@ -383,7 +384,6 @@ function cmdRemove(a: Args, dir: string) {
     if (!input) throw new Fail(`노드를 빼지 못했어요:\n${problems.map(p => `  - ${p}`).join('\n')}`, 2);
     return input;
   }, a);
-  join(dir, work);
   out(`노드를 뺐어요: ${id} (${work}, 노드 ${plan.nodes.length}개)`);
   // 하던 노드를 뺀 것이면 알려 둔다. 그 노드의 기록은 muwi show의 "빠진 노드"에 남는다
   if (was !== 'todo') out(`${id}는 ${{ doing: '하는 중', waiting: '사람을 기다리는 중', blocked: '막힌 상태', done: '끝난 상태', todo: '' }[was]}였어요. 기록은 남아 있어요 (muwi show ${work}의 빠진 노드).`);
@@ -411,7 +411,8 @@ function cmdNode(id: string | undefined, action: string | undefined, text: strin
     throw new Fail(`없는 노드예요: ${id}. 있는 노드: ${plan.nodes.map(n => n.id).join(', ')}. 새 노드면 muwi add <id> "<제목>" --after <앞 노드> --why "<이유>"로 먼저 넣어요 (이 작업의 흐름에 없는 일이면 새 작업으로).`);
   }
   if (sub) bySubagent = true;
-  else join(dir, work);
+  // 노드를 시작할 때만 그 작업에 붙는다. 끝내기·기다리기·멈추기는 --work로 다른 작업에 적어도 붙은 작업을 바꾸지 않는다 (하던 작업 정리)
+  else if (status === 'doing') join(dir, work);
   const done = result.nodes.filter(n => n.status === 'done').length;
   const label = { doing: '시작', done: '끝', waiting: '응답 대기', blocked: '막힘', todo: '잠시 멈춤 (다시 start하면 같은 회차로 이어져요)' }[status];
   out(`${status === 'todo' ? '⏸' : MARK[status]} ${id} ${label} (${work}, ${done}/${result.nodes.length} 끝)`);
@@ -562,6 +563,11 @@ function whoText(v: WorkView, who: Actor): string {
   return [base, own.length ? count(own) : '', helped.length ? `${count(helped)}가 도움` : ''].filter(Boolean).join(' + ');
 }
 
+/** 회차를 끝낸 세션이 시작한 세션과 다르면 그 세션 */
+function closerText(v: WorkView, t: Pick<Try, 'closer'>): string {
+  return t.closer ? `끝냄: 세션 ${v.sessions[t.closer]?.label ?? sessionLabel(null, t.closer)}` : '';
+}
+
 /** 노드를 누가 했는지. 시작 전이면 계획에 적은 것 */
 function whoLine(v: WorkView, n: NodeView): string {
   if (!n.who) {
@@ -614,7 +620,7 @@ function editText(id: string, edit?: NodeEdit): string {
 }
 
 function printShow(v: WorkView) {
-  const between = v.between ? BETWEEN_NAME[v.between] : v.quiet ? QUIET_NAME[v.quiet] : undefined;
+  const between = v.movedTo ? movedName(v.movedTo) : v.between ? BETWEEN_NAME[v.between] : v.quiet ? QUIET_NAME[v.quiet] : undefined;
   out(`${v.work}${v.title ? ` · ${v.title}` : ''} · ${STATE_NAME[v.state]}${between ? ` · ${between}` : ''}${v.unread ? ' · 아직 안 봄' : ''} (${v.counts.done}/${v.counts.total} 끝${v.spentMs > 0 ? ` · 작업 ${dur(v.spentMs)}` : ''})`);
   if (v.request) out(`요청: ${v.request}`);
   if (v.helpers.sessions || v.helpers.subagents) {
@@ -629,7 +635,7 @@ function printShow(v: WorkView) {
   const width = Math.max(...v.nodes.map(n => n.id.length));
   for (const n of v.nodes) {
     // 하던 세션이 닫혔으면 그렇게 적는다. 상태는 그대로 두지만 지금 하고 있는 쪽이 없다
-    const who = [whoLine(v, n), n.closed ? '세션이 닫힘' : n.quiet ? QUIET_NAME[n.quiet] : ''].filter(Boolean).join(' · ');
+    const who = [whoLine(v, n), n.tries.length === 1 ? closerText(v, n.tries[0]) : '', n.closed ? '세션이 닫힘' : n.moved ? `다른 작업으로 감 (${n.moved})` : n.quiet ? QUIET_NAME[n.quiet] : ''].filter(Boolean).join(' · ');
     const flow = n.paused ? '잠시 멈춤' : n.early ? '순서 앞당김 (앞 노드가 끝나기 전에 시작)' : '';
     const meta = [flow, n.attempts > 1 ? `${n.attempts}회차` : '', n.spentMs > 0 ? dur(n.spentMs) : '', who].filter(Boolean).join(' · ');
     out(`  ${n.paused ? '⏸' : MARK[n.status]} ${n.id.padEnd(width)}  ${n.title}${n.after.length ? `  ← ${n.after.join(', ')}` : ''}${meta ? `  (${meta})` : ''}`);
@@ -638,7 +644,7 @@ function printShow(v: WorkView) {
     if (n.tries.length > 1) {
       // 다시 한 노드는 회차별로 보여 준다. 처음에 무슨 일이 있었는지가 다시 한 기록에 덮이지 않게
       for (const t of n.tries) {
-        const head = [`${t.n}회차`, t.startedAt ? clockTime(t.startedAt) : '', t.spentMs > 0 ? dur(t.spentMs) : '', t.who ? whoText(v, t.who) : ''].filter(Boolean).join(' · ');
+        const head = [`${t.n}회차`, t.startedAt ? clockTime(t.startedAt) : '', t.spentMs > 0 ? dur(t.spentMs) : '', t.who ? whoText(v, t.who) : '', closerText(v, t)].filter(Boolean).join(' · ');
         const result = t.note && t.n !== n.tries[n.tries.length - 1].n ? ` · ${{ waiting: '기다린 것', blocked: '막힌 이유', done: '결과' }[t.status as 'waiting' | 'blocked' | 'done'] ?? '메모'}: ${t.note}` : '';
         out(`${indent}${head} · ${skillsLine(t, true)}${result}${t.why ? ` · 근거: ${t.why}` : ''}`);
       }
@@ -706,9 +712,9 @@ function cmdStatus(a: Args, dir: string) {
     if ((w.past || w.archived) && !a.flags.all) continue;
     // 끝났는데 사람이 아직 안 본 작업은 "새 결과"로 보여 준다
     out(`${(w.archived ? '보관' : w.unread ? '새 결과' : STATE_NAME[w.state]).padEnd(7)} ${w.work}  ${w.counts.done}/${w.counts.total}${w.spentMs > 0 ? ` · ${dur(w.spentMs)}` : ''}${w.title ? `  ${w.title}` : ''}`);
-    for (const n of w.active) out(`          ${MARK[n.status]} ${n.id}  ${n.title}${n.closed ? ' (세션이 닫힘)' : n.quiet ? ` (${QUIET_NAME[n.quiet]})` : ''}${n.note ? ` : ${n.note}` : ''}`);
+    for (const n of w.active) out(`          ${MARK[n.status]} ${n.id}  ${n.title}${n.closed ? ' (세션이 닫힘)' : n.moved ? ` (다른 작업으로 감: ${n.moved})` : n.quiet ? ` (${QUIET_NAME[n.quiet]})` : ''}${n.note ? ` : ${n.note}` : ''}`);
     // 하는 노드가 없으면 그 작업의 세션이 무얼 하는지
-    const between = w.between ? BETWEEN_NAME[w.between] : undefined;
+    const between = w.movedTo ? movedName(w.movedTo) : w.between ? BETWEEN_NAME[w.between] : undefined;
     if (between) out(`          · ${between}`);
   }
   if (past.length && !a.flags.all) out(`지난 작업 ${past.length}개는 접어 뒀어요 (${PAST_DAYS}일 넘게 바뀐 것이 없는 작업). muwi status --all로 봐요.`);
