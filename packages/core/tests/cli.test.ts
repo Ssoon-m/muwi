@@ -410,6 +410,32 @@ test('서브에이전트가 맡은 노드는 맡긴 세션이 다른 작업에 �
   assert.equal(a.active[0].moved, undefined);
 });
 
+test('다른 쪽이 끝낸 회차: 시작한 쪽과 다르면 끝낸 쪽을 남기고 muwi show에 "끝냄"으로 보여 준다', () => {
+  const { muwi } = bench();
+  muwi(['plan', '--work', 'a', PLAN]);
+  // read: lead가 시작하고 다른 세션이 끝을 적었다
+  muwi(['node', 'read', 'start']);
+  assert.equal(muwi(['node', 'read', 'done', '읽음', '--work', 'a'], { session: 'other' }).code, 0);
+  // impl: 1회차는 lead가 시작하고 끝냈고, 2회차는 lead가 시작하고 다른 세션이 끝냈다
+  muwi(['node', 'impl', 'start']);
+  muwi(['node', 'impl', 'done', '1차']);
+  muwi(['node', 'impl', 'start', '--why', '리뷰 반영']);
+  muwi(['node', 'impl', 'done', '2차', '--work', 'a'], { session: 'other' });
+  // check: 서브에이전트가 시작하고 끝을 적었다 (--sub를 빼먹어도 같은 쪽이다)
+  muwi(['node', 'check', 'start', '--sub']);
+  muwi(['node', 'check', 'done', '봄']);
+  const v = JSON.parse(muwi(['show', 'a', '--json']).out);
+  const tries = (id: string) => v.nodes.find((n: any) => n.id === id).tries.map((t: any) => t.closer ?? null);
+  assert.deepEqual(tries('read'), ['other']);
+  assert.deepEqual(tries('impl'), [null, 'other']);
+  assert.deepEqual(tries('check'), [null]);
+  const shown = muwi(['show', 'a']).out;
+  assert.match(shown, /✓ read .*\(.*세션 lead · 끝냄: 세션 othe\)/);
+  assert.match(shown, /1회차 [^\n]*세션 lead · 읽은/);
+  assert.match(shown, /2회차 [^\n]*세션 lead · 끝냄: 세션 othe · /);
+  assert.doesNotMatch(shown.split('\n').find((l: string) => l.includes('✓ check'))!, /끝냄/);
+});
+
 test('끝난 작업에 붙어 있던 세션이 새 계획을 내면 새 작업 이름을 요구한다', () => {
   const { muwi } = bench();
   muwi(['plan', '--work', 'old', '{"nodes":[{"id":"a","title":"A"}]}']);

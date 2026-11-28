@@ -52,6 +52,11 @@ export type Try = {
   instant: boolean;
   /** 계획과 다르게 진행한 판단의 근거 (muwi node --why). 이 회차에 여러 번 적었으면 마지막 것 */
   why?: string;
+  /**
+   * 이 회차를 끝낸 세션. 끝났고, 시작한 세션(who)과 다를 때만 있다 (다른 세션이 끝을 적었다).
+   * 끝을 적은 사건에는 서브에이전트가 적혀 있지 않아서 세션끼리만 비교한다
+   */
+  closer?: string;
 };
 
 export type Spawn = { at: string; /** 띄운 것의 이름표 */ id?: string; terminal: string; name?: string; show?: ShowIn; /** 그 세션에 맡긴 말 */ task?: string; /** 새 세션을 띄운 폴더 */ cwd?: string };
@@ -202,7 +207,7 @@ type Draft = {
   why?: string;
   /** 이 회차를 시작한 쪽들. 마지막이 지금(또는 끝까지) 한 쪽이다 */
   doers: Doer[];
-  /** 시작을 적지 않고 끝낸 회차는 끝낸 세션이 한 것으로 본다 */
+  /** 마지막으로 상태를 바꾼 세션 (시작 말고). 시작을 적지 않고 끝낸 회차는 끝낸 세션이 한 것으로 본다 */
   closer?: string;
   seen: boolean;
   /** main: 세션이 직접 읽은 적이 있다. sure: 확실하게 이 노드의 것으로 적힌 읽기가 있다 */
@@ -319,6 +324,8 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
       // 계획에서 작업 중이 아닌 노드는 열린 구간이 남아 있어도 닫는다 (기록이 한 줄 빠졌을 때)
       const running = d.openFrom !== null && n.status === 'doing' && i === list.length - 1;
       const owner: Doer | undefined = d.doers[d.doers.length - 1] ?? (d.closer ? { session: d.closer } : undefined);
+      // 끝낸 세션이 시작한 세션과 다르다: 다른 세션이 끝을 적었다
+      const closer = d.status === 'done' && d.closer && owner && d.closer !== owner.session ? d.closer : undefined;
       // 하던 세션이 닫혔으면 시간은 그 세션을 마지막으로 본 때까지만 센다. 닫힌 뒤로도 계속 늘어나지 않게
       const until = running && owner?.session && closed.has(owner.session) ? Math.min(now, Math.max(d.openFrom!, closed.get(owner.session)!)) : now;
       const spentMs = d.spent + (running ? Math.max(0, until - d.openFrom!) : 0);
@@ -371,6 +378,7 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
         seen: d.seen || d.reads.size > 0,
         instant: !d.startedAt || quick,
         ...(d.why ? { why: d.why } : {}),
+        ...(closer ? { closer } : {}),
       };
     });
     const last = tries[tries.length - 1];

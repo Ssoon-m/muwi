@@ -563,6 +563,11 @@ function whoText(v: WorkView, who: Actor): string {
   return [base, own.length ? count(own) : '', helped.length ? `${count(helped)}가 도움` : ''].filter(Boolean).join(' + ');
 }
 
+/** 회차를 끝낸 세션이 시작한 세션과 다르면 그 세션 */
+function closerText(v: WorkView, t: Pick<Try, 'closer'>): string {
+  return t.closer ? `끝냄: 세션 ${v.sessions[t.closer]?.label ?? sessionLabel(null, t.closer)}` : '';
+}
+
 /** 노드를 누가 했는지. 시작 전이면 계획에 적은 것 */
 function whoLine(v: WorkView, n: NodeView): string {
   if (!n.who) {
@@ -630,7 +635,7 @@ function printShow(v: WorkView) {
   const width = Math.max(...v.nodes.map(n => n.id.length));
   for (const n of v.nodes) {
     // 하던 세션이 닫혔으면 그렇게 적는다. 상태는 그대로 두지만 지금 하고 있는 쪽이 없다
-    const who = [whoLine(v, n), n.closed ? '세션이 닫힘' : n.moved ? `다른 작업으로 감 (${n.moved})` : n.quiet ? QUIET_NAME[n.quiet] : ''].filter(Boolean).join(' · ');
+    const who = [whoLine(v, n), n.tries.length === 1 ? closerText(v, n.tries[0]) : '', n.closed ? '세션이 닫힘' : n.moved ? `다른 작업으로 감 (${n.moved})` : n.quiet ? QUIET_NAME[n.quiet] : ''].filter(Boolean).join(' · ');
     const flow = n.paused ? '잠시 멈춤' : n.early ? '순서 앞당김 (앞 노드가 끝나기 전에 시작)' : '';
     const meta = [flow, n.attempts > 1 ? `${n.attempts}회차` : '', n.spentMs > 0 ? dur(n.spentMs) : '', who].filter(Boolean).join(' · ');
     out(`  ${n.paused ? '⏸' : MARK[n.status]} ${n.id.padEnd(width)}  ${n.title}${n.after.length ? `  ← ${n.after.join(', ')}` : ''}${meta ? `  (${meta})` : ''}`);
@@ -639,7 +644,7 @@ function printShow(v: WorkView) {
     if (n.tries.length > 1) {
       // 다시 한 노드는 회차별로 보여 준다. 처음에 무슨 일이 있었는지가 다시 한 기록에 덮이지 않게
       for (const t of n.tries) {
-        const head = [`${t.n}회차`, t.startedAt ? clockTime(t.startedAt) : '', t.spentMs > 0 ? dur(t.spentMs) : '', t.who ? whoText(v, t.who) : ''].filter(Boolean).join(' · ');
+        const head = [`${t.n}회차`, t.startedAt ? clockTime(t.startedAt) : '', t.spentMs > 0 ? dur(t.spentMs) : '', t.who ? whoText(v, t.who) : '', closerText(v, t)].filter(Boolean).join(' · ');
         const result = t.note && t.n !== n.tries[n.tries.length - 1].n ? ` · ${{ waiting: '기다린 것', blocked: '막힌 이유', done: '결과' }[t.status as 'waiting' | 'blocked' | 'done'] ?? '메모'}: ${t.note}` : '';
         out(`${indent}${head} · ${skillsLine(t, true)}${result}${t.why ? ` · 근거: ${t.why}` : ''}`);
       }
