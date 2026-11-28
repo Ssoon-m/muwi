@@ -44,7 +44,7 @@ export type Doer = { session: string | null; agent?: string };
 export type Where = { node?: string; attempt?: number; guess?: boolean };
 
 /** 기록 형식의 판. 형식이 바뀌면 올린다 */
-export const SCHEMA = 2;
+export const SCHEMA = 3;
 
 export type Plan = {
   work: string;
@@ -60,15 +60,28 @@ export type Plan = {
   nodes: PlanNode[];
 };
 
+/** 노드에서 계획에 해당하는 부분 (상태와 메모는 뺀다) */
+export type NodeShape = { id: string; title: string; after: string[]; run?: RunBy; show?: ShowIn };
+/** 바뀐 노드의 바뀐 필드만, 바뀌기 전과 뒤. 없어진 값(run, show)은 null */
+export type ShapeFields = { title?: string; after?: string[]; run?: RunBy | null; show?: ShowIn | null };
+export type NodeEdit = { id: string; before: ShapeFields; after: ShapeFields };
+
 export type EventBody =
-  /** gone: 빠진 노드가 어떤 노드였는지 (빠진 뒤에도 기록에서 찾아볼 수 있게) */
-  | { type: 'plan'; by: 'ai' | 'human'; why?: string; first?: boolean; added: string[]; removed: string[]; changed: string[]; gone?: { id: string; title: string; status: NodeStatus }[] }
+  /**
+   * added·removed·changed: 생긴·빠진·바뀐 노드의 id. 첫 계획(first)은 모든 노드가 added다.
+   * shapes: 생긴 노드의 모양. edits: 바뀐 노드의 바뀐 필드 (전과 뒤).
+   * gone: 빠진 노드가 어떤 노드였는지 (빠진 뒤에도 기록에서 찾아볼 수 있게)
+   */
+  | {
+    type: 'plan'; by: 'ai' | 'human'; why?: string; first?: boolean; added: string[]; removed: string[]; changed: string[];
+    shapes?: NodeShape[]; edits?: NodeEdit[]; gone?: (NodeShape & { status: NodeStatus })[];
+  }
   /**
    * attempt: 몇 번째 회차의 일인지. agent: 서브에이전트가 한 것이면 그 id.
    * seen: (시작할 때) 이 세션을 훅이 보고 있었는지. false면 이 회차에서 읽은 skill은 관찰하지 못한 것이다
    */
-  /** model: 그 노드를 시작할 때 그 세션이 쓰던 모델 (도구의 훅이 알려 줄 때) */
-  | { type: 'node'; node: string; status: NodeStatus; note?: string; attempt?: number; agent?: string; declared?: boolean; seen?: boolean; model?: string }
+  /** model: 그 노드를 시작할 때 그 세션이 쓰던 모델 (도구의 훅이 알려 줄 때). why: 계획과 다르게 진행한 판단의 근거 (muwi node --why) */
+  | { type: 'node'; node: string; status: NodeStatus; note?: string; attempt?: number; agent?: string; declared?: boolean; seen?: boolean; model?: string; why?: string }
   /** agent: 서브에이전트가 읽었으면 그 id. node·attempt: 읽을 때 하고 있던 노드 (없으면 어느 노드도 하고 있지 않았다) */
   | ({ type: 'skill'; skill: string; via: 'tool' | 'file'; carried?: boolean; agent?: string } & Where)
   /** 서브에이전트가 시작하고 끝난 것. 훅이 적는다. node·attempt: 뜰 때 그 세션이 하고 있던 노드 (그 노드를 도운 것으로 본다) */

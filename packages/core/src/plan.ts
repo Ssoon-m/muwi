@@ -2,13 +2,13 @@
 // 여기서 보는 것은 형식뿐이다 (id가 겹치지 않는가, 없는 노드를 가리키지 않는가, 돌고 도는 선이 없는가).
 // 어떤 노드를 둘지, 어떤 순서로 할지는 계획을 쓰는 쪽(AI)이 정한다.
 import { RUN_BY, SHOW_IN } from './store.ts';
-import type { NodeStatus, Plan, PlanNode, RunBy, ShowIn } from './store.ts';
+import type { NodeEdit, NodeShape, NodeStatus, Plan, PlanNode, RunBy, ShapeFields, ShowIn } from './store.ts';
 
-export type NodeInput = { id: string; title: string; after: string[]; run?: RunBy; show?: ShowIn };
+export type NodeInput = NodeShape;
 export type PlanInput = { title?: string; nodes: NodeInput[] };
 
 /** 노드에서 계획에 해당하는 부분만 (상태와 메모는 뺀다) */
-const shape = (n: NodeInput): NodeInput => ({
+export const shape = (n: NodeInput): NodeInput => ({
   id: n.id,
   title: n.title,
   after: [...n.after],
@@ -106,6 +106,20 @@ export function diffPlan(old: PlanNode[], next: NodeInput[]): PlanDiff {
       return b !== undefined && (b.title !== n.title || !sameList(b.after, n.after) || b.run !== n.run || b.show !== n.show);
     }).map(n => n.id),
   };
+}
+
+/** 바뀐 노드마다 바뀐 필드만 전과 뒤로 적는다 (계획이 바뀐 기록에 남긴다). 없어진 run·show는 null */
+export function editsOf(old: PlanNode[], next: NodeInput[], changed: string[]): NodeEdit[] {
+  const before = new Map(old.map(n => [n.id, n]));
+  return next.filter(n => changed.includes(n.id) && before.has(n.id)).map(n => {
+    const b = before.get(n.id)!;
+    const was: ShapeFields = {}, now: ShapeFields = {};
+    if (b.title !== n.title) [was.title, now.title] = [b.title, n.title];
+    if (!sameList(b.after, n.after)) [was.after, now.after] = [[...b.after], [...n.after]];
+    if (b.run !== n.run) [was.run, now.run] = [b.run ?? null, n.run ?? null];
+    if (b.show !== n.show) [was.show, now.show] = [b.show ?? null, n.show ?? null];
+    return { id: n.id, before: was, after: now };
+  });
 }
 
 export const isEmptyDiff = (d: PlanDiff) => !d.added.length && !d.removed.length && !d.changed.length;

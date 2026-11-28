@@ -3,7 +3,7 @@
 //   작업마다: 계획이 바뀐 이유들, 빠진 노드, 문제 표시, 노드 밖에서 읽은 skill
 // 사건에는 어느 노드의 몇 번째 회차인지가 적혀 있다. 여기서는 적힌 대로 모으기만 한다.
 // 시각을 맞춰 보며 짐작하지 않는다. 확실하지 않게 적힌 것(guess)과 관찰하지 못한 것(seen: false)은 그대로 드러낸다.
-import type { Event, NodeStatus, Plan, PlanNode, ShowIn } from './store.ts';
+import type { Event, NodeEdit, NodeShape, NodeStatus, Plan, PlanNode, ShowIn } from './store.ts';
 import { clock, listWorks, readEvents, readPlan, resultsSince } from './store.ts';
 import { flowOf, type Drawn } from './flow.ts';
 import { sessionStates } from './live.ts';
@@ -92,7 +92,8 @@ export type NodeView = PlanNode & {
   flags: { at: string; text: string }[];
 };
 
-export type Change = { at: string; by: 'ai' | 'human'; why?: string; first: boolean; added: string[]; removed: string[]; changed: string[] };
+/** 계획이 바뀐 한 번. shapes: 생긴 노드의 모양, edits: 바뀐 노드의 바뀐 필드 (전과 뒤) */
+export type Change = { at: string; by: 'ai' | 'human'; why?: string; first: boolean; added: string[]; removed: string[]; changed: string[]; shapes: NodeShape[]; edits: NodeEdit[] };
 /** stalled: 끝나지 않은 노드가 있는데 그 노드를 하던 세션이 모두 닫혔다 */
 export type WorkState = 'waiting' | 'blocked' | 'doing' | 'stalled' | 'done';
 /**
@@ -445,7 +446,7 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
     nodes,
     edges: plan.nodes.flatMap(n => n.after.filter(a => byId.has(a)).map(a => ({ from: a, to: n.id }))),
     drawn: flowOf(plan, events),
-    changes: planEvents.map(e => ({ at: e.at, by: e.by, why: e.why, first: Boolean(e.first), added: e.added, removed: e.removed, changed: e.changed })),
+    changes: planEvents.map(e => ({ at: e.at, by: e.by, why: e.why, first: Boolean(e.first), added: e.added, removed: e.removed, changed: e.changed, shapes: e.shapes ?? [], edits: e.edits ?? [] })),
     // 뺀 노드의 id는 다시 쓰지 않는다 (muwi add·plan이 받지 않는다). 그래서 빠진 노드는 계획에 다시 나오지 않는다
     gone: planEvents.flatMap(e => (e.gone ?? []).map(g => ({ at: e.at, id: g.id, title: g.title, status: g.status, ...(e.why ? { why: e.why } : {}) }))),
     flags: flags.map(f => ({ at: f.at, node: f.node, text: f.text })),

@@ -10,7 +10,7 @@ import { cmdPeek, cmdResume, cmdRun, cmdTell, cmdTidy, cmdWait } from './delegat
 import { Fail, dur, join, needPlan, out, parseArgs, resolveWork, str, type Args } from './kit.ts';
 import { hasTerminals, loadPlugins, pluginFailures, terminals, views } from './plugins.ts';
 import { earlyStart, fromSubagent, markNode } from './node.ts';
-import { addNode, carryStatus, diffPlan, isEmptyDiff, parsePlan, removeNode, type NodeInput, type PlanInput } from './plan.ts';
+import { addNode, carryStatus, diffPlan, editsOf, isEmptyDiff, parsePlan, removeNode, shape, type NodeInput, type PlanInput } from './plan.ts';
 import { readSession, sessionKey, sessionLabel } from './session.ts';
 import { installedTools, newerElsewhere, olderThan, readInstall, refreshSetup, removeSetup, runSetup } from './setup.ts';
 import { adapterOf } from './connectors/index.ts';
@@ -18,7 +18,7 @@ import { gaps } from './connectors/types.ts';
 import { TOOLS, toolById } from './connectors/tools.ts';
 import {
   SCHEMA, appendEvent, checkWorkName, listWorks, nowIso, readConfig, readEvents, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
-  type NodeStatus, type Plan, type PlanNode, type RunBy, type ShowIn,
+  type NodeEdit, type NodeStatus, type Plan, type PlanNode, type RunBy, type ShowIn,
 } from './store.ts';
 import { TRASH_DAYS, daysLeft, listTrash, purgeTrash, restoreWork, trashWork } from './trash.ts';
 import { afterCommand, cacheFile, cachedLatest, checkLatest, releaseUrl, updateTarget } from './update.ts';
@@ -186,7 +186,7 @@ function savePlan(dir: string, work: string, make: (old: Plan | null) => PlanInp
         nodes: carryStatus([], input.nodes),
       };
       writePlan(dir, plan);
-      appendEvent(dir, work, { type: 'plan', by, ...(why ? { why } : {}), first: true, added: plan.nodes.map(n => n.id), removed: [], changed: [] }, key, at);
+      appendEvent(dir, work, { type: 'plan', by, ...(why ? { why } : {}), first: true, added: plan.nodes.map(n => n.id), removed: [], changed: [], shapes: input.nodes.map(shape) }, key, at);
       return { plan, created: true, changed: true, paused: [] };
     }
     const diff = diffPlan(old.nodes, input.nodes);
@@ -219,8 +219,11 @@ function savePlan(dir: string, work: string, make: (old: Plan | null) => PlanInp
     if (!isEmptyDiff(diff)) {
       appendEvent(dir, work, {
         type: 'plan', by, ...(why ? { why } : {}), ...diff,
+        // 생긴 노드의 모양과 바뀐 노드의 전과 뒤. 무엇이 어떻게 바뀌었는지 기록만으로 알 수 있게
+        ...(diff.added.length ? { shapes: input.nodes.filter(n => diff.added.includes(n.id)).map(shape) } : {}),
+        ...(diff.changed.length ? { edits: editsOf(old.nodes, input.nodes, diff.changed) } : {}),
         // 빠진 노드가 무엇이었는지 남긴다. 빠진 뒤에도 기록에서 볼 수 있다
-        ...(gone.length ? { gone: gone.map(n => ({ id: n.id, title: n.title, status: n.status })) } : {}),
+        ...(gone.length ? { gone: gone.map(n => ({ ...shape(n), status: n.status })) } : {}),
       }, key, at);
     }
     // 하던 노드(작업 중, 응답 대기) 앞에 끝나지 않은 노드가 새로 생겼으면 그 노드는 아직 할 차례가 아니다.
@@ -585,6 +588,21 @@ function skillsLine(t: Pick<Try, 'skills' | 'seen' | 'instant'>, started: boolea
   return parts.join(' · ');
 }
 
+/** 바뀐 노드 하나를 짧게: ~impl(제목 "구현" → "구현과 시험" · 앞 read → read,lint) */
+function editText(id: string, edit?: NodeEdit): string {
+  if (!edit) return `~${id}`;
+  const { before: b, after: a } = edit;
+  const list = (x?: string[]) => (x?.length ? x.join(',') : '없음');
+  const run = (x?: RunBy | null) => (x ? RUN_NAME[x] : '정하지 않음');
+  const parts = [
+    'title' in a ? `제목 "${b.title}" → "${a.title}"` : '',
+    'after' in a ? `앞 ${list(b.after)} → ${list(a.after)}` : '',
+    'run' in a ? `맡는 쪽 ${run(b.run)} → ${run(a.run)}` : '',
+    'show' in a ? `보여 줄 곳 ${b.show ?? '정하지 않음'} → ${a.show ?? '정하지 않음'}` : '',
+  ].filter(Boolean);
+  return `~${id}${parts.length ? `(${parts.join(' · ')})` : ''}`;
+}
+
 function printShow(v: WorkView) {
   const between = v.between ? BETWEEN_NAME[v.between] : v.quiet ? QUIET_NAME[v.quiet] : undefined;
   out(`${v.work}${v.title ? ` · ${v.title}` : ''} · ${STATE_NAME[v.state]}${between ? ` · ${between}` : ''}${v.unread ? ' · 아직 안 봄' : ''} (${v.counts.done}/${v.counts.total} 끝${v.spentMs > 0 ? ` · 작업 ${dur(v.spentMs)}` : ''})`);
@@ -629,7 +647,7 @@ function printShow(v: WorkView) {
       const what = [
         ...c.added.map(id => `+${id}`),
         ...c.removed.map(id => `-${id}`),
-        ...c.changed.map(id => `~${id}`),
+        ...c.changed.map(id => editText(id, c.edits.find(x => x.id === id))),
       ].join(' ');
       out(`  ${clockTime(c.at)}  ${c.by === 'human' ? '사람' : 'AI'}  ${what}  이유: ${c.why ?? '(없음)'}`);
     }

@@ -165,6 +165,36 @@ test('뺀 노드의 id는 같은 작업에서 다시 쓰지 않는다: 앞 노�
   assert.deepEqual([node.status, node.attempts, node.tries.length], ['todo', 0, 0]);
 });
 
+test('계획이 바뀐 기록에 노드의 모양이 남는다: 생긴 노드의 모양, 바뀐 노드의 전과 뒤, 빠진 노드의 앞 노드', () => {
+  const { dir, muwi } = bench();
+  muwi(['plan', '--work', 'w', PLAN]);
+  const next = JSON.stringify({ nodes: [
+    { id: 'read', title: '티켓 읽기' },
+    { id: 'impl', title: '구현과 시험', after: ['read'], run: 'subagent' },
+    { id: 'lint', title: 'lint', after: ['impl'] },
+    { id: 'check', title: '화면 확인', after: ['lint'] },
+  ] });
+  assert.equal(muwi(['plan', '--why', 'lint를 먼저', next]).code, 0);
+  assert.equal(muwi(['remove', 'lint', '--why', '필요 없어짐']).code, 0);
+  const plans = fs.readFileSync(path.join(dir, 'w', 'events.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l)).filter(e => e.type === 'plan');
+  // 첫 계획은 모든 노드의 모양
+  assert.deepEqual(plans[0].shapes, [
+    { id: 'read', title: '티켓 읽기', after: [] }, { id: 'impl', title: '구현', after: ['read'] }, { id: 'check', title: '화면 확인', after: ['impl'] },
+  ]);
+  // 바꾼 계획: 생긴 노드의 모양과, 바뀐 노드는 바뀐 필드만 전과 뒤로 (없던 값은 null)
+  assert.deepEqual(plans[1].shapes, [{ id: 'lint', title: 'lint', after: ['impl'] }]);
+  assert.deepEqual(plans[1].edits, [
+    { id: 'impl', before: { title: '구현', run: null }, after: { title: '구현과 시험', run: 'subagent' } },
+    { id: 'check', before: { after: ['impl'] }, after: { after: ['lint'] } },
+  ]);
+  // 뺀 노드는 앞 노드까지 남고, 이어 붙인 노드는 바뀐 노드로 남는다
+  assert.deepEqual(plans[2].gone, [{ id: 'lint', title: 'lint', after: ['impl'], status: 'todo' }]);
+  assert.deepEqual(plans[2].edits, [{ id: 'check', before: { after: ['lint'] }, after: { after: ['impl'] } }]);
+  const show = muwi(['show', 'w']).out;
+  assert.match(show, /\+lint ~impl\(제목 "구현" → "구현과 시험" · 맡는 쪽 정하지 않음 → 서브에이전트\) ~check\(앞 impl → lint\)  이유: lint를 먼저/);
+  assert.match(show, /-lint ~check\(앞 lint → impl\)  이유: 필요 없어짐/);
+});
+
 test('작업 고르기: 세션이 붙어 있는 작업을 쓰고, 다른 세션은 --work로 들어온다', () => {
   const { muwi } = bench();
   muwi(['plan', '--work', 'one', PLAN], { session: 'lead' });
