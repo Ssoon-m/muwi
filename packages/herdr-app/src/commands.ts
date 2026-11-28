@@ -8,7 +8,7 @@ import { GRAPH_AT, ScreenError, applyLayout, removeLayout, screenState, type Gra
 
 /** 이 명령들의 값을 받는 옵션: 코어의 것과 layout의 --graph */
 const OWN = new Set([...VALUED, 'graph']);
-const args = (argv: string[]) => parseArgs(argv, OWN);
+const args = (cmd: string, flags: string[]) => (argv: string[]) => parseArgs(argv, OWN, { cmd, flags: new Set(flags) });
 
 /** 설정의 기본값 (muwi config) */
 export const CONFIG = { layout: { default: true, about: 'Herdr 앱 화면에 muwi 칸이 없을 때 넣자고 안내한다 (muwi setup, 그래프 칸)' } };
@@ -99,5 +99,5 @@ function cmdOpen(a: Args) {
   out(`그래프 칸을 열었어요${opened ? ` (${opened})` : ''}. 닫으려면 그 칸의 닫기 버튼을 눌러요.`);
 }
 
-export const layout = (argv: string[], dir: string) => cmdLayout(args(argv), dir);
-export const open = (argv: string[]) => cmdOpen(args(argv));
+export const layout = (argv: string[], dir: string) => cmdLayout(args('layout', ['status', 'json', 'remove', 'graph'])(argv), dir);
+export const open = (argv: string[]) => cmdOpen(args('open', ['right'])(argv));
