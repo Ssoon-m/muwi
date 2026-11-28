@@ -399,6 +399,21 @@ test('다른 작업으로 간 세션이 남긴 작업: 멈춤이고 어디로 �
   assert.deepEqual([back.state, back.movedTo], ['doing', undefined]);
 });
 
+test('다른 작업의 세션이 서브에이전트로 노드 하나를 도왔을 뿐이면, 하던 세션이 닫힌 작업을 그 세션의 작업으로 간 것으로 보지 않는다', () => {
+  const { muwi } = bench();
+  muwi(['plan', '--work', 'a', PLAN], { session: 's1' });
+  muwi(['node', 'read', 'start'], { session: 's1' });
+  muwi(['node', 'read', 'done', '읽음'], { session: 's1' });
+  muwi(['hook', '--from', 'claude'], { session: null, input: JSON.stringify({ session_id: 's1', hook_event_name: 'SessionEnd', reason: 'exit' }) });
+  // 작업 b를 하는 세션의 서브에이전트가 a의 노드를 시작하고 끝낸다 (끝 줄에는 서브에이전트 표시가 없다)
+  muwi(['plan', '--work', 'b', PLAN]);
+  muwi(['node', 'impl', 'start', '--sub', '--work', 'a']);
+  muwi(['node', 'impl', 'done', '고침', '--work', 'a']);
+  const a = JSON.parse(muwi(['board']).out).works.find((w: any) => w.work === 'a');
+  assert.equal(a.state, 'stalled');
+  assert.equal(a.movedTo, undefined);
+});
+
 test('서브에이전트가 맡은 노드는 맡긴 세션이 다른 작업에 붙어 있어도 다른 작업으로 간 것으로 보지 않는다', () => {
   const { muwi } = bench();
   muwi(['plan', '--work', 'a', PLAN]);

@@ -179,7 +179,7 @@ test('muwi run: 연결에 새 터미널을 띄우게 하고, 맡은 작업과 �
   const r = muwi(['run', 'impl', '목록 화면에 링크를 추가해줘']);
   assert.equal(r.code, 0, r.err);
   assert.match(r.out, /새 세션을 띄웠어요: impl \(t7\) → 노드 impl · pane/);
-  assert.match(r.out, /기다리려면 muwi wait impl, 화면을 보려면 muwi peek impl/);
+  assert.match(r.out, /기다리려면 muwi wait impl --work shop-1, 화면을 보려면 muwi peek impl --work shop-1/);
   const [launch, arrange] = did();
   assert.equal(launch.do, 'launch');
   assert.equal(launch.name, 'impl');

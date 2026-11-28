@@ -539,9 +539,17 @@ function betweenOf(work: string, sessions: Record<string, SessionInfo>, closed: 
 
 /** 이 작업을 직접 한 세션 중 가장 늦게 적은, 살아 있는 세션이 지금 붙어 있는 다른 작업. 없으면 undefined */
 function movedOf(work: string, events: Event[], sessions: Record<string, SessionInfo>, closed: Map<string, number>): string | undefined {
+  // 직접 한 세션: 계획을 적었거나, 서브에이전트 없이 회차를 시작했다. 서브에이전트는 시작할 때만 표시(agent)가 붙으므로
+  // 끝·응답 대기·막힘 줄은 그 회차를 누가 시작했는지로 가른다 (다른 작업의 세션이 서브에이전트로 도운 노드를 그 세션이 한 것으로 보지 않게)
+  const byAgent = new Map<string, boolean>();
   const last = new Map<string, number>();
   events.forEach((e, i) => {
-    if (e.session && (e.type === 'plan' || (e.type === 'node' && !e.agent))) last.set(e.session, i);
+    if (!e.session) return;
+    if (e.type === 'plan') return void last.set(e.session, i);
+    if (e.type !== 'node') return;
+    const attempt = `${e.node}#${e.attempt ?? 1}`;
+    if (e.status === 'doing') byAgent.set(attempt, Boolean(e.agent));
+    if (e.status === 'doing' ? !e.agent : !byAgent.get(attempt)) last.set(e.session, i);
   });
   return [...last]
     .filter(([key]) => !closed.has(key) && sessions[key]?.work && sessions[key].work !== work)

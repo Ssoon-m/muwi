@@ -135,8 +135,9 @@ export function cmdRun(a: Args, dir: string) {
   const program = programFor(a, dir, brief);
   const r = launchFor(dir, { work, node: id, name: str(a, 'name') ?? id, cwd, argv: program.argv, inArgs: program.inArgs, brief, task: task.trim(), model: program.model, show, down: Boolean(a.flags.down) });
   out(`새 세션을 띄웠어요: ${r.name} (${r.terminal}) → 노드 ${id}${r.placed ? ` · ${r.placed}` : ''}`);
-  if (!r.sent) out(`맡길 일이 아직 전달되지 않았어요. muwi peek ${id}로 화면을 보고(폴더 신뢰 확인이 떠 있을 수 있어요) 사람에게 풀어 달라고 한 뒤 muwi tell ${id} "<맡길 일>"로 다시 보내요.`);
-  out(`기다리려면 muwi wait ${id}, 화면을 보려면 muwi peek ${id}, 말을 걸려면 muwi tell ${id} "…"`);
+  if (!r.sent) out(`맡길 일이 아직 전달되지 않았어요. muwi peek ${id} --work ${work}로 화면을 보고(폴더 신뢰 확인이 떠 있을 수 있어요) 사람에게 풀어 달라고 한 뒤 muwi tell ${id} "<맡길 일>" --work ${work}로 다시 보내요.`);
+  // muwi run은 세션을 그 작업에 붙이지 않는다: 다른 작업의 노드를 맡겼어도 그대로 따라 칠 수 있게 작업을 적어 준다
+  out(`기다리려면 muwi wait ${id} --work ${work}, 화면을 보려면 muwi peek ${id} --work ${work}, 말을 걸려면 muwi tell ${id} "…" --work ${work}`);
 }
 
 /**
@@ -197,7 +198,7 @@ export async function cmdWait(a: Args, dir: string) {
       return;
     }
   }
-  out(`아직 하는 중이에요 (${Math.round(timeout / 1000)}초 기다림): ${ids.join(', ')}. 다시 기다리려면 muwi wait, 화면은 muwi peek <노드>`);
+  out(`아직 하는 중이에요 (${Math.round(timeout / 1000)}초 기다림): ${ids.join(', ')}. 다시 기다리려면 muwi wait --work ${work}, 화면은 muwi peek <노드> --work ${work}`);
 }
 
 /** muwi peek <노드>: 그 노드를 맡은 세션의 화면을 본다 */
@@ -309,7 +310,7 @@ export function cmdResume(a: Args, dir: string) {
   const key = n.session;
   // 그 노드를 하던 세션이 아직 살아 있으면 하나 더 띄우지 않는다
   if (key && !n.closed && n.status !== 'done' && !a.flags.force && sessionStates(dir, [key]).status.has(key)) {
-    throw new Fail(`${id}를 하던 세션이 아직 살아 있어요 (${v.sessions[key]?.terminal ?? key}). muwi peek ${id}로 보거나 muwi tell ${id} "…"로 말을 걸어요. 그래도 새로 띄우려면 --force`);
+    throw new Fail(`${id}를 하던 세션이 아직 살아 있어요 (${v.sessions[key]?.terminal ?? key}). muwi peek ${id} --work ${work}로 보거나 muwi tell ${id} "…" --work ${work}로 말을 걸어요. 그래도 새로 띄우려면 --force`);
   }
   const facts = resumeFacts(v);
   const folder = [key ? v.sessions[key]?.cwd : undefined, n.spawn?.cwd, v.cwd].find(f => f && facts.exists[f]) ?? process.cwd();
