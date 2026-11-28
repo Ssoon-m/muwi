@@ -453,7 +453,8 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
     drawn: flowOf(plan, events),
     changes: planEvents.map(e => ({ at: e.at, by: e.by, why: e.why, first: Boolean(e.first), added: e.added, removed: e.removed, changed: e.changed, shapes: e.shapes ?? [], edits: e.edits ?? [] })),
     // 뺀 노드의 id는 다시 쓰지 않는다 (muwi add·plan이 받지 않는다). 그래서 빠진 노드는 계획에 다시 나오지 않는다
-    gone: planEvents.flatMap(e => (e.gone ?? []).map(g => ({ at: e.at, id: g.id, title: g.title, status: g.status, ...(e.why ? { why: e.why } : {}) }))),
+    // 지금 계획에 있는 노드는 빼지 않는다 (같은 id를 다시 쓰는 것을 막기 전에 만든 작업)
+    gone: planEvents.flatMap(e => (e.gone ?? []).filter(g => !byId.has(g.id)).map(g => ({ at: e.at, id: g.id, title: g.title, status: g.status, ...(e.why ? { why: e.why } : {}) }))),
     flags: flags.map(f => ({ at: f.at, node: f.node, text: f.text })),
     outside,
     compacts: events.filter(e => e.type === 'session').map(e => ({ at: e.at, session: e.session })),

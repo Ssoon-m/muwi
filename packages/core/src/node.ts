@@ -72,15 +72,15 @@ function openBefore(nodes: PlanNode[], id: string): string[] {
  * 시작한 것이 계획과 다른 점들. 막지 않는다. 판단의 근거(--why)를 남기라고 알릴 때 쓴다.
  * nodes: 시작한 뒤의 계획, was: 시작하기 전 그 노드의 상태, sub: 서브에이전트가 시작했다
  *   다시 하기: 끝냈거나 막혔던 노드를 다시 시작했다 (새 회차)
- *   순서: 계획의 앞 노드가 끝나기 전에 시작했다
+ *   순서: 계획의 앞 노드가 끝나기 전에 시작했다 (o.open이 false면 뺀다: earlyStart가 이미 알렸다)
  *   맡는 쪽: 계획(run)은 서브에이전트인데 서브에이전트가 아닌 쪽이, 또는 직접인데 서브에이전트가 시작했다
  */
-export function offPlanStart(nodes: PlanNode[], id: string, was: NodeStatus | undefined, sub: boolean): string[] {
+export function offPlanStart(nodes: PlanNode[], id: string, was: NodeStatus | undefined, sub: boolean, o: { open?: boolean } = {}): string[] {
   const node = nodes.find(n => n.id === id);
   if (!node) return [];
   const out: string[] = [];
   if (was === 'done' || was === 'blocked') out.push(`${was === 'done' ? '끝낸' : '막혔던'} 노드를 ${node.attempt ?? 2}회차로 다시 함`);
-  const open = openBefore(nodes, id);
+  const open = o.open === false ? [] : openBefore(nodes, id);
   if (open.length) out.push(`${open.join(', ')}가 아직 안 끝남`);
   if (node.run === 'subagent' && !sub) out.push('계획은 서브에이전트인데 이 세션이 시작함');
   if (node.run === 'me' && sub) out.push('계획은 직접인데 서브에이전트가 시작함');

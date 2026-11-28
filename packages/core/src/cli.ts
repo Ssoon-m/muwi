@@ -420,8 +420,11 @@ function cmdNode(id: string | undefined, action: string | undefined, text: strin
   const early = status === 'doing' && !sub ? earlyStart(result.nodes, id) : null;
   if (early) out(early);
   // 계획과 다르게 시작했는데 근거가 없으면 근거를 남기는 법을 알린다 (막지 않는다). 다시 start하면 같은 회차에 붙는다
-  const off = status === 'doing' && !why ? offPlanStart(result.nodes, id, was, sub) : [];
-  if (off.length) out(`계획과 다르게 시작했어요 (${off.join(', ')}). 판단의 근거를 남기려면 muwi node ${id} start${sub ? ` --sub --work ${work}` : ''} --why "<근거>"로 다시 적어요.`);
+  // 앞 노드가 안 끝난 것은 위의 안내가 이미 말했다: 같은 말을 두 번 하지 않고 근거를 남기는 법만 붙인다
+  const off = status === 'doing' && !why ? offPlanStart(result.nodes, id, was, sub, { open: !early }) : [];
+  const again = `muwi node ${id} start${sub ? ` --sub --work ${work}` : ''} --why "<근거>"`;
+  if (off.length) out(`계획과 다르게 시작했어요 (${off.join(', ')}). 판단의 근거를 남기려면 ${again}로 다시 적어요.`);
+  else if (early && !why) out(`같이 하기로 판단한 거면 그 근거를 남기려면 ${again}로 다시 적어요.`);
 }
 
 function cmdFlag(a: Args, dir: string) {

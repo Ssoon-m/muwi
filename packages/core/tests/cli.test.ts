@@ -197,6 +197,17 @@ test('계획이 바뀐 기록에 노드의 모양이 남는다: 생긴 노드의
   assert.match(show, /-lint ~check\(앞 lint → impl\)  이유: 필요 없어짐/);
 });
 
+test('앞 노드가 끝나기 전에 시작하면 앞당김 안내 하나에 근거를 남기는 법만 붙인다 (같은 말을 두 번 하지 않는다)', () => {
+  const { muwi } = bench();
+  muwi(['plan', '--work', 'w', JSON.stringify({ nodes: [{ id: 'a', title: 'A' }, { id: 'b', title: 'B', after: ['a'] }] })]);
+  muwi(['node', 'a', 'start']);
+  const b = muwi(['node', 'b', 'start']);
+  assert.match(b.out, /앞 노드 a를 아직 하고 있어요/);
+  assert.doesNotMatch(b.out, /계획과 다르게 시작했어요/);
+  assert.match(b.out, /근거를 남기려면 muwi node b start --why "<근거>"로 다시 적어요/);
+  assert.doesNotMatch(muwi(['node', 'b', 'start', '--why', '다른 파일이라']).out, /근거를 남기려면/);
+});
+
 test('계획과 다르게 시작한 판단의 근거(--why): 회차에 적히고 muwi show에 나온다. 근거 없이 다르게 시작하면 막지 않고 한 줄 알린다', () => {
   const { dir, muwi } = bench();
   const plan = JSON.stringify({ nodes: [
@@ -221,7 +232,10 @@ test('계획과 다르게 시작한 판단의 근거(--why): 회차에 적히고
   muwi(['node', 'read', 'done', '요구사항 3건']);
   // 앞 노드가 끝나기 전에 시작, 계획은 서브에이전트인데 이 세션이 시작
   const early = muwi(['node', 'review', 'start']);
-  assert.match(early.out, /계획과 다르게 시작했어요 \(impl가 아직 안 끝남, 계획은 서브에이전트인데 이 세션이 시작함\)/);
+  // 앞 노드가 안 끝난 것은 앞당김 안내가 이미 말하므로 근거 안내에는 다시 적지 않는다
+  assert.match(early.out, /계획과 다르게 시작했어요 \(계획은 서브에이전트인데 이 세션이 시작함\)/);
+  assert.doesNotMatch(early.out, /아직 안 끝남/);
+  assert.equal(early.out.match(/--why/g)?.length, 1);
   assert.doesNotMatch(muwi(['node', 'review', 'start', '--why', '바뀐 파일이 하나뿐이라']).out, hint);
   // 계획은 직접인데 서브에이전트가 시작: 서브에이전트가 다시 적을 명령으로 알려 준다
   const sub = muwi(['node', 'impl', 'start', '--sub', '--work', 'w']);
