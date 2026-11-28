@@ -17,7 +17,7 @@ import { adapterOf } from './connectors/index.ts';
 import { gaps } from './connectors/types.ts';
 import { TOOLS, toolById } from './connectors/tools.ts';
 import {
-  SCHEMA, appendEvent, checkWorkName, listWorks, nowIso, readConfig, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
+  SCHEMA, appendEvent, checkWorkName, listWorks, nowIso, readConfig, readEvents, readJson, readPlan, runsDir, withLock, workDir, writeConfig, writePlan,
   type NodeStatus, type Plan, type PlanNode, type RunBy, type ShowIn,
 } from './store.ts';
 import { TRASH_DAYS, daysLeft, listTrash, purgeTrash, restoreWork, trashWork } from './trash.ts';
@@ -203,6 +203,14 @@ function savePlan(dir: string, work: string, make: (old: Plan | null) => PlanInp
         2,
       );
     }
+    // 이 작업에서 뺀 노드의 id는 다시 쓰지 않는다. 기록은 노드 id로 모이므로 같은 id면 앞 노드의 회차와 결과가 새 노드에 섞인다
+    const reused = removedBefore(dir, work).filter(g => diff.added.includes(g.id));
+    if (reused.length) {
+      throw new Fail(
+        `이 작업에서 전에 뺀 노드의 id예요: ${reused.map(g => `${g.id}(${g.title})`).join(', ')}. 같은 id를 다시 쓰면 그 노드의 회차와 결과가 새 노드에 섞여요. 다른 id를 골라 다시 적어요. 뺀 노드와 같은 일을 다시 넣는 것이어도 새로 하는 일이니 새 id로 적어요.`,
+        2,
+      );
+    }
     if (!isEmptyDiff(diff) && !why) {
       throw new Fail(`${work}의 계획을 바꾸려면 --why "<이유>"를 적어요. 나중에 왜 바뀌었는지 볼 수 있게요. 사람이 바꾸라고 했으면 --human도 붙여요. 다른 새 작업이면 --work <새 이름>으로 적어요.`);
     }
@@ -225,6 +233,17 @@ function savePlan(dir: string, work: string, make: (old: Plan | null) => PlanInp
       .filter(p => p.by.length > 0);
     return { plan, created: false, changed: true, paused };
   });
+}
+
+/** 이 작업에서 전에 뺀 노드들 (계획이 바뀐 기록의 gone). 같은 id가 여러 번 빠졌으면 마지막 것 */
+function removedBefore(dir: string, work: string): { id: string; title: string }[] {
+  const out = new Map<string, { id: string; title: string }>();
+  for (const e of readEvents(dir, work)) {
+    if (e.type !== 'plan') continue;
+    for (const id of e.removed) out.set(id, { id, title: out.get(id)?.title ?? id });
+    for (const g of e.gone ?? []) out.set(g.id, { id: g.id, title: g.title });
+  }
+  return [...out.values()];
 }
 
 /** 앞에 끝나지 않은 노드가 생긴 하던 노드를 잠시 멈춘다. 다시 start하면 같은 회차로 이어진다 */

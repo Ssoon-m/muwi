@@ -140,6 +140,31 @@ test('계획 바꾸기: 이유가 있어야 하고, 같은 id의 노드는 상�
   ]);
 });
 
+test('뺀 노드의 id는 같은 작업에서 다시 쓰지 않는다: 앞 노드의 회차와 결과가 새 노드에 섞이지 않게', () => {
+  const { dir, muwi } = bench();
+  muwi(['plan', '--work', 'w', PLAN]);
+  muwi(['node', 'impl', 'start']);
+  muwi(['node', 'impl', 'done', '첫 구현']);
+  assert.equal(muwi(['remove', 'impl', '--why', '접근을 바꿈']).code, 0);
+  // 다른 일을 같은 id로 넣으면 받지 않는다. 뺀 노드(id와 제목)를 알려 주고 다른 id를 고르라고 한다
+  const other = muwi(['add', 'impl', '다른 방식으로 구현', '--after', 'read', '--why', '새 접근']);
+  assert.equal(other.code, 2);
+  assert.match(other.err, /전에 뺀 노드의 id예요: impl\(구현\)/);
+  assert.match(other.err, /다른 id를 골라/);
+  // 같은 노드를 다시 넣는 것도 새로 하는 일이라 받지 않는다
+  assert.match(muwi(['add', 'impl', '구현', '--after', 'read', '--why', '다시 넣음']).err, /같은 일을 다시 넣는 것이어도 새로 하는 일이니 새 id로/);
+  // 계획을 통째로 다시 낼 때도 같다
+  const whole = muwi(['plan', '--why', '다시 짬', PLAN]);
+  assert.equal(whole.code, 2);
+  assert.match(whole.err, /impl\(구현\)/);
+  const plan = JSON.parse(fs.readFileSync(path.join(dir, 'w', 'plan.json'), 'utf8'));
+  assert.deepEqual(plan.nodes.map((n: any) => n.id), ['read', 'check']);
+  // 새 id는 받고, 앞 노드의 기록과 섞이지 않는다
+  assert.equal(muwi(['add', 'impl2', '다른 방식으로 구현', '--after', 'read', '--before', 'check', '--why', '새 접근']).code, 0);
+  const node = JSON.parse(muwi(['show', 'w', '--json']).out).nodes.find((n: any) => n.id === 'impl2');
+  assert.deepEqual([node.status, node.attempts, node.tries.length], ['todo', 0, 0]);
+});
+
 test('작업 고르기: 세션이 붙어 있는 작업을 쓰고, 다른 세션은 --work로 들어온다', () => {
   const { muwi } = bench();
   muwi(['plan', '--work', 'one', PLAN], { session: 'lead' });
