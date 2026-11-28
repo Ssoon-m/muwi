@@ -5,7 +5,7 @@
 // 시각을 맞춰 보며 짐작하지 않는다. 확실하지 않게 적힌 것(guess)과 관찰하지 못한 것(seen: false)은 그대로 드러낸다.
 import type { Event, NodeEdit, NodeShape, NodeStatus, Plan, PlanNode, ShowIn } from './store.ts';
 import { clock, listWorks, readEvents, readPlan, resultsSince } from './store.ts';
-import { flowOf, type Drawn } from './flow.ts';
+import { addedOf, redosOf, timelineOf, type Redo, type Timeline } from './flow.ts';
 import { sessionStates } from './live.ts';
 import { readSession, sessionLabel } from './session.ts';
 
@@ -95,8 +95,12 @@ export type NodeView = PlanNode & {
   moved?: string;
   /** 시작했다가 잠시 멈췄다 (앞에 먼저 할 노드가 끼어드는 등). 다시 시작하면 같은 회차로 이어진다 */
   paused?: boolean;
-  /** 앞 노드가 끝나기 전에 시작했다 (그래프 흐름보다 순서를 앞당겼다) */
+  /** 앞 노드가 끝나기 전에 시작했다 (계획보다 순서를 앞당겼다) */
   early?: boolean;
+  /** 다시 한 회차들 (2회차부터): 어디서 돌아왔는지, 또는 앞 회차의 결과 (flow.ts) */
+  redo?: Redo[];
+  /** 첫 계획 뒤에 넣은 노드다 */
+  added?: boolean;
   /** 이 노드를 맡기려고 띄운 새 세션들 (muwi run). spawn은 가장 최근 것 */
   spawn?: Spawn;
   spawns: Spawn[];
@@ -177,8 +181,8 @@ export type WorkView = {
   nodes: NodeView[];
   /** 계획의 선 */
   edges: { from: string; to: string }[];
-  /** 그래프에 그리는 카드와 선: 계획의 선을 실제로 일어난 순서에 맞춘 것 (flow.ts). 다시 한 노드는 카드가 나뉠 수 있다. board의 flow(그리는 방향)와 다르다 */
-  drawn: Drawn;
+  /** 실제로 일어난 일: 노드마다 작업 중·응답 대기·막힘이 이어진 구간, 일한 쪽의 줄, 계획이 바뀐 때 (flow.ts) */
+  timeline: Timeline;
   changes: Change[];
   /** 계획에서 빠진 노드. 빠진 뒤에도 무엇이었는지 볼 수 있게 남긴다 */
   gone: { at: string; id: string; title: string; status: NodeStatus; why?: string }[];
@@ -318,6 +322,8 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
 
   const flags = events.filter((e): e is Event & { type: 'flag' } => e.type === 'flag');
 
+  const redos = redosOf(plan, events);
+  const added = addedOf(plan, events);
   const nodes: NodeView[] = plan.nodes.map(n => {
     const list = drafts.get(n.id) ?? [];
     const tries: Try[] = list.map((d, i) => {
@@ -421,6 +427,8 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
     if (n.status === 'todo' && (n.attempt ?? 0) > 0) view.paused = true;
     if ((n.status === 'doing' || n.status === 'waiting') && (n.after ?? []).some(p => plan.nodes.find(x => x.id === p)?.status !== 'done')) view.early = true;
     if (mine.length) view.spawn = mine[mine.length - 1];
+    if (redos.has(n.id)) view.redo = redos.get(n.id);
+    if (added.has(n.id)) view.added = true;
     return view;
   });
 
@@ -480,7 +488,7 @@ export function buildView(plan: Plan, events: Event[], sessions: Record<string, 
     spentMs: unionMs(spans),
     nodes,
     edges: plan.nodes.flatMap(n => n.after.filter(a => byId.has(a)).map(a => ({ from: a, to: n.id }))),
-    drawn: flowOf(plan, events),
+    timeline: timelineOf(plan, events),
     changes: planEvents.map(e => ({ at: e.at, by: e.by, why: e.why, first: Boolean(e.first), added: e.added, removed: e.removed, changed: e.changed, shapes: e.shapes ?? [], edits: e.edits ?? [] })),
     // 뺀 노드의 id는 다시 쓰지 않는다 (muwi add·plan이 받지 않는다). 그래서 빠진 노드는 계획에 다시 나오지 않는다
     // 지금 계획에 있는 노드는 빼지 않는다 (같은 id를 다시 쓰는 것을 막기 전에 만든 작업)

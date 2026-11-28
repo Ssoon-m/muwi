@@ -37,6 +37,12 @@ test('배치: 같은 계획이면 같은 좌표가 나온다', async () => {
   assert.deepEqual(a, b);
 });
 
+test('배치: 셋째 줄이 있는 카드(tall)는 그만큼 높게 놓고 겹치지 않는다', async () => {
+  const l = await layoutGraph({ nodes: [{ id: 'a' }, { id: 'b', tall: true }, { id: 'c', tall: true }], edges: [{ from: 'a', to: 'b' }, { from: 'a', to: 'c' }] });
+  assert.deepEqual(l.nodes.map(n => n.h), [SIZE.cardH, SIZE.cardH + SIZE.lineH, SIZE.cardH + SIZE.lineH]);
+  assert.deepEqual(layoutProblems(l), []);
+});
+
 test('배치: 노드가 없으면 빈 그림', async () => {
   assert.deepEqual(await layoutGraph({ nodes: [], edges: [] }), { width: 0, height: 0, nodes: [], edges: [] });
 });
