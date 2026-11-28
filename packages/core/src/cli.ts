@@ -819,7 +819,7 @@ async function main(argv: string[]) {
   // 보기가 더하는 명령 (muwi layout …): 인자는 그 명령이 읽는다. 코어의 명령과 이름이 겹치면 코어가 먼저다
   const viewed = cmd && !CORE.has(cmd) ? views().find(v => v.commands?.[cmd])?.commands?.[cmd] : undefined;
   if (viewed) return viewed(rest, dir);
-  const a = parseArgs(rest);
+  const a = parseArgs(rest, undefined, cmd && FLAGS[cmd] ? { cmd, flags: new Set(FLAGS[cmd]) } : undefined);
   // 적는 명령이 끝나면 바뀐 지침이 있는지 보고 출력 끝에 붙인다
   if (cmd && TELLS.has(cmd)) {
     if (ADOPTS.has(cmd)) adoptHere(dir);
@@ -858,6 +858,35 @@ const CORE = new Set([
   'plan', 'add', 'remove', 'node', 'flag', 'viewed', 'delete', 'restore', 'show', 'status', 'session', 'guide', 'board',
   'run', 'wait', 'peek', 'tell', 'tidy', 'resume', 'hook', 'setup', 'config', 'version', '--version', '-v', 'help', '--help', '-h',
 ]);
+
+/** 명령마다 받는 옵션. 여기 없는 옵션은 오류다 (오타가 조용히 무시되지 않게). 옵션을 더하면 여기에도 적는다 */
+const FLAGS: Record<string, string[]> = {
+  plan: ['work', 'request', 'title', 'why', 'human', 'by', 'file', 'json'],
+  add: ['work', 'after', 'before', 'alone', 'run', 'show', 'why', 'human', 'by'],
+  remove: ['work', 'why', 'human', 'by'],
+  node: ['work', 'sub', 'result'],
+  flag: ['work'],
+  viewed: ['work'],
+  archive: ['work', 'done'],
+  unarchive: ['work'],
+  delete: ['work', 'archived'],
+  restore: [],
+  show: ['work', 'json'],
+  status: ['json', 'all'],
+  board: ['work', 'fit', 'down'],
+  run: ['work', 'show', 'down', 'name', 'agent', 'cwd'],
+  wait: ['work', 'timeout'],
+  peek: ['work', 'all'],
+  tell: ['work'],
+  tidy: ['work'],
+  resume: ['work', 'show', 'down', 'name', 'agent', 'new', 'force'],
+  hook: ['event', 'from', 'tool'],
+  setup: ['tool', 'tools', 'all', 'remove'],
+  config: [],
+  update: ['check'],
+  session: [],
+  guide: [],
+};
 
 /** 맡은 세션이 처음 실행할 만한 명령들: 맡은 노드의 진행을 적는 명령 */
 const ADOPTS = new Set(['node', 'add', 'remove', 'tell']);

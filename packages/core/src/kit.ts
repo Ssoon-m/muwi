@@ -23,8 +23,11 @@ process.stdout.on('error', (e: NodeJS.ErrnoException) => {
 /** 값을 받는 코어 명령의 옵션 (--work <이름> 같은 것). 나머지 옵션은 켜고 끄는 것으로 읽는다 */
 export const VALUED: ReadonlySet<string> = new Set(['work', 'request', 'title', 'why', 'by', 'file', 'after', 'before', 'result', 'run', 'show', 'from', 'event', 'tool', 'name', 'agent', 'cwd', 'fit', 'timeout']);
 
-/** 명령의 인자를 읽는다. valued: 값을 받는 옵션들 (보기가 더하는 명령은 자기 옵션을 더해서 준다) */
-export function parseArgs(argv: string[], valued: ReadonlySet<string> = VALUED) {
+/**
+ * 명령의 인자를 읽는다. valued: 값을 받는 옵션들 (보기가 더하는 명령은 자기 옵션을 더해서 준다).
+ * known: 그 명령이 받는 옵션들. 주면 그 밖의 옵션은 오류다 (--wrok 같은 오타가 조용히 무시되어 다른 작업에 적히지 않게)
+ */
+export function parseArgs(argv: string[], valued: ReadonlySet<string> = VALUED, known?: { cmd: string; flags: ReadonlySet<string> }) {
   const pos: string[] = [];
   const flags: Record<string, string | boolean> = {};
   const multi: Record<string, string[]> = {};
@@ -37,6 +40,7 @@ export function parseArgs(argv: string[], valued: ReadonlySet<string> = VALUED) 
     if (a.startsWith('--') && a.length > 2) {
       const eq = a.indexOf('=');
       const name = eq > 0 ? a.slice(2, eq) : a.slice(2);
+      if (known && !known.flags.has(name)) throw unknownOption(name, known.cmd, known.flags);
       if (valued.has(name)) {
         const value = eq > 0 ? a.slice(eq + 1) : argv[++i];
         if (value === undefined) throw new Fail(`--${name}에 값이 없어요`);
@@ -46,6 +50,21 @@ export function parseArgs(argv: string[], valued: ReadonlySet<string> = VALUED) 
     } else pos.push(a);
   }
   return { pos, flags, multi };
+}
+
+/** 모르는 옵션: 그 명령이 받는 옵션과, 비슷한 이름이 있으면 그것을 알려 준다 */
+function unknownOption(name: string, cmd: string, flags: ReadonlySet<string>): Fail {
+  const near = [...flags].filter(f => editDistance(f, name) <= 2).sort((x, y) => editDistance(x, name) - editDistance(y, name))[0];
+  const list = flags.size ? [...flags].map(f => `--${f}`).join(', ') : '없음';
+  return new Fail(`모르는 옵션이에요: --${name}${near ? ` (--${near}를 쓰려던 거면 고쳐서 다시 실행해요)` : ''}. muwi ${cmd}가 받는 옵션: ${list}`, 2);
+}
+
+function editDistance(a: string, b: string): number {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length];
 }
 
 export type Args = ReturnType<typeof parseArgs>;

@@ -52,6 +52,21 @@ test('muwi plan: 새 작업을 만들고 계획 파일과 첫 사건을 남긴�
   assert.deepEqual([events[0].type, events[0].first, events[0].session, events[0].added], ['plan', true, 'lead', ['read', 'impl', 'check']]);
 });
 
+test('명령이 받지 않는 옵션은 실행하지 않고 알린다: 오타가 조용히 무시되어 붙어 있는 작업에 적히지 않게', () => {
+  const { muwi } = bench();
+  muwi(['plan', '--work', 'a', PLAN]);
+  const typo = muwi(['node', 'read', 'start', '--wrok', 'b']);
+  assert.equal(typo.code, 2);
+  assert.match(typo.err, /모르는 옵션이에요: --wrok \(--work를 쓰려던 거면/);
+  assert.match(typo.err, /muwi node가 받는 옵션: --work, --sub, --result/);
+  // 실행하지 않았다: read는 그대로 시작 전이다
+  assert.match(muwi(['show', 'a']).out, /○ read/);
+  // 값을 받지 않는 옵션도 같다
+  assert.match(muwi(['status', '--jsn']).err, /모르는 옵션이에요: --jsn \(--json/);
+  // --help는 어느 명령이든 사용법을 보여 준다
+  assert.equal(muwi(['setup', '--help']).code, 0);
+});
+
 test('muwi plan: 계획 JSON은 표준 입력이나 파일로도 받는다', () => {
   const { dir, muwi } = bench();
   assert.equal(muwi(['plan', '--work', 'a'], { input: PLAN }).code, 0);
