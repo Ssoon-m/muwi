@@ -407,7 +407,8 @@ test('계획을 통째로 다시 낼 때 이미 시작했거나 끝난 노드가
   const child = { MUWI_SESSION: 'child' };
   // 새 세션이 자기 일을 쪼개서 노드를 넣고 시작했다
   assert.equal(muwi(['add', 'impl-api', 'API 연결', '--after', 'read', '--why', '쪼갬', '--work', 'shop-1'], child).code, 0);
-  assert.equal(muwi(['node', 'impl-api', 'start'], child).code, 0);
+  // 노드를 넣는 것만으로는 그 작업에 붙지 않는다. 시작할 때 붙는다
+  assert.equal(muwi(['node', 'impl-api', 'start', '--work', 'shop-1'], child).code, 0);
   // 리드는 그걸 모른 채 갖고 있던 계획에 lint만 더해서 다시 낸다
   const stale = JSON.stringify({ nodes: [{ id: 'read', title: '읽기' }, { id: 'impl', title: '화면 구현', after: ['read'] }, { id: 'review', title: '리뷰', after: ['impl'] }, { id: 'lint', title: 'lint', after: ['impl'] }] });
   const r = muwi(['plan', '--why', 'lint 추가', stale]);

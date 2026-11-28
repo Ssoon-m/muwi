@@ -58,12 +58,13 @@ test('muwi board: 그래프 칸이 터미널과 작업을 잇도록 세션과 �
   muwi(['plan', '--work', 'w', '--request', '작업해줘', PLAN], { env: { HC_TERMINAL_ID: 't5' } });
   muwi(['hook', '--from', 'claude'], { session: 'other', env: { HC_TERMINAL_ID: 't6' }, input: JSON.stringify({ session_id: 'other', hook_event_name: 'SessionStart', source: 'startup' }) });
   // 사람을 기다리는 노드를 다른 세션이 맡고 있으면 그 세션의 터미널로 간다
-  muwi(['node', 'impl', 'wait', '어느 쪽?', '--work', 'w'], { session: 'helper', env: { HC_TERMINAL_ID: 't7' } });
+  muwi(['node', 'impl', 'start', '--work', 'w'], { session: 'helper', env: { HC_TERMINAL_ID: 't7' } });
+  muwi(['node', 'impl', 'wait', '어느 쪽?'], { session: 'helper', env: { HC_TERMINAL_ID: 't7' } });
   const board = JSON.parse(muwi(['board']).out);
   assert.equal(board.works[0].terminal, 't7');
   assert.deepEqual(
     board.sessions.map((s: any) => [s.key, s.terminal, s.work ?? null]).sort(),
-    // 노드를 맡은 세션은 그 작업에 붙는다. 계획 없이 일하는 세션은 작업이 없다
+    // 노드를 시작한 세션은 그 작업에 붙는다. 계획 없이 일하는 세션은 작업이 없다
     [['helper', 't7', 'w'], ['lead', 't5', 'w'], ['other', 't6', null]],
   );
   assert.equal(board.suggest, true);

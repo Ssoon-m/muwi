@@ -11,7 +11,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { RUN_ENV, spawnFile } from './events.ts';
-import { Fail, join, needPlan, out, resolveWork, str, type Args } from './kit.ts';
+import { Fail, needPlan, out, resolveWork, str, type Args } from './kit.ts';
 import { ownerOfTerminal, sessionStates } from './live.ts';
 import { hasTerminals, terminals, type Spot, type Terminals } from './plugins.ts';
 import { resumeFacts } from './resume.ts';
@@ -134,7 +134,6 @@ export function cmdRun(a: Args, dir: string) {
   const brief = `${task.trim()}\n\n(muwi) 작업 ${work}의 노드 ${id}(${node.title})를 맡았어요. 시작은 자동으로 적혀요. 끝나면 muwi node ${id} done "<결과 한 줄>"을 적고, muwi tell "<결과나 막힌 점>"으로 알려요.`;
   const program = programFor(a, dir, brief);
   const r = launchFor(dir, { work, node: id, name: str(a, 'name') ?? id, cwd, argv: program.argv, inArgs: program.inArgs, brief, task: task.trim(), model: program.model, show, down: Boolean(a.flags.down) });
-  join(dir, work);
   out(`새 세션을 띄웠어요: ${r.name} (${r.terminal}) → 노드 ${id}${r.placed ? ` · ${r.placed}` : ''}`);
   if (!r.sent) out(`맡길 일이 아직 전달되지 않았어요. muwi peek ${id}로 화면을 보고(폴더 신뢰 확인이 떠 있을 수 있어요) 사람에게 풀어 달라고 한 뒤 muwi tell ${id} "<맡길 일>"로 다시 보내요.`);
   out(`기다리려면 muwi wait ${id}, 화면을 보려면 muwi peek ${id}, 말을 걸려면 muwi tell ${id} "…"`);

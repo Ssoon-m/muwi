@@ -316,6 +316,45 @@ test('작업 고르기: 세션이 붙어 있는 작업을 쓰고, 다른 세션�
   assert.match(muwi(['node', 'read', 'start'], { session: 'other' }).out, /\(two/);
 });
 
+test('세션은 일을 시작하는 명령(plan, node start)으로만 작업에 붙는다. 다른 적는 명령은 --work로 다른 작업에 적어도 붙은 작업을 바꾸지 않는다', () => {
+  const { dir, muwi } = bench();
+  const attached = () => JSON.parse(fs.readFileSync(path.join(dir, '.sessions', 'lead.json'), 'utf8')).work;
+  muwi(['plan', '--work', 'a', PLAN]);
+  muwi(['node', 'read', 'start']);
+  // 다른 작업으로 넘어가면 하던 작업의 남은 노드와 정리하는 방법을 알린다. 명령의 출력과 섞이지 않게 표준 오류로
+  const moved = muwi(['plan', '--work', 'b', PLAN]);
+  assert.equal(moved.code, 0, moved.err);
+  assert.match(moved.err, /※ 이 세션이 하던 작업 a에 끝나지 않은 노드가 남았어요: read\(작업 중\), impl\(시작 전\), check\(시작 전\)/);
+  assert.match(moved.err, /muwi node <id> done "<결과>" --work a/);
+  assert.match(moved.err, /muwi remove <id> --why "<이유>" --work a/);
+  assert.doesNotMatch(moved.out, /※/);
+  assert.equal(attached(), 'b');
+  // 정리하는 명령은 붙은 작업을 바꾸지 않으므로 알림도 다시 나오지 않는다
+  for (const args of [
+    ['add', 'lint', 'lint', '--after', 'impl', '--why', '빠뜨림', '--work', 'a'],
+    ['node', 'read', 'done', '읽음', '--work', 'a'],
+    ['node', 'impl', 'wait', '물어볼 것', '--work', 'a'],
+    ['node', 'impl', 'block', '막힌 이유', '--work', 'a'],
+    ['node', 'impl', 'pause', '--work', 'a'],
+    ['remove', 'lint', '--why', '안 함', '--work', 'a'],
+    ['flag', 'read', '표시', '--work', 'a'],
+  ]) {
+    const r = muwi(args);
+    assert.equal(r.code, 0, `${args.join(' ')}: ${r.err}`);
+    assert.equal(attached(), 'b', args.join(' '));
+    assert.doesNotMatch(r.err, /※/, args.join(' '));
+  }
+  // --work 없이 적으면 그대로 b에 적힌다
+  assert.match(muwi(['node', 'read', 'start']).out, /● read 시작 \(b, /);
+  // 노드를 시작하면 그 작업에 붙는다. 이번에는 b에 하던 노드가 남는다
+  const back = muwi(['node', 'impl', 'start', '--work', 'a']);
+  assert.equal(attached(), 'a');
+  assert.match(back.err, /작업 b에 끝나지 않은 노드가 남았어요: read\(작업 중\)/);
+  // 다른 살아 있는 세션이 붙어 있는 작업이면 알리지 않는다
+  assert.equal(muwi(['node', 'check', 'start', '--work', 'a'], { session: 'other' }).code, 0);
+  assert.doesNotMatch(muwi(['plan', '--work', 'c', PLAN]).err, /※/);
+});
+
 test('끝난 작업에 붙어 있던 세션이 새 계획을 내면 새 작업 이름을 요구한다', () => {
   const { muwi } = bench();
   muwi(['plan', '--work', 'old', '{"nodes":[{"id":"a","title":"A"}]}']);

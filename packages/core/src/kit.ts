@@ -2,6 +2,8 @@
 // 코어의 명령과 보기가 더하는 명령이 함께 쓴다.
 import { attach, readSession, sessionKey } from './session.ts';
 import { checkWorkName, listWorks, readPlan, type Plan } from './store.ts';
+import { sessionStates } from './live.ts';
+import { loadView } from './view.ts';
 
 /** 사람에게 보여 줄 이유와 함께 명령을 끝낸다 (code: 종료 코드) */
 export class Fail extends Error {
@@ -122,10 +124,43 @@ export function needPlan(dir: string, work: string): Plan {
   return plan;
 }
 
-/** 이 명령을 실행한 세션을 그 작업에 붙인다 (그 뒤의 명령과 훅이 그 작업에 적는다) */
+/**
+ * 이 명령을 실행한 세션을 그 작업에 붙인다 (그 뒤의 명령과 훅이 그 작업에 적는다).
+ * 그 작업에서 일을 시작하는 명령(계획 적기, 노드 시작)만 부른다. 끝내기·빼기·넣기 같은 명령은 --work로 다른 작업에 적어도
+ * 붙은 작업을 바꾸지 않는다. 넘어간 뒤 하던 작업을 정리하다가 지금 작업의 훅 기록이 하던 작업으로 가지 않게
+ */
 export function join(dir: string, work: string) {
   const key = sessionKey();
-  if (key) attach(dir, key, work);
+  if (!key) return;
+  const prev = readSession(dir, key)?.work;
+  attach(dir, key, work);
+  if (prev && prev !== work) {
+    const note = leftBehind(dir, prev, key);
+    // 명령의 출력(--json 등)과 섞이지 않게 표준 오류로 낸다. AI는 둘 다 본다
+    if (note) process.stderr.write(`${note}\n`);
+  }
+}
+
+/**
+ * 세션이 다른 작업으로 옮겨 붙었다. 하던 작업에 끝나지 않은 노드가 남았고 그 작업에 붙은 다른 (살아 있는) 세션이 없으면,
+ * 남은 노드를 정리하는 방법을 알린다. 남긴 노드는 적어 줄 세션이 없어 그대로 남는다 (그래프에는 "다른 작업으로 감")
+ */
+function leftBehind(dir: string, work: string, key: string): string | null {
+  const v = loadView(dir, work);
+  if (!v || v.state === 'done') return null;
+  const left = v.nodes.filter(n => n.status !== 'done');
+  if (!left.length) return null;
+  const others = Object.entries(v.sessions).filter(([k, s]) => k !== key && s.work === work).map(([k]) => k);
+  if (others.length) {
+    const { closed } = sessionStates(dir, others);
+    if (others.some(k => !closed.has(k))) return null;
+  }
+  const name = (n: (typeof left)[number]) =>
+    n.status === 'todo' ? (n.paused ? '잠시 멈춤' : '시작 전') : ({ doing: '작업 중', waiting: '응답 대기', blocked: '막힘' } as Record<string, string>)[n.status];
+  return [
+    `※ 이 세션이 하던 작업 ${work}에 끝나지 않은 노드가 남았어요: ${left.map(n => `${n.id}(${name(n)})`).join(', ')}. 이 작업을 맡은 세션이 없어 그래프에 그대로 남아요.`,
+    `  이미 끝낸 일이면 muwi node <id> done "<결과>" --work ${work}, 하지 않을 일이면 muwi remove <id> --why "<이유>" --work ${work}로 맞춰요 (이 세션은 지금 작업에 그대로 붙어 있어요). 나중에 이어 할 일이면 그대로 둬요.`,
+  ].join('\n');
 }
 
 /** 걸린 시간을 사람이 읽는 글로 (4m 1s, 1h 1m 1s) */
