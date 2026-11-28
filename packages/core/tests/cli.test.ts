@@ -355,6 +355,61 @@ test('세션은 일을 시작하는 명령(plan, node start)으로만 작업에 
   assert.doesNotMatch(muwi(['plan', '--work', 'c', PLAN]).err, /※/);
 });
 
+test('다른 작업으로 간 세션이 남긴 작업: 멈춤이고 어디로 갔는지(movedTo) 보여 준다. 하던 노드는 작업 중으로 세지 않고, 세션이 쉬어도 응답 대기로 올라오지 않는다', () => {
+  const { muwi } = bench();
+  const turn = (event: string) => muwi(['hook', '--from', 'claude'], { input: JSON.stringify({ session_id: 'lead', hook_event_name: event }) });
+  const two = (title: string) => JSON.stringify({ title, nodes: [{ id: 'x', title: 'X' }, { id: 'y', title: 'Y', after: ['x'] }] });
+  const work = (name: string) => JSON.parse(muwi(['board']).out).works.find((w: any) => w.work === name);
+  // 하던 노드를 남기고 넘어갔다. 세션은 b에서 말을 끝내고 쉬고 있다
+  muwi(['plan', '--work', 'a', PLAN]);
+  muwi(['node', 'read', 'start']);
+  muwi(['plan', '--work', 'b', two('새 일')]);
+  turn('Stop');
+  const a = work('a');
+  assert.equal(a.state, 'stalled');
+  assert.equal(a.between, 'gone');
+  assert.equal(a.movedTo, 'b');
+  assert.equal(a.quiet, undefined);
+  assert.deepEqual(a.active.map((n: any) => [n.id, n.status, n.moved, n.quiet, n.terminal]), [['read', 'doing', 'b', undefined, undefined]]);
+  const shownA = muwi(['show', 'a']).out;
+  assert.match(shownA, /^a · .* · 멈춤 · 하던 세션이 다른 작업으로 감 \(b\)/);
+  assert.match(shownA, /● read .*다른 작업으로 감 \(b\)/);
+  const status = muwi(['status']).out;
+  assert.match(status, /read  티켓 읽기 \(다른 작업으로 감: b\)/);
+  assert.match(status, /· 하던 세션이 다른 작업으로 감 \(b\)/);
+  // b는 세션이 붙어 있는 작업이다: 세션이 쉬면 응답 대기
+  assert.equal(work('b').state, 'waiting');
+  // --work로 a를 정리해도 세션은 b에 그대로 붙어 있다. 시작 전 노드만 남아도 어디로 갔는지 보여 준다
+  assert.equal(muwi(['node', 'read', 'done', '읽음', '--work', 'a']).code, 0);
+  assert.match(muwi(['node', 'x', 'start']).out, /● x 시작 \(b, /);
+  const left = work('a');
+  assert.deepEqual([left.state, left.between, left.movedTo, left.active.length], ['stalled', 'gone', 'b', 0]);
+  // 사람에게 묻던 노드를 남기고 넘어가면 그대로 응답 대기다 (사람이 답할 일이다)
+  muwi(['plan', '--work', 'c', two('묻는 일')]);
+  muwi(['node', 'x', 'start']);
+  muwi(['node', 'x', 'wait', 'A와 B 중 어느 쪽?']);
+  muwi(['plan', '--work', 'd', two('또 새 일')]);
+  const c = work('c');
+  assert.equal(c.state, 'waiting');
+  assert.deepEqual(c.active.map((n: any) => [n.id, n.status, n.moved]), [['x', 'waiting', undefined]]);
+  // 하던 세션이 이 작업으로 돌아와 노드를 시작하면 다시 작업 중이다
+  muwi(['node', 'impl', 'start', '--work', 'a']);
+  turn('UserPromptSubmit');
+  const back = work('a');
+  assert.deepEqual([back.state, back.movedTo], ['doing', undefined]);
+});
+
+test('서브에이전트가 맡은 노드는 맡긴 세션이 다른 작업에 붙어 있어도 다른 작업으로 간 것으로 보지 않는다', () => {
+  const { muwi } = bench();
+  muwi(['plan', '--work', 'a', PLAN]);
+  muwi(['plan', '--work', 'b', PLAN]);
+  assert.equal(muwi(['node', 'read', 'start', '--sub', '--work', 'a']).code, 0);
+  const a = JSON.parse(muwi(['board']).out).works.find((w: any) => w.work === 'a');
+  assert.equal(a.state, 'doing');
+  assert.equal(a.movedTo, undefined);
+  assert.equal(a.active[0].moved, undefined);
+});
+
 test('끝난 작업에 붙어 있던 세션이 새 계획을 내면 새 작업 이름을 요구한다', () => {
   const { muwi } = bench();
   muwi(['plan', '--work', 'old', '{"nodes":[{"id":"a","title":"A"}]}']);
