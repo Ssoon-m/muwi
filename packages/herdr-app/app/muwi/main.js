@@ -1,16 +1,18 @@
 // muwi 그래프 칸 (Herdr 앱 mod).
 // AI가 적은 작업 계획과 진행 기록을 `muwi board`로 읽어 그린다. 기록도 세션도 바꾸지 않는다.
 //   작업 목록: 급한 순서로 묶는다 (응답 대기가 위, 끝났는데 아직 안 본 작업은 "새 결과"). 계획 없이 일하는 세션도 같이 보여서 Herdr의 Agents 칸을 대신한다
-//   그래프: 고른 작업의 계획. 카드와 선의 좌표는 `muwi board`가 ELK로 계산해서 준다. 기록이 바뀌면 전체를 다시 그린다.
+//   그래프: 고른 작업의 계획 그대로. 카드와 선의 좌표는 `muwi board`가 ELK로 계산해서 준다. 기록이 바뀌면 전체를 다시 그린다.
+//   타임라인: 큰 그래프 아래에 펼치는 실제로 일어난 일 (일한 쪽마다 한 줄, 계획이 바뀐 때)
 //     관제탑: 끝나지 않은 작업·고정한 작업·보는 중을 탭과 상관없이 늘 큰 그래프 여럿과 맨 아래 지도 줄로 그린다 (자리 규칙은 lanes.js)
 //   기록: 고른 노드의 기록 (맡은 세션, 걸린 시간, 읽은 skill, 문제 표시) 또는 작업의 기록 (계획이 바뀐 이유)
 // 끌어서 옮기고, cmd/ctrl+스크롤로 확대한다. 지금 일어나는 곳(작업 중, 응답 대기)이 보이게 따라간다.
 // 키보드가 있는 터미널이 바뀌면 그 터미널의 세션이 하는 작업이 보는 중이 된다 (나오는 작업은 그대로, 자리 순서만 바뀐다).
 import { View, div, svg, image, PathBuilder } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { cardNodes, lastCards } from "./cards.js";
+import { redoChip, redoLine } from "./cards.js";
 import { LANE, justShelved, laneTargets, layoutLanes, togglePin } from "./lanes.js";
 import { claimSeen, seenWorks, talksOf } from "./seen.js";
+import { timelineLayout } from "./timeline.js";
 import {
   exec, home, theme, watchFolder, checking, shared, setShared, agents, panes, terminals, focused, updates, run, notify,
   layout as shownLayout, props as blockProps, window as appWindow, settings,
@@ -211,24 +213,43 @@ const SAMPLE = (() => {
     id, title, after: [], status, attempts: status === "todo" ? 0 : 1, spentMs: 65000, skills: [], flags: [], tries: [], spawns: [], seen: true, instant: false, ...extra,
   });
   // 견본은 화면의 모든 갈래를 한 번씩 지나가게 만든다 (herdr-app check가 이걸로 그려 본다):
-  // 다시 한 노드, 서브에이전트가 도운 회차, 훅이 보지 못한 회차, 한꺼번에 적은 회차, 새 세션에 맡긴 노드, 빠진 노드
+  // 다시 한 노드(뒤 노드에서 돌아온 것과 앞 회차의 결과), 나중에 넣은 노드, 서브에이전트가 도운 회차, 훅이 보지 못한 회차,
+  // 한꺼번에 적은 회차, 새 세션에 맡긴 노드, 빠진 노드, 타임라인
   const who = { kind: "me", session: "s1", agents: [{ id: "a1", kind: "Explore" }] };
+  const at = (m) => `2026-01-01T00:${String(m).padStart(2, "0")}:00.000Z`;
   const tries = [
-    { n: 1, startedAt: "2026-01-01T00:00:00.000Z", endedAt: "2026-01-01T00:01:00.000Z", spentMs: 60000, status: "done", note: "처음 결과", who: { kind: "me", session: "s1", agents: [] }, skills: [], seen: false, instant: false },
-    { n: 2, startedAt: "2026-01-01T00:02:00.000Z", endedAt: "2026-01-01T00:02:01.000Z", spentMs: 1000, status: "blocked", note: "막힘", who: { kind: "subagent", session: "s1", agents: [{ id: "a2", own: true }] }, skills: [], seen: true, instant: true },
-    { n: 3, startedAt: "2026-01-01T00:03:00.000Z", spentMs: 5000, status: "doing", who, seen: true, instant: false,
+    { n: 1, startedAt: at(2), endedAt: at(3), spentMs: 60000, status: "done", note: "처음 결과", who: { kind: "me", session: "s1", agents: [] }, skills: [], seen: false, instant: false },
+    { n: 2, startedAt: at(5), endedAt: at(6), spentMs: 1000, status: "blocked", note: "막힘", who: { kind: "subagent", session: "s1", agents: [{ id: "a2", own: true }] }, skills: [], seen: true, instant: true, why: "견본 근거" },
+    { n: 3, startedAt: at(8), spentMs: 5000, status: "doing", who, seen: true, instant: false, why: "검토에서 걸림",
       skills: [{ skill: "team-rules", state: "read", count: 2, via: "file", agent: true, guess: true }, { skill: "spec-reader", state: "loaded", count: 0, via: "tool" }] },
   ];
   const nodes = [
-    node("read", "티켓·기획 읽기", "done", 28, { note: "요구사항 2건", skills: [{ skill: "spec-reader", state: "read", count: 1, via: "tool" }] }),
-    node("impl", "구현", "doing", 308, { session: "s1", attempts: 3, who, tries, skills: tries[2].skills, run: "session", show: "pane", offPlan: true,
-      spawn: { at: "2026-01-01T00:00:00.000Z", terminal: "t9", task: "견본으로 맡긴 말" }, spawns: [{ at: "2026-01-01T00:00:00.000Z", terminal: "t9", task: "견본으로 맡긴 말" }] }),
-    node("pr", "PR 올리기", "waiting", 588, { note: "PR 올릴까요?", seen: false, closed: true, session: SAMPLE_CLOSED, flags: [{ at: "2026-01-01T00:00:00.000Z", text: "견본" }] }),
+    node("read", "티켓·기획 읽기", "done", 28, { attempts: 2, note: "요구사항 2건", skills: [{ skill: "spec-reader", state: "read", count: 1, via: "tool" }],
+      redo: [{ attempt: 2, prev: "요구사항 1건" }] }),
+    node("impl", "구현", "doing", 308, { after: ["read"], session: "s1", attempts: 3, who, tries, skills: tries[2].skills, run: "session", show: "pane", offPlan: true,
+      redo: [{ attempt: 2, prev: "처음 결과" }, { attempt: 3, from: "review", fromTitle: "검토", reason: "검토에서 걸림" }],
+      spawn: { at: at(0), terminal: "t9", task: "견본으로 맡긴 말" }, spawns: [{ at: at(0), terminal: "t9", task: "견본으로 맡긴 말" }] }),
+    node("review", "검토", "done", 588, { after: ["impl"], added: true, note: "꼭 고칠 것 1" }),
+    node("pr", "PR 올리기", "waiting", 868, { after: ["review"], note: "PR 올릴까요?", seen: false, closed: true, session: SAMPLE_CLOSED, flags: [{ at: at(0), text: "견본" }] }),
   ];
-  const cards = [{ id: "read", node: "read" }, { id: "impl", node: "impl", tries: [1, 2] }, { id: "impl#3", node: "impl", tries: [3] }, { id: "pr", node: "pr" }];
+  const segment = (node, title, attempt, lane, kind, start, end, extra = {}) => ({ node, title, attempt, lane, kind, start: at(start), end: end === null ? null : at(end), ...extra });
+  const timeline = {
+    segments: [
+      segment("read", "티켓·기획 읽기", 1, "s1", "doing", 0, 1, { note: "요구사항 1건", done: true }),
+      segment("lint", "lint", 1, "s1", "doing", 1, 2, { gone: true }),
+      segment("read", "티켓·기획 읽기", 2, "s1", "doing", 2, 2, { note: "요구사항 2건", done: true, instant: true }),
+      segment("impl", "구현", 1, "s1", "doing", 2, 3, { note: "처음 결과", done: true }),
+      segment("impl", "구현", 2, "a2", "blocked", 5, 6, { note: "막힘", why: "견본 근거" }),
+      segment("review", "검토", 1, SAMPLE_CLOSED, "doing", 6, 7, { note: "꼭 고칠 것 1", done: true }),
+      segment("impl", "구현", 3, "s1", "doing", 8, null, { why: "검토에서 걸림" }),
+      segment("pr", "PR 올리기", 1, SAMPLE_CLOSED, "waiting", 7, null, { note: "PR 올릴까요?" }),
+    ],
+    lanes: [{ key: "s1", sub: false, name: "세션" }, { key: SAMPLE_CLOSED, sub: false, name: "세션 2" }, { key: "a2", sub: true, name: "서브 1" }],
+    marks: [{ at: at(4), by: "human", why: "견본", added: ["review"], removed: ["lint"], changed: ["impl"] }],
+  };
   const work = {
     work: "sample", title: "견본 작업", request: "견본", state: "waiting", updatedAt: "2026-01-01T00:00:00.000Z",
-    counts: { total: 3, todo: 0, doing: 1, waiting: 1, blocked: 0, done: 1 },
+    counts: { total: 4, todo: 0, doing: 1, waiting: 1, blocked: 0, done: 2 },
   };
   return {
     works: [
@@ -249,21 +270,21 @@ const SAMPLE = (() => {
     owners: { t1: "s1" },
     suggest: false,
     selected: {
-      ...work, nodes, edges: [], outside: [], compacts: [], flags: [], lead: "s1", helpers: { sessions: 1, subagents: 2 },
-      gone: [{ at: "2026-01-01T00:00:00.000Z", id: "lint", title: "lint", status: "todo", why: "견본" }],
-      changes: [{ at: "2026-01-01T00:00:00.000Z", by: "human", why: "견본", first: false, added: ["pr"], removed: [], changed: [] }],
+      ...work, nodes, outside: [], compacts: [], flags: [], lead: "s1", helpers: { sessions: 1, subagents: 2 },
+      edges: [{ from: "read", to: "impl" }, { from: "impl", to: "review" }, { from: "review", to: "pr" }],
+      gone: [{ at: at(4), id: "lint", title: "lint", status: "doing", why: "견본" }],
+      changes: [{ at: at(4), by: "human", why: "견본", first: false, added: ["review"], removed: ["lint"], changed: ["impl"] }],
       sessions: { s1: { label: "t1", tool: "claude", terminal: "t1" }, [SAMPLE_CLOSED]: { label: "t2", tool: "claude", terminal: "t2", cwd: "/tmp/sample repo" } },
       resumable: [SAMPLE_CLOSED], exists: { "/tmp/sample repo": true },
-      // 다시 한 노드가 두 카드로 나뉜 그림 (막힘으로 끝난 지난 회차 카드와 지금 회차 카드. cards.js).
-      // 그리는 코드를 지나가게 하는 견본이라 선은 flowOf가 만드는 모양이 아니다 (실제로는 다시 한 카드 앞에 다른 노드의 카드가 온다)
-      drawn: { cards, edges: [{ from: "read", to: "impl" }, { from: "impl", to: "impl#3" }, { from: "impl#3", to: "pr" }] },
+      timeline,
+      // 다시 한 노드(read, impl)의 카드는 셋째 줄만큼 높다
       layout: {
-        width: 1120, height: 118,
-        nodes: cards.map((c, i) => ({ id: c.id, x: 28 + i * 280, y: 28, w: 224, h: 62 })),
+        width: 1120, height: 134,
+        nodes: nodes.map((n, i) => ({ id: n.id, x: 28 + i * 280, y: 28, w: 224, h: n.redo ? 78 : 62 })),
         edges: [
-          { key: "read|impl", from: "read", to: "impl", points: [[252, 59], [308, 59]] },
-          { key: "impl|impl#3", from: "impl", to: "impl#3", points: [[532, 59], [588, 59]] },
-          { key: "impl#3|pr", from: "impl#3", to: "pr", points: [[812, 59], [868, 59]] },
+          { key: "read|impl", from: "read", to: "impl", points: [[252, 67], [308, 67]] },
+          { key: "impl|review", from: "impl", to: "review", points: [[532, 67], [588, 59]] },
+          { key: "review|pr", from: "review", to: "pr", points: [[812, 59], [868, 59]] },
         ],
       },
     },
@@ -295,6 +316,8 @@ export default class Muwi extends View {
     this.lastLoad = 0;
     /** 그래프마다 옮기기·확대 상태 (작업 → { pan, zoom, press, px, focusKey }). 나눠 그린 그래프는 저마다 움직인다 */
     this.lanes = new Map();
+    /** 타임라인을 펼친 큰 그래프들 (작업). 그래프마다 따로 열고 닫는다 */
+    this.timelineOpen = new Set();
     /** 그래프 배치에 넘기는 크기(그래프 하나를 그리는 곳), 보이는 픽셀. 쓸 때는 배율을 뺀 canvasSize를 쓴다 */
     this.fitPx = null;
     /** 기록 칸과 머리줄에 나오는 작업 (큰 그래프를 눌러 고름). 없으면 보는 중인 작업. 칸마다 따로다 */
@@ -368,6 +391,8 @@ export default class Muwi extends View {
       for (const w of SAMPLE.works) this.views.set(w.work, { ...SAMPLE.selected, work: w.work, title: w.title, state: w.state });
       this.node = "impl";
       this.tab = "node";
+      // 타임라인까지 그려 본다
+      for (const w of SAMPLE.works) this.timelineOpen.add(w.work);
       // herdr-app check는 견본으로 보관함과 알림 줄까지 그려 본다
       this.showShelf = true;
       this.shelfToast = { id: 0, text: SHELF.delete.text(1), undo: { works: ["finished"], action: "restore" } };
@@ -1106,15 +1131,14 @@ export default class Muwi extends View {
     if (L?.width) {
       const z = Math.min((W - 14) / L.width, (H - 12) / L.height);
       const ox = (W - L.width * z) / 2, oy = (H - L.height * z) / 2;
-      // 카드마다 그 카드가 그리는 노드 (다시 한 노드는 카드가 나뉠 수 있다. cards.js)
-      const byId = Object.fromEntries(cardNodes(raw));
+      const byId = Object.fromEntries(raw.nodes.map((n) => [n.id, n]));
       for (const e of L.edges) {
         const path = roundPath(PathBuilder.stroke(1), e.points.map(([x, y]) => [ox + x * z, oy + y * z]), 3).build();
         parts.push(window.paint_path(path, t.input).absolute().left(0).top(0).w(W).h(H));
       }
       for (const q of L.nodes) {
         const n = byId[q.id];
-        const going = n && !n.closed && !n.moved && !n.past && (n.status === "doing" || n.status === "waiting" || n.status === "blocked");
+        const going = n && !n.closed && !n.moved && (n.status === "doing" || n.status === "waiting" || n.status === "blocked");
         const col = !n ? t.border : n.closed || n.moved ? t.muted : (c[n.status] ?? t.border);
         parts.push(div().absolute().left(ox + q.x * z).top(oy + q.y * z).w(Math.max(4, q.w * z)).h(Math.max(3, q.h * z)).rounded(2)
           .bg(n?.status === "todo" ? t.raised : tint(col, going ? 0.95 : 0.5)).border(going ? 1 : 0.5).border_color(going ? col : t.border));
@@ -1937,8 +1961,7 @@ export default class Muwi extends View {
     // 다 담기지 않으면 높이를 읽히는 만큼만 줄이고, 볼 노드를 가운데에 둔다
     const z = Math.max(floor, Math.min(1, s.height / L.height));
     lane.zoom = z;
-    // 다시 한 노드는 지금 회차가 든 카드에
-    const ids = lastCards(view, this.focusIds(view));
+    const ids = this.focusIds(view);
     const boxes = L.nodes.filter((p) => ids.includes(p.id));
     if (!boxes.length) return;
     const x1 = Math.min(...boxes.map((p) => p.x)), x2 = Math.max(...boxes.map((p) => p.x + p.w));
@@ -2002,18 +2025,90 @@ export default class Muwi extends View {
     lane.pan = { x: axis(lane.pan.x, s.width, L.width * z), y: axis(lane.pan.y, s.height, L.height * z) };
   }
 
+  /** 큰 그래프 하나: 그래프와, 그 아래에 접었다 펴는 타임라인 (그래프마다 따로 연다) */
   canvas(t, view, now, withControls = true) {
+    const open = this.timelineOpen.has(view.work);
+    const count = view.timeline?.segments?.length ?? 0;
+    return v_flex().flex_1().min_w(0).min_h(0)
+      .child(this.graph(t, view, now, withControls))
+      .child(h_flex().id(`timeline-head-${view.work}`).flex_none().h(24).px(10).gap(6).items_center().border_t(1).border_color(t.border).bg(t.surface)
+        .cursor_pointer().hover((st) => st.bg(t.hover))
+        .on_click((_e, cx) => {
+          if (open) this.timelineOpen.delete(view.work);
+          else this.timelineOpen.add(view.work);
+          cx.notify();
+        })
+        .child(div().text_size(10.5).text_color(t.muted).child(open ? "▾ 타임라인" : "▸ 타임라인"))
+        .when(!open, (el) => el.child(div().text_size(10).text_color(t.dim).child(count ? `실제로 일어난 일 ${count}개` : "아직 일어난 일이 없어요"))))
+      .when(open, (el) => el.child(this.timeline(t, view, now)));
+  }
+
+  /**
+   * 타임라인: 시간 축, 계획이 바뀐 때(◆, 세로선), 일한 쪽마다 한 줄의 막대 (timeline.js).
+   * 막대를 누르면 그 노드를 고른다 (카드를 누른 것과 같다). 고른 노드의 막대는 진하게 그린다
+   */
+  timeline(t, view, now) {
+    const c = this.colors(t);
+    const T = timelineLayout(view.timeline, now);
+    if (!T) return div().flex_none().bg(t.surface).px(12).pb(10).text_size(11).text_color(t.dim).child("아직 일어난 일이 없어요");
+    const LABEL = 52;
+    const guides = () => T.marks.map((m) => div().absolute().top(0).bottom(0).left(m.left).w(1).bg(tint(t.accent, 0.35)));
+    const bar = (x) => {
+      const color = x.gone ? t.muted : c[x.tone];
+      const picked = !x.gone && this.node === x.node && view.work === this.mainWork;
+      const range = `${clock(x.start)} ~ ${x.end ? clock(x.end) : "지금"} · ${dur(x.to - x.from)}`;
+      const tip = [x.label, range, x.why ? `근거: ${x.why}` : null, x.instant ? "시작과 끝을 한꺼번에 적었어요" : null].filter(Boolean).join("\n");
+      return div().id(`timeline-bar-${view.work}-${x.i}`).absolute().top(4).h(24).left(x.left).w(x.width).min_w(x.thin ? 3 : 8).rounded(4).overflow_hidden()
+        .bg(tint(color, x.gone ? 0.12 : picked ? 0.45 : 0.24)).border(picked ? 1.5 : 1).border_color(tint(color, x.gone ? 0.4 : picked ? 1 : 0.75))
+        .px(x.thin ? 0 : 5).flex().items_center().cursor_pointer()
+        .tooltip(tip)
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => {
+          this.pick(view.work);
+          if (!x.gone) {
+            this.node = x.node;
+            this.tab = "node";
+            this.drawer = true;
+          }
+          cx.notify();
+        })
+        .when(!x.thin, (el) => el.child(div().truncate().text_size(10.5).text_color(x.gone ? t.muted : t.foreground).child(x.label)));
+    };
+    const row = (l) => h_flex().h(32).items_center().gap(8)
+      .child(div().w(LABEL).flex_none().text_size(10.5).text_color(t.muted).child(l.name))
+      .child(div().relative().flex_1().min_w(0).h(32).children([...guides(), ...l.bars.map(bar)]));
+    const plan = h_flex().h(22).items_center().gap(8)
+      .child(div().w(LABEL).flex_none().text_size(10).text_color(t.dim).child("계획"))
+      .child(div().relative().flex_1().min_w(0).h(22).children(T.marks.map((m, i) => {
+        const tip = [
+          `계획 바뀜 · ${m.by === "human" ? "사람" : "AI"} · ${clock(m.at)}`,
+          `이유: ${m.why ?? "없음"}`,
+          m.added.length ? `넣음: ${m.added.join(", ")}` : null,
+          m.removed.length ? `뺌: ${m.removed.join(", ")}` : null,
+          m.changed.length ? `바꿈: ${m.changed.join(", ")}` : null,
+        ].filter(Boolean).join("\n");
+        return div().id(`timeline-mark-${view.work}-${i}`).absolute().top(2).left(m.left).h(18).px(5).flex().items_center().rounded(4)
+          .bg(tint(t.accent, 0.14)).border(1).border_color(tint(t.accent, 0.5)).text_size(10).text_color(t.accent)
+          .tooltip(tip)
+          .child(["◆", m.added.length ? `+${m.added.length}` : null, m.removed.length ? `−${m.removed.length}` : null].filter(Boolean).join(" "));
+      })));
+    const axis = h_flex().h(18).items_center().gap(8)
+      .child(div().w(LABEL).flex_none().text_size(10).text_color(t.dim).child(dur(T.span)))
+      .child(div().relative().flex_1().min_w(0).h(18).children(T.ticks.map((k) =>
+        div().absolute().top(2).left(k.left).text_size(9.5).text_color(t.dim).child(clock(new Date(k.at).toISOString())))));
+    return v_flex().flex_none().min_w(0).bg(t.surface).pt(2).px(12).pb(10).gap(2)
+      .child(axis).child(plan)
+      .children(T.lanes.map(row));
+  }
+
+  graph(t, view, now, withControls = true) {
     const lane = this.laneOf(view.work);
     // 그래프 하나일 때 처음 그리는 작업은 같은 자리에서 잰 크기로 바로 맞춘다 (다음 프레임까지 왼쪽 위에 붙어 나오지 않게)
     const size = laneSize(lane) ?? (this.lanesOn ? null : this.canvasSize);
     const L = view.layout;
     const c = this.colors(t);
-    // 카드마다 그 카드가 그리는 노드. 다시 한 노드는 그 사이에 끝난 노드 뒤에 새 카드로 나뉜다 (core의 flow.ts가 주는 drawn, cards.js)
-    const byId = Object.fromEntries(cardNodes(view));
-    // 노드마다 고른 것으로 그릴 카드: 누른 카드가 그 노드의 것이면 그 카드, 아니면 마지막 카드
-    const shown = new Map();
-    for (const [id, c] of Object.entries(byId)) shown.set(c.node ?? id, id);
-    if (this.nodeCard && byId[this.nodeCard]) shown.set(byId[this.nodeCard].node ?? this.nodeCard, this.nodeCard);
+    // 카드는 노드 하나에 하나 (계획 그대로)
+    const byId = Object.fromEntries(view.nodes.map((n) => [n.id, n]));
 
     // 작업이 바뀌거나, 지금 일어나는 곳이 바뀌거나, 계획의 모양이 바뀌면 다시 맞춘다
     const live = view.nodes.filter((n) => n.status === "doing" || n.status === "waiting" || n.status === "blocked").map((n) => n.id).join(",");
@@ -2062,10 +2157,9 @@ export default class Muwi extends View {
       // 하는 중이라고 적혀 있어도 그 세션이 일을 멈췄으면 응답 대기처럼 그린다 (돌지 않고, 색도 응답 대기 색)
       const quiet = this.nodeQuiet(view, n);
       const color = n.closed || n.moved ? t.muted : quiet ? c.waiting : c[n.status];
-      // 나뉜 카드의 지난 회차(past)는 막힘으로 끝났어도 지금 일어나는 일이 아니다. 다른 작업으로 간 세션이 남긴 노드도
-      const active = !n.closed && !n.moved && !n.past && (n.status === "doing" || n.status === "waiting" || n.status === "blocked");
-      // 고른 노드가 여러 카드로 나뉘었으면 누른 카드(없으면 지금 회차가 든 마지막 카드)만 고른 것으로 그린다
-      const picked = this.node === (n.node ?? n.id) && view.work === this.mainWork && (shown.get(n.node ?? n.id) ?? n.id) === n.id;
+      // 다른 작업으로 간 세션이 남긴 노드는 지금 일어나는 일이 아니다
+      const active = !n.closed && !n.moved && (n.status === "doing" || n.status === "waiting" || n.status === "blocked");
+      const picked = this.node === n.id && view.work === this.mainWork;
       if (active) {
         const moving = n.status === "doing" && !quiet;
         glows.push(div().absolute().left(x - 6 * z).top(y - 6 * z).w(w + 12 * z).h(h + 12 * z).rounded(12 * z).bg(color)
@@ -2074,6 +2168,8 @@ export default class Muwi extends View {
       const read = n.skills.filter((s) => s.state === "read").length;
       const meta = this.metaOf(view, n, now);
       const tag = this.tagOf(n);
+      const again = redoChip(n);
+      const third = redoLine(n);
       const chip = (text, tone, faint) => div().flex_none().px(4.5 * z).rounded(4 * z).border(1).border_color(tint(tone, faint ? 0.3 : 0.6))
         .text_size(9.5 * z).text_color(faint ? tint(tone, 0.7) : tone).child(text);
       cards.push(h_flex().id(`node-${n.id}`).absolute().left(x).top(y).w(w).h(h).px(11 * z).gap(9 * z).items_center().rounded(8 * z)
@@ -2086,8 +2182,7 @@ export default class Muwi extends View {
         // 작업의 기록은 위의 "작업" 탭이나 그래프의 빈 곳을 눌러서 본다 (다시 눌러 고르기를 풀지 않는다: 두 번 누르기와 겹친다)
         .on_click((e, cx) => {
           this.pick(view.work);
-          this.node = n.node ?? n.id;
-          this.nodeCard = n.id;
+          this.node = n.id;
           this.tab = "node";
           this.drawer = true;
           if ((e?.click_count ?? 1) >= 2) this.goNode(view, n);
@@ -2098,19 +2193,19 @@ export default class Muwi extends View {
           .child(h_flex().gap(5 * z).items_center()
             .child(div().flex_1().min_w(0).truncate().text_size(12.5 * z).text_color(n.status === "todo" ? t.muted : t.foreground)
               .when(active, (el) => el.font_semibold()).child(n.title))
-            // 다시 한 노드는 눈에 띄게: 여기서 뭔가 걸렸다는 신호다
-            // 나뉜 카드는 그 카드의 회차 ("1회차" → 뒤 노드 → "2회차")
-            .when(Boolean(n.round) || n.attempts > 1, (el) => el.child(chip(n.round ?? `${n.attempts}회차`, t.accent, false)))
+            // 다시 한 노드는 눈에 띄게: 여기서 뭔가 걸렸다는 신호다 ("두 번 함", "다시 하는 중")
+            .when(Boolean(again), (el) => el.child(chip(again, t.accent, false)))
+            // 첫 계획 뒤에 넣은 노드
+            .when(Boolean(n.added), (el) => el.child(chip("추가됨", t.accent, true)))
             .when(Boolean(tag), (el) => el.child(chip(tag.text, t.muted, tag.planned)))
             // 여러 도구가 같이 한 작업이면 이 노드를 어느 도구가 했는지 (리뷰는 Codex, 구현은 Claude처럼)
-            .when(Boolean(madeBy(n)), (el) => el.child(chip(madeBy(n), t.accent, true)))
-            .when(Boolean(n.offPlan), (el) => el.child(chip("≠계획", t.blocked, false)))
-            // 앞 노드가 끝나기 전에 시작했다: 그래프 흐름과 다르게 진행 중이라는 표시
-            .when(Boolean(n.early), (el) => el.child(chip("순서 앞당김", t.muted, false))))
+            .when(Boolean(madeBy(n)), (el) => el.child(chip(madeBy(n), t.accent, true))))
           .child(h_flex().gap(6 * z).items_center().text_size(10.5 * z)
             .child(div().flex_1().min_w(0).truncate().text_color(active ? color : t.dim).child(meta || " "))
             .when(n.flags.length > 0, (el) => el.child(div().flex_none().text_color(t.blocked).child("⚑")))
-            .when(read > 0, (el) => el.child(div().flex_none().text_color(t.dim).child(`skill ${read}`))))));
+            .when(read > 0, (el) => el.child(div().flex_none().text_color(t.dim).child(`skill ${read}`))))
+          // 다시 한 노드: 어디서 왜 돌아왔는지, 또는 앞 회차의 결과 (layout이 이 줄만큼 높게 놓는다)
+          .when(Boolean(third), (el) => el.child(div().truncate().text_size(10.5 * z).text_color(third.back ? c.waiting : t.muted).child(third.text)))));
     }
     const ports = dots.map((d) => div().absolute().left(d.x - 3 * z).top(d.y - 3 * z).size(6 * z)
       .rounded_full().bg(d.color).border(1.5).border_color(t.canvas));
@@ -2376,10 +2471,13 @@ export default class Muwi extends View {
             .on_click(() => this.jump(to.go))
             .child("터미널로 가기"))))
         .when(Boolean(whoText && to?.why), (el) => el.child(line(to.why, t.dim)))
+        // 계획과 다른 쪽이 했으면 실제로 한 쪽을 나란히 적는다 (잘못이 아니라 사실이다)
         .when(Boolean(plannedText), (el) => el.child(line(
-          n.offPlan ? `${plannedText} · 계획과 다르게 했어요`
+          n.offPlan && n.who ? `${plannedText} · 실제: ${RUN_NAME[n.who.kind] ?? n.who.kind}`
             : n.runUnknown ? `${plannedText} · 이 세션에서 훅이 돌지 않아 계획대로 했는지 확인하지 못했어요` : plannedText,
-          n.offPlan ? t.blocked : t.dim)))))
+          n.offPlan ? t.muted : t.dim)))
+        // 한 번만 한 노드의 근거 (다시 한 노드는 회차별 기록에)
+        .when(tries.length === 1 && Boolean(tries[0].why), (el) => el.child(line(`근거: ${tries[0]?.why}`, t.muted)))))
       .when(resume.choices > 0, (el) => el.child(v_flex().gap(8).child(label(n.status === "done" ? "그 대화를 다시 열려면" : resume.choices > 1 ? "이어서 하려면 (둘 중 하나)" : "이어서 하려면")).children(resume.rows)))
       .child(v_flex().gap(4).child(label(tries.length > 1 ? "회차별 기록" : "읽은 skill"))
         .when(n.attempts === 0, (el) => el.child(line("아직 시작하지 않았어요", t.dim)))
@@ -2389,6 +2487,7 @@ export default class Muwi extends View {
               .child(div().flex_none().px(5).rounded(4).border(1).border_color(tint(t.accent, 0.6)).text_size(10).text_color(t.accent).child(`${x.n}회차`))
               .child(div().flex_1().min_w(0).truncate().text_size(10.5).text_color(t.dim)
                 .child([x.startedAt ? clock(x.startedAt) : null, x.spentMs > 0 ? dur(this.spent(x.spentMs, running && x === tries[tries.length - 1], now)) : null, x.who ? whoOf(x.who) : null].filter(Boolean).join(" · "))))
+            .when(Boolean(x.why), (el) => el.child(line(`근거: ${x.why}`, t.muted)))
             .children(skillRows(x))
             .when(Boolean(x.note), (el) => el.child(line(`${{ waiting: "기다린 것", blocked: "막힌 이유", done: "결과" }[x.status] ?? "메모"}: ${x.note}`))))
           : n.attempts > 0 ? skillRows(n) : []))
