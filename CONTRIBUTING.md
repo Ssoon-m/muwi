@@ -39,7 +39,7 @@ node packages/herdr-app/bin/muwi.js <명령>           # 깔지 않고 이 저�
 | `packages/core/src/store.ts`, `src/plan.ts` | 기록 파일 읽고 쓰기, 계획 형식 확인과 비교 |
 | `packages/core/src/node.ts` | 노드 상태 기록 (명령과 훅이 함께 씁니다) |
 | `packages/core/src/session.ts`, `src/hook.ts`, `src/events.ts` | 세션 정보, 훅 입력 처리 (도구를 모르는 코어) |
-| `packages/core/src/view.ts` | 계획과 사건 기록을 합쳐 보여 줄 형태로 만들기 |
+| `packages/core/src/view.ts`, `src/flow.ts` | 계획과 사건 기록을 합쳐 보여 줄 형태로 만들기, 실제로 일어난 일(타임라인, 다시 한 회차) |
 | `packages/core/src/setup.ts` | `muwi setup` |
 | `packages/core/src/connectors/` | AI 도구 커넥터 (도구 표 `tools.ts`, 커넥터 규격 `types.ts`) |
 | `packages/core/connectors/` | 도구에 넣는 플러그인 파일 (OpenCode, Kilo, Pi, oh-my-pi, Hermes) |

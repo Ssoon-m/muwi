@@ -14,12 +14,14 @@ export type LayoutEdge = { key: string; from: string; to: string; points: Point[
 export type Layout = { width: number; height: number; nodes: LayoutNode[]; edges: LayoutEdge[]; /** 칸 비율에 맞춰 여러 줄로 접었다 */ wrapped?: boolean };
 /** 그래프를 그릴 칸의 크기 (그래프 칸이 알려 준다) */
 export type Fit = { w: number; h: number };
-export type Graph = { nodes: { id: string }[]; edges: { from: string; to: string }[] };
+/** tall: 카드에 셋째 줄이 있다 (다시 한 노드). 그만큼 높게 놓는다 */
+export type Graph = { nodes: { id: string; tall?: boolean }[]; edges: { from: string; to: string }[] };
 /** 흐름의 방향: 왼쪽→오른쪽(right) 또는 위→아래(down) */
 export type Flow = 'right' | 'down';
 
-/** 카드 크기 (px, 확대 1 기준). 그리는 쪽과 같아야 한다 */
-export const SIZE = { cardW: 224, cardH: 62 };
+/** 카드 크기 (px, 확대 1 기준). lineH: 셋째 줄이 있는 카드에 더하는 높이. 그리는 쪽과 같아야 한다 */
+export const SIZE = { cardW: 224, cardH: 62, lineH: 16 };
+type Size = { cardW: number; cardH: number; lineH?: number };
 
 const OPTIONS = {
   'elk.algorithm': 'layered',
@@ -51,7 +53,7 @@ const WRAP_BELOW = 0.7;
  * 계획을 그래프로 배치한다. fit(그릴 칸의 크기)을 주면, 한 줄로는 칸에 너무 작게 들어가는 긴 그래프를
  * 칸 비율에 맞춰 여러 줄로 접는다 (ELK의 graph wrapping). 접어도 더 크게 보이지 않으면 한 줄 그대로 둔다
  */
-export async function layoutGraph(g: Graph, size = SIZE, flow: Flow = 'right', fit?: Fit): Promise<Layout> {
+export async function layoutGraph(g: Graph, size: Size = SIZE, flow: Flow = 'right', fit?: Fit): Promise<Layout> {
   const flat = await place(g, size, flow);
   if (!fit || fit.w <= 0 || fit.h <= 0 || !flat.nodes.length) return flat;
   const zoom = (l: Layout) => fitZoom(l, fit);
@@ -62,7 +64,7 @@ export async function layoutGraph(g: Graph, size = SIZE, flow: Flow = 'right', f
   return zoom(wrapped) > zoom(flat) + 0.05 ? { ...wrapped, wrapped: true } : flat;
 }
 
-async function place(g: Graph, size: { cardW: number; cardH: number }, flow: Flow, extra: Record<string, string> = {}): Promise<Layout> {
+async function place(g: Graph, size: Size, flow: Flow, extra: Record<string, string> = {}): Promise<Layout> {
   if (!g.nodes.length) return { width: 0, height: 0, nodes: [], edges: [] };
   // elkjs의 한 파일짜리 판 (워커 없이 이 프로세스에서 계산한다)
   const ELK = require('elkjs/lib/elk.bundled.js');
@@ -71,7 +73,7 @@ async function place(g: Graph, size: { cardW: number; cardH: number }, flow: Flo
   const out = await new ELK().layout({
     id: 'plan',
     layoutOptions: { ...(flow === 'down' ? { ...OPTIONS, 'elk.direction': 'DOWN', 'elk.layered.spacing.nodeNodeBetweenLayers': '40' } : OPTIONS), ...extra },
-    children: g.nodes.map(n => ({ id: n.id, width: size.cardW, height: size.cardH })),
+    children: g.nodes.map(n => ({ id: n.id, width: size.cardW, height: size.cardH + (n.tall ? size.lineH ?? 0 : 0) })),
     edges: lines.map(l => ({ id: l.key, sources: [l.from], targets: [l.to] })),
   });
   const nodes: LayoutNode[] = out.children.map((c: any) => ({ id: c.id, x: r1(c.x), y: r1(c.y), w: c.width, h: c.height }));
@@ -96,7 +98,7 @@ const SWITCH = 1.25;
  * 예: 나란히 하는 일이 여덟인 계획을 좁고 긴 칸에서 위→아래로 그리면 여덟 카드가 옆으로 늘어서 칸보다 몇 배 넓어진다.
  * 왼쪽→오른쪽으로 그리면 여덟 카드가 세로로 쌓여 칸에 들어간다
  */
-export async function layoutFor(g: Graph, prefer: Flow, fit?: Fit, size = SIZE): Promise<{ layout: Layout; flow: Flow }> {
+export async function layoutFor(g: Graph, prefer: Flow, fit?: Fit, size: Size = SIZE): Promise<{ layout: Layout; flow: Flow }> {
   const layout = await layoutGraph(g, size, prefer, fit);
   // 칸에 거의 다 들어가면 반대 방향이 더 나을 수 없다 (1배보다 키우지 않는다)
   if (!fit || fit.w <= 0 || fit.h <= 0 || !layout.nodes.length || fitZoom(layout, fit) * SWITCH >= 1) return { layout, flow: prefer };

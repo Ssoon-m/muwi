@@ -18,13 +18,14 @@ import { PAST_DAYS, loadBoard, loadView, type WorkView } from './view.ts';
 import type { Fit, Flow } from './layout.ts';
 
 /** board의 모양이 바뀌면 올린다. 보기는 모르는 판이면 다시 깔라고 알린다 */
-export const BOARD_VERSION = 1;
+export const BOARD_VERSION = 2;
 
 /** prefer: 칸 모양으로 정한 흐름 방향. fit(칸 크기)을 알면 칸에 훨씬 크게 들어가는 쪽으로 바꿀 수 있다. 실제로 쓴 방향을 flow로 돌려준다 */
 async function withLayout(v: WorkView, prefer: Flow = 'right', fit?: Fit) {
   const { layoutFor, layoutProblems } = await import('./layout.ts');
-  // 계획의 선이 아니라 실제 흐름에 맞춘 카드와 선을 배치한다 (flow.ts)
-  const { layout, flow } = await layoutFor({ nodes: v.drawn.cards, edges: v.drawn.edges }, prefer, fit);
+  // 그래프는 계획 그대로: 카드는 노드 하나에 하나, 선은 계획의 선. 다시 한 노드는 셋째 줄만큼 높게 놓는다
+  const nodes = v.nodes.map(n => ({ id: n.id, ...(n.redo?.length ? { tall: true } : {}) }));
+  const { layout, flow } = await layoutFor({ nodes, edges: v.edges }, prefer, fit);
   return { ...v, layout, flow, layoutProblems: layoutProblems(layout, flow) };
 }
 
